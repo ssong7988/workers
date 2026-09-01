@@ -1,0 +1,22 @@
+# Secrets and local configuration
+.env
+**/.env
+**/data/kakao-token.json
+
+# Python
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Runtime data
+**/logs/
+**/*.log
+
