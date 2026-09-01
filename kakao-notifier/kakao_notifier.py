@@ -10,11 +10,14 @@ from pathlib import Path
 from common import load_env, post_form_json
 
 
-load_env()
+BASE_DIR = Path(__file__).resolve().parent
+load_env(BASE_DIR / ".env")
 
 REST_API_KEY = os.environ.get("KAKAO_REST_API_KEY", "").strip()
 CLIENT_SECRET = os.environ.get("KAKAO_CLIENT_SECRET", "").strip()
 TOKEN_FILE = Path(os.environ.get("KAKAO_TOKEN_FILE", "data/kakao-token.json"))
+if not TOKEN_FILE.is_absolute():
+    TOKEN_FILE = BASE_DIR / TOKEN_FILE
 
 
 def load_tokens() -> dict:
@@ -58,13 +61,13 @@ def refresh_access_token(tokens: dict) -> dict:
     return tokens
 
 
-def _send(access_token: str, message: str) -> tuple[int, dict]:
+def _send(access_token: str, message: str, link_url: str) -> tuple[int, dict]:
     template = {
         "object_type": "text",
         "text": message,
         "link": {
-            "web_url": "https://developers.kakao.com",
-            "mobile_web_url": "https://developers.kakao.com",
+            "web_url": link_url,
+            "mobile_web_url": link_url,
         },
     }
     return post_form_json(
@@ -74,16 +77,21 @@ def _send(access_token: str, message: str) -> tuple[int, dict]:
     )
 
 
-def send_to_me(message: str) -> None:
+def send_to_me(
+    message: str, link_url: str = "https://developers.kakao.com"
+) -> None:
     if not REST_API_KEY or not CLIENT_SECRET:
         raise RuntimeError(".env의 REST API 키와 클라이언트 시크릿을 확인하세요.")
 
     tokens = load_tokens()
-    status, payload = _send(tokens["access_token"], message)
+    if len(message) > 200:
+        raise ValueError("카카오 기본 텍스트 메시지는 200자 이하여야 합니다.")
+
+    status, payload = _send(tokens["access_token"], message, link_url)
 
     if status == 401:
         tokens = refresh_access_token(tokens)
-        status, payload = _send(tokens["access_token"], message)
+        status, payload = _send(tokens["access_token"], message, link_url)
 
     if status != 200:
         raise RuntimeError(f"카카오 메시지 전송 실패 ({status}): {payload}")
@@ -96,8 +104,9 @@ def main() -> None:
     parser.add_argument(
         "message", nargs="?", default="자동화 프로그램 카카오톡 연결 테스트입니다. ✅"
     )
+    parser.add_argument("--link", default="https://developers.kakao.com")
     args = parser.parse_args()
-    send_to_me(args.message)
+    send_to_me(args.message, args.link)
     print("카카오톡 '나와의 채팅'으로 메시지를 보냈습니다.")
 
 

@@ -1,0 +1,127 @@
+"""Application orchestration for scans, urgent notifications, and digests."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from .models import AppConfig, Listing, ScanResult, iso_now
+from .notifier import KakaoNotifier, listing_message, scan_summary_message
+from .parsing import matches_condition
+from .storage import FileStore
+
+
+class FinderService:
+    def __init__(self, config: AppConfig, collector, store: FileStore, notifier: KakaoNotifier) -> None:
+        self.config = config
+        self.collector = collector
+        self.store = store
+        self.notifier = notifier
+
+    def scan(self, *, notify_urgent: bool = True, smoke: bool = False) -> ScanResult:
+        started = iso_now()
+        conditions = [condition for condition in self.config.searches if condition.enabled]
+        result = ScanResult(started_at=started, finished_at=started)
+        collected_by_condition: dict[str, list[Listing]] = {}
+        for condition in conditions:
+            try:
+                partial = self.collector.collect_all([condition])
+                collected_by_condition[condition.id] = partial.get(condition.id, [])
+                result.successful_conditions.append(condition.id)
+            except Exception as exc:
+                result.failed_conditions[condition.id] = str(exc)
+
+        state = self.store.load_state()
+        previous = state.setdefault("listings", {})
+        next_state = dict(previous)
+        observed: list[Listing] = []
+        for condition in conditions:
+            if condition.id not in collected_by_condition:
+                continue
+            condition_listings = collected_by_condition[condition.id]
+            result.collected_count += len(condition_listings)
+            seen_keys: set[str] = set()
+            for listing in condition_listings:
+                observed.append(listing)
+                if not matches_condition(listing, condition, self.config.low_floor):
+                    result.excluded_count += 1
+                    continue
+                seen_keys.add(listing.key)
+                result.matched.append(listing)
+                old = previous.get(listing.key, {})
+                last_alert_price = old.get("last_urgent_alert_price_won")
+                is_urgent = listing.price_won <= listing.effective_urgent_price_won
+                should_alert = is_urgent and (
+                    last_alert_price is None or listing.price_won < int(last_alert_price)
+                )
+                if should_alert:
+                    result.urgent.append(listing)
+                    if notify_urgent and not smoke:
+                        self._safe_send(listing_message(listing, urgent=True), listing.url)
+                        last_alert_price = listing.price_won
+                payload = listing.to_dict()
+                payload.update(
+                    {
+                        "first_seen_at": old.get("first_seen_at", listing.observed_at),
+                        "last_seen_at": listing.observed_at,
+                        "active": True,
+                        "last_urgent_alert_price_won": last_alert_price,
+                    }
+                )
+                next_state[listing.key] = payload
+            for key, payload in list(next_state.items()):
+                if payload.get("condition_id") == condition.id and key not in seen_keys:
+                    payload["active"] = False
+
+        result.finished_at = iso_now()
+        self.store.append_observations(observed)
+        self.store.append_run(result)
+        if result.successful_conditions:
+            state["listings"] = next_state
+            state["last_successful_scan"] = result.finished_at
+            self.store.save_state(state)
+        return result
+
+    def scheduled_run(self) -> ScanResult:
+        result = self.scan(notify_urgent=True)
+        now = datetime.now(ZoneInfo(self.config.timezone))
+        if result.success and now.weekday() in self.config.digest_weekdays and now.hour == self.config.digest_hour:
+            self.send_digest(result.matched)
+        elif result.failed_conditions:
+            self._safe_send(scan_summary_message(result), "https://new.land.naver.com/")
+        return result
+
+    def smoke_test(self) -> ScanResult:
+        result = self.scan(notify_urgent=False, smoke=True)
+        self._safe_send(scan_summary_message(result, smoke=True), "https://new.land.naver.com/")
+        if result.success:
+            for listing in sorted(result.matched, key=_sort_key):
+                self._safe_send(listing_message(listing, urgent=listing in result.urgent), listing.url)
+        return result
+
+    def send_digest(self, listings: list[Listing] | None = None) -> None:
+        if listings is None:
+            state = self.store.load_state()
+            listings = [
+                Listing.from_dict(payload)
+                for payload in state.get("listings", {}).values()
+                if payload.get("active")
+            ]
+        summary = f"☀️ 과천 관심 매물 {len(listings)}건\n급매 우선·가격순으로 전송합니다."
+        self._safe_send(summary, "https://new.land.naver.com/")
+        for listing in sorted(listings, key=_sort_key):
+            urgent = listing.price_won <= listing.effective_urgent_price_won
+            self._safe_send(listing_message(listing, urgent=urgent), listing.url)
+
+    def _safe_send(self, message: str, link_url: str) -> None:
+        try:
+            self.notifier.send(message, link_url)
+        except Exception as exc:
+            self.store.enqueue_notification(message, link_url, str(exc))
+            raise
+
+
+def _sort_key(listing: Listing) -> tuple[bool, int, int]:
+    urgent = listing.price_won <= listing.effective_urgent_price_won
+    floor = listing.floor if listing.floor is not None else 999
+    return (not urgent, listing.price_won, floor)
