@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -38,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("smoke-test", help="즉시 1회 조회하고 결과를 카카오톡으로 전송")
     commands.add_parser("scheduled-run", help="시간별 조회 및 오전 보고")
     commands.add_parser("send-digest", help="저장된 현재 매물 전체 보고")
+    commands.add_parser(
+        "collect-favorites",
+        help="로그인된 화면에서 관심부동산 6개 단지 매물을 JSON으로 저장",
+    )
     return parser
 
 
@@ -59,6 +64,21 @@ def main(argv: list[str] | None = None) -> None:
         if args.command == "browser-login":
             collector.open_login()
             print("브라우저 로그인 프로필을 저장했습니다.")
+            return
+        if args.command == "collect-favorites":
+            snapshot = collector.collect_favorites_snapshot()
+            output = PROJECT_DIR / "data" / "favorites-latest.json"
+            output.parent.mkdir(parents=True, exist_ok=True)
+            temporary = output.with_suffix(".json.tmp")
+            temporary.write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            temporary.replace(output)
+            total = sum(item["listing_count"] for item in snapshot["complexes"])
+            print(
+                f"관심부동산 수집 완료: 단지 {len(snapshot['complexes'])}개, "
+                f"매물 {total}건, {output}"
+            )
             return
 
         store = FileStore(PROJECT_DIR / "data")

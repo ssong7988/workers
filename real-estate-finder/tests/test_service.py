@@ -48,6 +48,14 @@ class FakeCollector:
         return {"weverfield": [self.item]}
 
 
+class MappingCollector:
+    def __init__(self, mapping):
+        self.mapping = mapping
+
+    def collect_all(self, _conditions):
+        return self.mapping
+
+
 class ServiceTests(unittest.TestCase):
     def test_first_urgent_and_further_drop_only(self) -> None:
         sent: list[str] = []
@@ -77,6 +85,37 @@ class ServiceTests(unittest.TestCase):
             state = store.load_state()
             self.assertIsNone(state["listings"]["weverfield:123"]["last_urgent_alert_price_won"])
             self.assertEqual(len(sent), 2)
+
+    def test_notify_new_without_urgent_threshold(self) -> None:
+        condition = SearchCondition(
+            id="worldmark",
+            name="광교푸르지오월드마크 전체",
+            complex_names=("광교푸르지오월드마크",),
+            search_url="",
+            exclusive_area_m2=None,
+            allowed_types=None,
+            max_price_won=None,
+            urgent_price_won=None,
+            notify_new=True,
+            apply_low_floor_discount=False,
+        )
+        config = AppConfig("sale", LowFloorRule(), (condition,))
+        item = make_listing(1_800_000_000)
+        item.condition_id = "worldmark"
+        item.complex_name = "광교푸르지오월드마크(주상복합)"
+        sent: list[str] = []
+        notifier = KakaoNotifier(Path("."), sender=lambda message, _url: sent.append(message))
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                config, MappingCollector({"worldmark": [item]}), store, notifier
+            )
+            first = service.scan()
+            self.assertEqual(len(first.urgent), 0)
+            self.assertEqual(len(sent), 1)
+            self.assertIn("신규", sent[0])
+            service.scan()
+            self.assertEqual(len(sent), 1)
 
 
 if __name__ == "__main__":

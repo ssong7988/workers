@@ -6,7 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .models import AppConfig, Listing, ScanResult, iso_now
-from .notifier import KakaoNotifier, listing_message, scan_summary_message
+from .notifier import KakaoNotifier, batch_listing_message, listing_message, scan_summary_message
 from .parsing import matches_condition
 from .storage import FileStore
 
@@ -23,12 +23,13 @@ class FinderService:
         conditions = [condition for condition in self.config.searches if condition.enabled]
         result = ScanResult(started_at=started, finished_at=started)
         collected_by_condition: dict[str, list[Listing]] = {}
-        for condition in conditions:
-            try:
-                partial = self.collector.collect_all([condition])
-                collected_by_condition[condition.id] = partial.get(condition.id, [])
+        pending_notifications: list[tuple[Listing, bool, bool]] = []
+        try:
+            collected_by_condition = self.collector.collect_all(conditions)
+            for condition in conditions:
                 result.successful_conditions.append(condition.id)
-            except Exception as exc:
+        except Exception as exc:
+            for condition in conditions:
                 result.failed_conditions[condition.id] = str(exc)
 
         state = self.store.load_state()
@@ -50,15 +51,21 @@ class FinderService:
                 result.matched.append(listing)
                 old = previous.get(listing.key, {})
                 last_alert_price = old.get("last_urgent_alert_price_won")
-                is_urgent = listing.price_won <= listing.effective_urgent_price_won
+                is_urgent = (
+                    listing.effective_urgent_price_won is not None
+                    and listing.price_won <= listing.effective_urgent_price_won
+                )
+                is_new = not bool(old)
                 should_alert = is_urgent and (
                     last_alert_price is None or listing.price_won < int(last_alert_price)
                 )
                 if should_alert:
                     result.urgent.append(listing)
                     if notify_urgent and not smoke:
-                        self._safe_send(listing_message(listing, urgent=True), listing.url)
+                        pending_notifications.append((listing, True, False))
                         last_alert_price = listing.price_won
+                elif condition.notify_new and is_new and notify_urgent and not smoke:
+                    pending_notifications.append((listing, False, True))
                 payload = listing.to_dict()
                 payload.update(
                     {
@@ -73,6 +80,11 @@ class FinderService:
                 if payload.get("condition_id") == condition.id and key not in seen_keys:
                     payload["active"] = False
 
+        if pending_notifications:
+            self._safe_send(
+                batch_listing_message(pending_notifications),
+                "https://fin.land.naver.com/",
+            )
         result.finished_at = iso_now()
         self.store.append_observations(observed)
         self.store.append_run(result)
@@ -110,7 +122,10 @@ class FinderService:
         summary = f"☀️ 과천 관심 매물 {len(listings)}건\n급매 우선·가격순으로 전송합니다."
         self._safe_send(summary, "https://new.land.naver.com/")
         for listing in sorted(listings, key=_sort_key):
-            urgent = listing.price_won <= listing.effective_urgent_price_won
+            urgent = (
+                listing.effective_urgent_price_won is not None
+                and listing.price_won <= listing.effective_urgent_price_won
+            )
             self._safe_send(listing_message(listing, urgent=urgent), listing.url)
 
     def _safe_send(self, message: str, link_url: str) -> None:
@@ -122,6 +137,9 @@ class FinderService:
 
 
 def _sort_key(listing: Listing) -> tuple[bool, int, int]:
-    urgent = listing.price_won <= listing.effective_urgent_price_won
+    urgent = (
+        listing.effective_urgent_price_won is not None
+        and listing.price_won <= listing.effective_urgent_price_won
+    )
     floor = listing.floor if listing.floor is not None else 999
     return (not urgent, listing.price_won, floor)

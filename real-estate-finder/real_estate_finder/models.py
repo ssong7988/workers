@@ -20,10 +20,14 @@ class SearchCondition:
     name: str
     complex_names: tuple[str, ...]
     search_url: str
-    exclusive_area_m2: float
+    exclusive_area_m2: float | None
     allowed_types: tuple[str, ...] | None
-    max_price_won: int
-    urgent_price_won: int
+    max_price_won: int | None
+    urgent_price_won: int | None
+    exclusive_area_min_m2: float | None = None
+    exclusive_area_max_m2: float | None = None
+    notify_new: bool = False
+    apply_low_floor_discount: bool = True
     enabled: bool = True
 
 
@@ -52,8 +56,8 @@ class Listing:
     url: str
     observed_at: str
     is_low_floor: bool = False
-    effective_max_price_won: int = 0
-    effective_urgent_price_won: int = 0
+    effective_max_price_won: int | None = None
+    effective_urgent_price_won: int | None = None
 
     @property
     def key(self) -> str:

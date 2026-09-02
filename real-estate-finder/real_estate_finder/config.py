@@ -32,10 +32,34 @@ def load_config(path: Path) -> AppConfig:
                 name=str(item["name"]),
                 complex_names=tuple(str(v) for v in item.get("complex_names", [item["name"]])),
                 search_url=str(item.get("search_url", "")).strip(),
-                exclusive_area_m2=float(item["exclusive_area_m2"]),
+                exclusive_area_m2=(
+                    float(item["exclusive_area_m2"])
+                    if item.get("exclusive_area_m2") is not None
+                    else None
+                ),
                 allowed_types=allowed_types,
-                max_price_won=int(item["max_price_won"]),
-                urgent_price_won=int(item["urgent_price_won"]),
+                max_price_won=(
+                    int(item["max_price_won"])
+                    if item.get("max_price_won") is not None
+                    else None
+                ),
+                urgent_price_won=(
+                    int(item["urgent_price_won"])
+                    if item.get("urgent_price_won") is not None
+                    else None
+                ),
+                exclusive_area_min_m2=(
+                    float(item["exclusive_area_min_m2"])
+                    if item.get("exclusive_area_min_m2") is not None
+                    else None
+                ),
+                exclusive_area_max_m2=(
+                    float(item["exclusive_area_max_m2"])
+                    if item.get("exclusive_area_max_m2") is not None
+                    else None
+                ),
+                notify_new=bool(item.get("notify_new", False)),
+                apply_low_floor_discount=bool(item.get("apply_low_floor_discount", True)),
                 enabled=bool(item.get("enabled", True)),
             )
         )
@@ -64,9 +88,16 @@ def validate_config(config: AppConfig, require_urls: bool = False) -> None:
     if config.low_floor.price_discount_won < 0:
         raise ValueError("저층 가격 차감액은 음수일 수 없습니다.")
     for condition in config.searches:
-        if condition.urgent_price_won > condition.max_price_won:
+        if (
+            condition.urgent_price_won is not None
+            and condition.max_price_won is not None
+            and condition.urgent_price_won > condition.max_price_won
+        ):
             raise ValueError(f"{condition.id}: 급매 기준이 조사 기준보다 높습니다.")
-        if condition.urgent_price_won <= config.low_floor.price_discount_won:
+        if (
+            condition.urgent_price_won is not None
+            and condition.urgent_price_won <= config.low_floor.price_discount_won
+        ):
             raise ValueError(f"{condition.id}: 저층 급매 기준이 0 이하가 됩니다.")
         if require_urls and condition.enabled and not condition.search_url:
             raise ValueError(f"{condition.id}: search_url을 입력하세요.")

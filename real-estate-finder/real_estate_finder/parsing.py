@@ -54,7 +54,14 @@ def normalize_type_name(text: str) -> str:
 def matches_condition(listing: Listing, condition: SearchCondition, rule: LowFloorRule) -> bool:
     if not any(alias.replace(" ", "") in listing.complex_name.replace(" ", "") for alias in condition.complex_names):
         return False
-    if not condition.exclusive_area_m2 <= listing.exclusive_area_m2 < condition.exclusive_area_m2 + 1:
+    area_min = condition.exclusive_area_min_m2
+    area_max = condition.exclusive_area_max_m2
+    if condition.exclusive_area_m2 is not None:
+        area_min = area_min if area_min is not None else condition.exclusive_area_m2 - 1
+        area_max = area_max if area_max is not None else condition.exclusive_area_m2 + 2
+    if area_min is not None and listing.exclusive_area_m2 < area_min:
+        return False
+    if area_max is not None and listing.exclusive_area_m2 > area_max:
         return False
     normalized_type = normalize_type_name(listing.type_name)
     if condition.allowed_types is not None and normalized_type not in condition.allowed_types:
@@ -64,7 +71,14 @@ def matches_condition(listing: Listing, condition: SearchCondition, rule: LowFlo
         return False
     listing.floor = floor
     listing.is_low_floor = is_low
-    discount = rule.price_discount_won if is_low else 0
-    listing.effective_max_price_won = condition.max_price_won - discount
-    listing.effective_urgent_price_won = condition.urgent_price_won - discount
-    return listing.price_won <= listing.effective_max_price_won
+    discount = rule.price_discount_won if is_low and condition.apply_low_floor_discount else 0
+    listing.effective_max_price_won = (
+        condition.max_price_won - discount if condition.max_price_won is not None else None
+    )
+    listing.effective_urgent_price_won = (
+        condition.urgent_price_won - discount if condition.urgent_price_won is not None else None
+    )
+    return (
+        listing.effective_max_price_won is None
+        or listing.price_won <= listing.effective_max_price_won
+    )
