@@ -173,6 +173,75 @@ class CardPathTests(unittest.TestCase):
         self.assertEqual(len(image_sender.calls), 1, "digest must be one message, not one per listing")
         self.assertEqual(len(self.built[0]), 30, "no listing may be dropped")
 
+    def _matched_set(self):
+        """One urgent listing plus two that merely match the condition."""
+        urgent = make_listing(2_500_000_000)
+        urgent.listing_id = "urgent"
+        first = make_listing(2_550_000_000)
+        first.listing_id = "plain1"
+        second = make_listing(2_580_000_000)
+        second.listing_id = "plain2"
+        return [urgent, first, second]
+
+    def test_card_carries_every_matched_listing(self) -> None:
+        image_sender = RecordingImageSender()
+        notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                CONFIG,
+                MappingCollector({"weverfield": self._matched_set()}),
+                store,
+                notifier,
+            )
+            service.scan()
+
+        self.assertEqual(len(image_sender.calls), 1, "알림은 한 통이어야 한다")
+        flags = {listing.listing_id: (urgent, new) for listing, urgent, new in self.built[0]}
+        self.assertEqual(len(flags), 3, "카드에는 조건충족 전체가 담겨야 한다")
+        self.assertEqual(flags["urgent"], (True, False))
+        self.assertEqual(flags["plain1"], (False, False))
+        self.assertEqual(flags["plain2"], (False, False))
+
+    def test_no_alert_sends_nothing(self) -> None:
+        image_sender = RecordingImageSender()
+        sent: list[str] = []
+        notifier = KakaoNotifier(
+            Path("."), sender=lambda message, _url: sent.append(message), image_sender=image_sender
+        )
+        plain = make_listing(2_550_000_000)  # matches, but never dips to urgent
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                CONFIG, MappingCollector({"weverfield": [plain]}), store, notifier
+            )
+            result = service.scan()
+
+        self.assertEqual(len(result.matched), 1)
+        self.assertEqual(image_sender.calls, [], "알림이 없으면 카드도 보내지 않는다")
+        self.assertEqual(sent, [])
+
+    def test_fallback_text_carries_alerts_only(self) -> None:
+        image_sender = RecordingImageSender(error=RuntimeError("렌더 실패"))
+        sent: list[str] = []
+        notifier = KakaoNotifier(
+            Path("."), sender=lambda message, _url: sent.append(message), image_sender=image_sender
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                CONFIG,
+                MappingCollector({"weverfield": self._matched_set()}),
+                store,
+                notifier,
+            )
+            service.scan()
+
+        # 200 characters cannot hold all three, and the urgent one must survive.
+        self.assertEqual(len(sent), 1)
+        self.assertIn("1건", sent[0])
+        self.assertIn("급매1", sent[0])
+
     def test_scan_alert_uses_the_card(self) -> None:
         image_sender = RecordingImageSender()
         sent: list[str] = []

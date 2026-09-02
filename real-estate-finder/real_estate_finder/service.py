@@ -98,7 +98,17 @@ class FinderService:
                     payload["active"] = False
 
         if pending_notifications:
-            self._safe_send_card(pending_notifications, heading="오늘의 매물 알림")
+            # Alerts decide *whether* to send; the card carries every matched
+            # listing so one message shows the whole picture, with the alerted
+            # ones badged.
+            flags = {listing.key: (urgent, new) for listing, urgent, new in pending_notifications}
+            items: list[CardItem] = [
+                (listing, *flags.get(listing.key, (False, False)))
+                for listing in result.matched
+            ]
+            self._safe_send_card(
+                items, heading="오늘의 매물", alerts=pending_notifications
+            )
         result.finished_at = iso_now()
         self.store.append_observations(observed)
         self.store.append_run(result)
@@ -147,11 +157,20 @@ class FinderService:
         ]
         self._safe_send_card(items, heading="과천 관심 매물")
 
-    def _safe_send_card(self, items: list[CardItem], *, heading: str) -> None:
+    def _safe_send_card(
+        self,
+        items: list[CardItem],
+        *,
+        heading: str,
+        alerts: list[CardItem] | None = None,
+    ) -> None:
         """Send the listings as one card image, degrading to text on any failure.
 
         The image exists to escape Kakao's 200-character text limit, but an
-        alert that cannot be rendered still has to reach the user.
+        alert that cannot be rendered still has to reach the user. The text
+        fallback carries `alerts` when given: 200 characters cannot hold the
+        full list, and losing the urgent listing to truncation is the worst
+        possible outcome.
         """
         if self.use_cards:
             try:
@@ -175,7 +194,7 @@ class FinderService:
                 return
             except Exception as exc:
                 print(f"카드 전송 실패, 텍스트로 대체합니다: {exc}")
-        self._safe_send(batch_listing_message(items), REPORT_URL)
+        self._safe_send(batch_listing_message(alerts or items), REPORT_URL)
 
     def _safe_send(self, message: str, link_url: str) -> None:
         try:

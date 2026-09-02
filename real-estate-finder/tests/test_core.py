@@ -12,7 +12,12 @@ from real_estate_finder.collector import (
 )
 from real_estate_finder.models import Listing, LowFloorRule, SearchCondition
 from real_estate_finder.notifier import batch_listing_message, listing_message
-from real_estate_finder.parsing import matches_condition, parse_floor, parse_price_won
+from real_estate_finder.parsing import (
+    explain_condition,
+    matches_condition,
+    parse_floor,
+    parse_price_won,
+)
 from real_estate_finder.storage import FileStore
 
 
@@ -145,6 +150,36 @@ class RepresentativeArticleTests(unittest.TestCase):
     def test_no_article_link(self) -> None:
         self.assertEqual(_pick_representative_article([]), ("", ""))
         self.assertEqual(_pick_representative_article(["/complexes/104517?tab=article"]), ("", ""))
+
+
+class ExplainConditionTests(unittest.TestCase):
+    """Exclusion reasons must stay in step with matches_condition."""
+
+    def test_reason_matches_the_boolean(self) -> None:
+        for item in (
+            listing(2_400_000_000),
+            listing(2_700_000_000),
+            listing(2_400_000_000, area=59.9),
+            listing(2_400_000_000, "미상"),
+        ):
+            with self.subTest(price=item.price_won, area=item.exclusive_area_m2):
+                reason = explain_condition(item, CONDITION, RULE)
+                self.assertEqual(reason is None, matches_condition(item, CONDITION, RULE))
+
+    def test_passing_listing_has_no_reason(self) -> None:
+        self.assertIsNone(explain_condition(listing(2_400_000_000), CONDITION, RULE))
+
+    def test_area_reasons(self) -> None:
+        self.assertIn("면적 미달", explain_condition(listing(2_400_000_000, area=59.9), CONDITION, RULE))
+        self.assertIn("면적 초과", explain_condition(listing(2_400_000_000, area=118.9), CONDITION, RULE))
+
+    def test_price_reason_names_the_low_floor_cap(self) -> None:
+        reason = explain_condition(listing(2_550_000_000, "2/25층"), CONDITION, RULE)
+        self.assertIn("가격 초과", reason)
+        self.assertIn("저층기준", reason)
+
+    def test_unknown_floor_reason(self) -> None:
+        self.assertIn("층 해석 실패", explain_condition(listing(2_400_000_000, "미상"), CONDITION, RULE))
 
 
 class FilteringTests(unittest.TestCase):

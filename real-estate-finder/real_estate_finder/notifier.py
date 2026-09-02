@@ -77,7 +77,9 @@ def card_heading(items: list[tuple[Listing, bool, bool]]) -> str:
     """Short feed title. The card image carries the full list."""
     urgent_count = sum(urgent for _, urgent, _ in items)
     new_count = sum(new for _, _, new in items)
-    parts = [f"🏠 매물 알림 {len(items)}건"]
+    # "관심 매물", not "알림": the count is every matched listing on the card,
+    # of which only some triggered the alert.
+    parts = [f"🏠 관심 매물 {len(items)}건"]
     if urgent_count:
         parts.append(f"급매 {urgent_count}")
     if new_count:

@@ -58,24 +58,35 @@ def normalize_type_name(text: str) -> str:
     return f"84{match.group(1)}" if match else compact
 
 
-def matches_condition(listing: Listing, condition: SearchCondition, rule: LowFloorRule) -> bool:
+def _eok(price_won: int) -> str:
+    return f"{price_won / 100_000_000:.2f}억"
+
+
+def explain_condition(
+    listing: Listing, condition: SearchCondition, rule: LowFloorRule
+) -> str | None:
+    """Why a listing does not match, or None when it does.
+
+    Also fills in the listing's floor, low-floor flag and effective thresholds,
+    which the caller relies on afterwards.
+    """
     if not any(alias.replace(" ", "") in listing.complex_name.replace(" ", "") for alias in condition.complex_names):
-        return False
+        return "단지명 불일치"
     area_min = condition.exclusive_area_min_m2
     area_max = condition.exclusive_area_max_m2
     if condition.exclusive_area_m2 is not None:
         area_min = area_min if area_min is not None else condition.exclusive_area_m2 - 1
         area_max = area_max if area_max is not None else condition.exclusive_area_m2 + 2
     if area_min is not None and listing.exclusive_area_m2 < area_min:
-        return False
+        return f"면적 미달 ({listing.exclusive_area_m2:g} < {area_min:g}㎡)"
     if area_max is not None and listing.exclusive_area_m2 > area_max:
-        return False
+        return f"면적 초과 ({listing.exclusive_area_m2:g} > {area_max:g}㎡)"
     normalized_type = normalize_type_name(listing.type_name)
     if condition.allowed_types is not None and normalized_type not in condition.allowed_types:
-        return False
+        return f"타입 제외 ({normalized_type})"
     floor, is_low, known = parse_floor(listing.floor_text, rule)
     if not known:
-        return False
+        return f"층 해석 실패 ('{listing.floor_text}')"
     listing.floor = floor
     listing.is_low_floor = is_low
     discount = rule.price_discount_won if is_low and condition.apply_low_floor_discount else 0
@@ -85,7 +96,11 @@ def matches_condition(listing: Listing, condition: SearchCondition, rule: LowFlo
     listing.effective_urgent_price_won = (
         condition.urgent_price_won - discount if condition.urgent_price_won is not None else None
     )
-    return (
-        listing.effective_max_price_won is None
-        or listing.price_won <= listing.effective_max_price_won
-    )
+    cap = listing.effective_max_price_won
+    if cap is not None and listing.price_won > cap:
+        return f"가격 초과 ({_eok(listing.price_won)} > {_eok(cap)}{' 저층기준' if is_low else ''})"
+    return None
+
+
+def matches_condition(listing: Listing, condition: SearchCondition, rule: LowFloorRule) -> bool:
+    return explain_condition(listing, condition, rule) is None

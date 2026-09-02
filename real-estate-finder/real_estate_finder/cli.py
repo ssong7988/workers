@@ -7,11 +7,14 @@ import json
 import sys
 from pathlib import Path
 
+from collections import Counter
+
 from .card import CardItem, build_card_image
 from .collector import NaverBrowserCollector
 from .config import load_config, validate_config
 from .models import Listing
 from .notifier import REPORT_URL, KakaoNotifier
+from .parsing import explain_condition
 from .service import FinderService
 from .storage import FileStore
 
@@ -77,7 +80,55 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument(
         "--out", type=Path, default=PROJECT_DIR / "data" / "card-preview.png"
     )
+    explain = commands.add_parser(
+        "explain-filters",
+        help="수집된 매물이 조건을 통과했는지, 아니면 왜 빠졌는지 출력",
+    )
+    explain.add_argument(
+        "--all", action="store_true", help="통과한 매물도 함께 출력"
+    )
     return parser
+
+
+def _explain_filters(config, store: FileStore, show_passed: bool) -> None:
+    """Replay the filters over the last snapshot so exclusions are visible.
+
+    Reads only the saved JSON, so it needs no browser and cannot disturb a scan.
+    """
+    snapshot_path = PROJECT_DIR / "data" / "favorites-latest.json"
+    if not snapshot_path.exists():
+        raise RuntimeError(
+            f"수집 스냅샷이 없습니다: {snapshot_path}\n먼저 collect-favorites를 실행하세요."
+        )
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    print(f"수집 시각: {snapshot.get('observed_at', '?')}\n")
+
+    for condition in config.searches:
+        rows: list[tuple[Listing, str | None]] = []
+        for complex_info in snapshot["complexes"]:
+            compact = complex_info["name"].replace(" ", "")
+            if not any(a.replace(" ", "") in compact for a in condition.complex_names):
+                continue
+            for raw in complex_info["listings"]:
+                listing = Listing.from_dict({**raw, "condition_id": condition.id, "floor": None})
+                rows.append((listing, explain_condition(listing, condition, config.low_floor)))
+        if not rows:
+            continue
+
+        passed = [item for item in rows if item[1] is None]
+        print(f"■ {condition.name}  (수집 {len(rows)}건 → 통과 {len(passed)}건)")
+        reasons = Counter(reason.split(" (")[0] for _, reason in rows if reason)
+        for label, count in reasons.most_common():
+            print(f"    {label}: {count}건")
+        for listing, reason in rows:
+            if reason is None and not show_passed:
+                continue
+            mark = "통과" if reason is None else reason
+            print(
+                f"      {listing.price_won / 1e8:>6.2f}억 {listing.type_name:>9}"
+                f" {listing.floor_text:>8}  {mark}"
+            )
+        print()
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -116,6 +167,10 @@ def main(argv: list[str] | None = None) -> None:
             return
 
         store = FileStore(PROJECT_DIR / "data")
+
+        if args.command == "explain-filters":
+            _explain_filters(config, store, args.all)
+            return
 
         if args.command == "preview-card":
             items = _stored_card_items(store)
