@@ -181,13 +181,13 @@ class FinderService:
                     report_url=REPORT_URL,
                     timezone=self.config.timezone,
                 )
-                # No link_url: the card opens the full-resolution original, since
-                # the image in the chat is scaled down.
+                # Keep the full-resolution image action and add the hosted report
+                # as a second Kakao button.
                 self.notifier.send_image(
                     image_path,
                     card_heading(items),
                     card_caption(items),
-                    None,
+                    REPORT_URL,
                     width,
                     height,
                 )

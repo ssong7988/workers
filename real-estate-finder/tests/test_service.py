@@ -259,8 +259,7 @@ class CardPathTests(unittest.TestCase):
         self.assertEqual(sent, [], "the text path must not also fire")
         _path, title, _description, link_url = image_sender.calls[0]
         self.assertIn("급매 1", title)
-        # No link means the card opens the uploaded original, not the report site.
-        self.assertIsNone(link_url)
+        self.assertEqual(link_url, service_module.REPORT_URL)
 
     def test_card_failure_falls_back_to_text(self) -> None:
         image_sender = RecordingImageSender(error=RuntimeError("업로드 실패"))

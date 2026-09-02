@@ -283,15 +283,22 @@ class NaverBrowserCollector:
         else:
             self._select_similar_exclusive_area(page, minimum=83, maximum=86)
 
-        for _ in range(20):
-            before = page.locator(self.ARTICLE_LINK_SELECTOR).count()
+        stable_scrolls = 0
+        for _ in range(40):
+            before = self._listing_root_count(page)
             page.mouse.wheel(0, 1400)
             page.wait_for_timeout(500)
-            after = page.locator(self.ARTICLE_LINK_SELECTOR).count()
+            after = self._listing_root_count(page)
             if after == before:
+                stable_scrolls += 1
+            else:
+                stable_scrolls = 0
+            if stable_scrolls >= 3:
                 break
 
-        rows = page.locator("body").evaluate(
+        expanded_rows = self._expand_listing_groups(page)
+
+        standalone_rows = page.locator("body").evaluate(
             r"""els => {
                 const cards = new Set();
                 const rows = [];
@@ -308,24 +315,44 @@ class NaverBrowserCollector:
                         card = card.parentElement?.closest('li') || null;
                     }
                     if (!card || cards.has(card)) continue;
+                    // Expanded bundle rows were captured immediately after the
+                    // click. Skip their collapsed/virtualized shells here.
+                    if ([...card.querySelectorAll('button')].some(button =>
+                        (button.textContent || '').includes('매물목록')
+                    )) continue;
                     cards.add(card);
-                    // A bundled card holds one link per agent listing; return
-                    // them all so the caller can choose which one to keep.
-                    const hrefs = [...card.querySelectorAll('a[href*="/articles/"]')]
-                        .map(a => a.getAttribute('href') || '')
-                        .filter(Boolean);
+                    // After expanding a bundle, capture each article link with
+                    // the text of its own row. Climb until the next parent would
+                    // contain multiple article links; that keeps the individual
+                    // price beside the correct href.
+                    const byHref = new Map();
+                    for (const anchor of card.querySelectorAll('a[href*="/articles/"]')) {
+                        const href = anchor.getAttribute('href') || '';
+                        if (!href) continue;
+                        let item = anchor;
+                        while (item.parentElement && item.parentElement !== card) {
+                            const parent = item.parentElement;
+                            if (parent.querySelectorAll('a[href*="/articles/"]').length > 1) break;
+                            item = parent;
+                        }
+                        const text = (item.innerText || anchor.innerText || '').trim();
+                        if (!byHref.has(href) || text.length > byHref.get(href).text.length) {
+                            byHref.set(href, {href, text});
+                        }
+                    }
                     rows.push({
-                        hrefs: hrefs,
+                        articles: [...byHref.values()],
                         text: (card.innerText || '').trim()
                     });
                 }
                 return rows;
             }"""
         )
+        rows = [*expanded_rows, *standalone_rows]
         listings = []
         seen: set[str] = set()
         for row in rows:
-            listing_id, href = _pick_representative_article(row["hrefs"])
+            listing_id, href = _pick_representative_article(row["articles"])
             if not listing_id:
                 fingerprint = f"{complex_info['complex_id']}|{row['text']}"
                 listing_id = "card-" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:20]
@@ -343,6 +370,95 @@ class NaverBrowserCollector:
             if len(listings) >= self.MAX_LISTINGS_PER_COMPLEX:
                 break
         return {**complex_info, "listing_count": len(listings), "listings": listings}
+
+    @staticmethod
+    def _listing_root_count(page) -> int:
+        """Count loaded card roots, including bundles that have no article link yet."""
+        return page.locator("body").evaluate(
+            """body => [...body.querySelectorAll('button, a')].filter(element =>
+                (element.textContent || '').trim() === '매물목록 펼치기' ||
+                (element.getAttribute('href') || '').includes('/articles/')
+            ).length"""
+        )
+
+    def _expand_listing_groups(self, page) -> list[dict]:
+        """Open bundles and capture their article rows before Naver virtualizes them."""
+        rows: list[dict] = []
+        for _ in range(self.MAX_LISTINGS_PER_COMPLEX):
+            # Find the button, its owning card and invoke the click atomically.
+            # React replaces this part of the DOM as bundles expand, so holding
+            # a Locator across separate find/scroll/click calls races that render.
+            card_handle = page.locator("body").evaluate_handle(
+                r"""body => {
+                    const button = [...body.querySelectorAll('button')].find(element =>
+                        (element.textContent || '').trim() === '매물목록 펼치기' &&
+                        element.getClientRects().length > 0
+                    );
+                    if (!button) return null;
+                    let card = button.closest('li');
+                    while (card && !/전용\s*\d/.test(card.innerText || '')) {
+                        card = card.parentElement?.closest('li') || null;
+                    }
+                    if (!card) return null;
+                    // Naver's sticky filter header can cover the button after
+                    // scrolling. Calling the same visible control's handler
+                    // avoids pointer interception by that fixed overlay.
+                    button.click();
+                    return card;
+                }"""
+            ).as_element()
+            if card_handle is None:
+                break
+            for _ in range(32):
+                if card_handle.query_selector('a[href*="/articles/"]') is not None:
+                    break
+                page.wait_for_timeout(250)
+            else:
+                summary = " ".join(
+                    (card_handle.inner_text() or "").split()
+                )[:160]
+                raise CollectionError(
+                    "매물목록을 펼쳤지만 개별 매물 링크가 나타나지 않았습니다: "
+                    f"{summary}"
+                )
+            rows.append(
+                card_handle.evaluate(
+                    r"""card => {
+                        const byHref = new Map();
+                        for (const anchor of card.querySelectorAll('a[href*="/articles/"]')) {
+                            const href = anchor.getAttribute('href') || '';
+                            if (!href) continue;
+                            let item = anchor;
+                            while (item.parentElement && item.parentElement !== card) {
+                                const parent = item.parentElement;
+                                if (parent.querySelectorAll('a[href*="/articles/"]').length > 1) break;
+                                item = parent;
+                            }
+                            const text = (item.innerText || anchor.innerText || '').trim();
+                            if (!byHref.has(href) || text.length > byHref.get(href).text.length) {
+                                byHref.set(href, {href, text});
+                            }
+                        }
+                        return {
+                            articles: [...byHref.values()],
+                            text: (card.innerText || '').trim()
+                        };
+                    }"""
+                )
+            )
+        remaining = page.locator("body").evaluate(
+            """body => [...body.querySelectorAll('button')].some(element =>
+                (element.textContent || '').trim() === '매물목록 펼치기' &&
+                element.getClientRects().length > 0
+            )"""
+        )
+        if remaining:
+            raise CollectionError(
+                "매물목록 펼치기가 비정상적으로 많이 반복되어 수집을 중단했습니다."
+            )
+        # The expanded agent rows are populated asynchronously after the click.
+        page.wait_for_timeout(800)
+        return rows
 
     def _select_similar_exclusive_area(self, page, minimum: float, maximum: float) -> None:
         area_button = page.get_by_role("button", name="전체면적", exact=True)
@@ -637,25 +753,39 @@ def _extract_listing_id(text: str) -> str:
     return ""
 
 
-def _pick_representative_article(hrefs: list[str]) -> tuple[str, str]:
+def _pick_representative_article(articles: list[dict[str, str]]) -> tuple[str, str]:
     """Choose which listing a card should link to.
 
     Naver bundles several agents' listings into a single card whose price is
-    shown as a range; the card text we parse already carries the cheapest of
-    them. Among the links on the card we keep the newest, since article numbers
-    grow over time — a heuristic, but the numbers are not otherwise ordered.
+    shown as a range. Choose the cheapest expanded individual listing; when
+    prices tie, keep the newest article number because those numbers grow over
+    time.
 
     Returns `(listing_id, href)`, both empty when the card links to no article.
     """
-    best_id = ""
-    best_href = ""
-    for href in hrefs:
+    candidates: list[tuple[int, int, str, str]] = []
+    unpriced: list[tuple[int, str, str]] = []
+    for article in articles:
+        href = article.get("href", "")
         listing_id = _extract_listing_id(href)
         if not listing_id:
             continue
-        if not best_id or int(listing_id) > int(best_id):
-            best_id, best_href = listing_id, href
-    return best_id, best_href
+        article_number = int(listing_id)
+        try:
+            price = parse_price_won(_extract_price_text(article.get("text", "")))
+        except ValueError:
+            unpriced.append((article_number, listing_id, href))
+            continue
+        # Lowest price wins; the negative article number makes the newest ID
+        # sort first when two individual listings have the same price.
+        candidates.append((price, -article_number, listing_id, href))
+    if candidates:
+        _, _, listing_id, href = min(candidates)
+        return listing_id, href
+    if unpriced:
+        _, listing_id, href = max(unpriced)
+        return listing_id, href
+    return "", ""
 
 
 def _extract_price_text(text: str) -> str:

@@ -134,22 +134,55 @@ class FavoriteCountTests(unittest.TestCase):
 
 
 class RepresentativeArticleTests(unittest.TestCase):
-    def test_picks_the_newest_of_a_bundle(self) -> None:
+    def test_picks_the_cheapest_of_a_bundle(self) -> None:
         listing_id, href = _pick_representative_article(
-            ["/articles/2645262271", "/articles/2647101276", "/articles/2646599402"]
+            [
+                {"href": "/articles/2647101276", "text": "매매 25억"},
+                {"href": "/articles/2646599402", "text": "매매 24억 5,000"},
+                {"href": "/articles/2645262271", "text": "매매 26억"},
+            ]
+        )
+        self.assertEqual(listing_id, "2646599402")
+        self.assertEqual(href, "/articles/2646599402")
+
+    def test_same_price_picks_the_newest_article(self) -> None:
+        listing_id, href = _pick_representative_article(
+            [
+                {"href": "/articles/2645262271", "text": "매매 25억"},
+                {"href": "/articles/2647101276", "text": "매매 25억"},
+                {"href": "/articles/2646599402", "text": "매매 25억"},
+            ]
         )
         self.assertEqual(listing_id, "2647101276")
         self.assertEqual(href, "/articles/2647101276")
 
     def test_single_link(self) -> None:
         self.assertEqual(
-            _pick_representative_article(["/articles/2647057443"]),
+            _pick_representative_article(
+                [{"href": "/articles/2647057443", "text": "매매 22억 5,000"}]
+            ),
+            ("2647057443", "/articles/2647057443"),
+        )
+
+    def test_unpriced_links_fall_back_to_newest(self) -> None:
+        self.assertEqual(
+            _pick_representative_article(
+                [
+                    {"href": "/articles/2647057443", "text": "매물 보러가기"},
+                    {"href": "/articles/2647055564", "text": "매물 보러가기"},
+                ]
+            ),
             ("2647057443", "/articles/2647057443"),
         )
 
     def test_no_article_link(self) -> None:
         self.assertEqual(_pick_representative_article([]), ("", ""))
-        self.assertEqual(_pick_representative_article(["/complexes/104517?tab=article"]), ("", ""))
+        self.assertEqual(
+            _pick_representative_article(
+                [{"href": "/complexes/104517?tab=article", "text": "매매 16억"}]
+            ),
+            ("", ""),
+        )
 
 
 class ExplainConditionTests(unittest.TestCase):

@@ -176,27 +176,29 @@ def send_image_to_me(
 ) -> None:
     """Send the card as a feed message.
 
-    With no `link_url` the card and its button open the full-resolution image
-    itself, which is usually what you want — the card in the chat is scaled down.
+    The card and first button open the full-resolution image. When `link_url` is
+    provided, a second button opens the full property report.
     """
-    target = link_url or image_url
-    link = {"web_url": target, "mobile_web_url": target}
+    image_link = {"web_url": image_url, "mobile_web_url": image_url}
     content = {
         "title": title[:CAPTION_LIMIT],
         "description": description[:CAPTION_LIMIT],
         "image_url": image_url,
-        "link": link,
+        "link": image_link,
     }
     if image_width:
         content["image_width"] = image_width
     if image_height:
         content["image_height"] = image_height
-    button_title = TEXT_BUTTON_TITLE if link_url else IMAGE_BUTTON_TITLE
+    buttons = [{"title": IMAGE_BUTTON_TITLE, "link": image_link}]
+    if link_url:
+        report_link = {"web_url": link_url, "mobile_web_url": link_url}
+        buttons.append({"title": TEXT_BUTTON_TITLE, "link": report_link})
     _send_template(
         {
             "object_type": "feed",
             "content": content,
-            "buttons": [{"title": button_title, "link": link}],
+            "buttons": buttons,
         }
     )
 
@@ -211,8 +213,9 @@ def send_card_to_me(
 ) -> None:
     """Upload the rendered card and send it as a feed message.
 
-    By default the message links to the uploaded original so tapping it opens the
-    card at full resolution. Falls back to a public URL under
+    The message image always links to the uploaded original at full resolution.
+    If `link_url` is supplied, the message also includes a report button. Falls
+    back to a public URL under
     KAKAO_IMAGE_BASE_URL when the upload API is unavailable.
 
     Note: whatever domain ends up in the link must be registered under
