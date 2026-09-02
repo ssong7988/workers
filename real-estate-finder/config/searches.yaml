@@ -1,0 +1,88 @@
+global_rules:
+  trade_type: sale
+  low_floor:
+    numeric_floors: [1, 2, 3]
+    labels: ["저", "저층"]
+    price_discount_won: 100000000
+
+schedule:
+  timezone: Asia/Seoul
+  digest_weekdays: [0, 1, 2, 3, 4]
+  digest_hour: 8
+
+searches:
+  - id: raemian-central-suite-84
+    name: 래미안센트럴스위트 84
+    complex_names:
+      - 래미안센트럴스위트
+      - 래미안 과천 센트럴스위트
+    search_url: ""
+    exclusive_area_m2: 84
+    allowed_types: [84A, 84B, 84C]
+    max_price_won: 2500000000
+    urgent_price_won: 2400000000
+    enabled: true
+
+  - id: gwacheon-central-park-prugio-summit-84
+    name: 과천센트럴파크푸르지오써밋 84
+    complex_names:
+      - 과천센트럴파크푸르지오써밋
+      - 과천 센트럴파크 푸르지오
+      - 과천 센트럴파크 푸르지오 써밋
+    search_url: ""
+    exclusive_area_m2: 84
+    allowed_types: all
+    max_price_won: 2550000000
+    urgent_price_won: 2450000000
+    enabled: true
+
+  - id: gwacheon-weverfield-84
+    name: 과천위버필드 84
+    complex_names:
+      - 과천위버필드
+      - 과천 위버필드
+      - 위버필드
+    search_url: ""
+    exclusive_area_m2: 84
+    allowed_types: all
+    max_price_won: 2600000000
+    urgent_price_won: 2500000000
+    enabled: true
+
+  - id: raemian-sur-all
+    name: 래미안슈르 전체
+    complex_names: [래미안슈르]
+    search_url: ""
+    exclusive_area_m2: 84
+    allowed_types: all
+    max_price_won: 2250000000
+    urgent_price_won: 2150000000
+    notify_new: false
+    apply_low_floor_discount: true
+    enabled: true
+
+  - id: raemian-eco-palace-all
+    name: 래미안에코팰리스 전체
+    complex_names: [래미안에코팰리스]
+    search_url: ""
+    exclusive_area_m2: 84
+    allowed_types: all
+    max_price_won: 2250000000
+    urgent_price_won: 2150000000
+    notify_new: false
+    apply_low_floor_discount: true
+    enabled: true
+
+  - id: gwanggyo-prugio-worldmark-84-85
+    name: 광교푸르지오월드마크 전용 84~85㎡ 전체 매매
+    complex_names: [광교푸르지오월드마크, 광교푸르지오월드마크(주상복합)]
+    search_url: ""
+    exclusive_area_m2: 84
+    exclusive_area_min_m2: 84
+    exclusive_area_max_m2: 85.999
+    allowed_types: all
+    max_price_won: null
+    urgent_price_won: null
+    notify_new: true
+    apply_low_floor_discount: false
+    enabled: true
