@@ -15,11 +15,6 @@ PAGE = (
 )
 
 
-def _verb(command: list[str]) -> str:
-    """The git subcommand, past the -c options that silence credential prompts."""
-    return command[len(publish.NO_CREDENTIAL_PROMPT) + 1]
-
-
 def _completed(returncode: int, stdout: str = "", stderr: str = ""):
     return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
@@ -48,6 +43,24 @@ class LiveCheckTests(unittest.TestCase):
             self.assertFalse(publish.is_live(OBSERVED_AT, "https://report"))
 
 
+class DescribeLiveTests(unittest.TestCase):
+    """`live_observed_at` collapses two failures into None; a human needs them apart."""
+
+    def test_reports_the_served_timestamp(self) -> None:
+        with mock.patch.object(publish, "_fetch", return_value=PAGE):
+            self.assertEqual(publish.describe_live("https://report"), OBSERVED_AT)
+
+    def test_distinguishes_an_unreachable_site(self) -> None:
+        with mock.patch.object(publish, "_fetch", side_effect=OSError("연결 실패")):
+            message = publish.describe_live("https://report")
+        self.assertIn("접속하지 못했습니다", message)
+
+    def test_distinguishes_a_build_too_old_to_carry_the_marker(self) -> None:
+        with mock.patch.object(publish, "_fetch", return_value="<div>옛 빌드</div>"):
+            message = publish.describe_live("https://report")
+        self.assertIn("오래된 버전", message)
+
+
 class BuildTests(unittest.TestCase):
     def test_runs_the_site_build_in_the_site_directory(self) -> None:
         calls: list[tuple] = []
@@ -72,58 +85,12 @@ class BuildTests(unittest.TestCase):
         self.assertIn("타입 오류", str(caught.exception))
 
 
-class DeployTests(unittest.TestCase):
-    def _runner(self, results: dict[str, subprocess.CompletedProcess]):
-        calls: list[list[str]] = []
-
-        def fake_run(command, cwd, env, timeout):
-            calls.append(command)
-            return results.get(_verb(command), _completed(0))
-
-        return fake_run, calls
-
-    def test_pushes_the_committed_report_data(self) -> None:
-        # `diff --cached` exits non-zero when there is something staged.
-        fake_run, calls = self._runner({"diff": _completed(1)})
-        with mock.patch.object(publish, "_run", fake_run):
-            publish.deploy_site(Path("site"))
-
-        verbs = [_verb(command) for command in calls]
-        self.assertEqual(verbs, ["add", "diff", "commit", "push"])
-        self.assertIn("HEAD:main", calls[-1])
-
-    def test_unchanged_data_skips_the_commit(self) -> None:
-        fake_run, calls = self._runner({"diff": _completed(0)})
-        with mock.patch.object(publish, "_run", fake_run):
-            publish.deploy_site(Path("site"))
-
-        self.assertEqual([_verb(command) for command in calls], ["add", "diff", "push"])
-
-    def test_push_failure_asks_for_a_manual_publish(self) -> None:
-        fake_run, _calls = self._runner(
-            {"diff": _completed(0), "push": _completed(128, stderr="Authentication failed")}
-        )
-        with mock.patch.object(publish, "_run", fake_run):
-            with self.assertRaises(publish.ManualPublishRequired) as caught:
-                publish.deploy_site(Path("site"))
-
-        message = str(caught.exception)
-        self.assertIn("Authentication failed", message)
-        self.assertIn("--verify-only", message, "수동 배포 안내가 따라와야 한다")
-
-
-class PublishReportTests(unittest.TestCase):
-    def test_reports_false_when_the_deploy_did_not_land(self) -> None:
-        with mock.patch.object(publish, "build_site"), mock.patch.object(
-            publish, "deploy_site"
-        ), mock.patch.object(publish, "is_live", return_value=False):
-            self.assertFalse(publish.publish_report(OBSERVED_AT, "https://report"))
-
-    def test_reports_true_once_the_live_page_matches(self) -> None:
-        with mock.patch.object(publish, "build_site"), mock.patch.object(
-            publish, "deploy_site"
-        ), mock.patch.object(publish, "is_live", return_value=True):
-            self.assertTrue(publish.publish_report(OBSERVED_AT, "https://report"))
+class ManualStepsTests(unittest.TestCase):
+    def test_points_at_the_hosting_ui_not_a_git_push(self) -> None:
+        """Pushing to the git remote does not deploy this site; the UI does."""
+        self.assertIn("앱 호스팅 UI", publish.MANUAL_STEPS)
+        self.assertIn("--verify-only", publish.MANUAL_STEPS)
+        self.assertNotIn("push", publish.MANUAL_STEPS)
 
 
 if __name__ == "__main__":

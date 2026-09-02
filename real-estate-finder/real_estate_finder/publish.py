@@ -1,9 +1,10 @@
-"""Build the hosted report site, deploy it, and confirm the live page matches.
+"""Check whether the hosted report site already serves a given scan.
 
 `app/page.tsx` imports `report-data.json` at build time, so writing that file
-changes nothing until the site is rebuilt and deployed. Publishing therefore
-ends with a live check: only a page that already serves this scan may be put
-behind the 전체 매물 보기 button.
+changes nothing until the site is rebuilt and deployed. Deploying is a manual
+step through the ChatGPT app-hosting UI, so nothing here can publish on its
+own; what it can do is tell the truth about what is live. Only a page that
+already serves this scan may be put behind the 전체 매물 보기 button.
 """
 
 from __future__ import annotations
@@ -22,26 +23,19 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SITE_ROOT = ROOT_DIR / "property-report-site"
 SITE_DIR = SITE_ROOT / "site-app"
-REPORT_DATA = Path("app") / "report-data.json"
-DEPLOY_REMOTE = "sites"
-DEPLOY_BRANCH = "main"
 
 BUILD_TIMEOUT_SECONDS = 900
-GIT_TIMEOUT_SECONDS = 180
-# Credential Manager may still answer from its store — it just may not open a
-# dialog to ask. Disabling the helper entirely would lock out saved logins too.
-NO_CREDENTIAL_PROMPT = ("-c", "credential.interactive=false")
-# The deploy can take a moment to go live after the push returns.
+# A deploy takes a moment to go live, so the verify after a build retries.
 VERIFY_ATTEMPTS = 4
 VERIFY_INTERVAL_SECONDS = 6.0
 
 _OBSERVED_AT = re.compile(r'data-observed-at="([^"]+)"')
 
 MANUAL_STEPS = (
-    "리포트를 손으로 배포한 뒤 확인하세요:\n"
+    "리포트는 ChatGPT 앱 호스팅 UI에서 직접 배포해야 합니다:\n"
     f"  1) cd {SITE_DIR}\n"
     "  2) npm run build\n"
-    "  3) 평소 쓰시는 배포 UI로 올리기\n"
+    "  3) 앱 호스팅 UI에서 배포하기\n"
     "  4) python -m real_estate_finder publish-report --verify-only"
 )
 
@@ -98,56 +92,6 @@ def build_site(site_dir: Path = SITE_DIR) -> None:
         )
 
 
-def deploy_site(site_dir: Path = SITE_DIR, *, message: str | None = None) -> None:
-    """Commit the report data and push it to the hosting remote.
-
-    Every credential prompt is disabled. `GIT_TERMINAL_PROMPT` alone is not
-    enough: Git Credential Manager answers with a GUI dialog that a scheduled
-    scan can sit behind forever, so the helper is told never to ask. A saved
-    login still works; only the dialog is off.
-    """
-    env = dict(os.environ)
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    env["GCM_INTERACTIVE"] = "never"
-
-    def git(*args: str) -> subprocess.CompletedProcess[str]:
-        try:
-            return _run(
-                ["git", *NO_CREDENTIAL_PROMPT, *args],
-                site_dir,
-                env,
-                GIT_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            raise ManualPublishRequired(
-                f"git {args[0]}이(가) {GIT_TIMEOUT_SECONDS}초 안에 끝나지 않았습니다."
-                + "\n\n"
-                + MANUAL_STEPS
-            ) from None
-
-    git("add", str(REPORT_DATA))
-    if git("diff", "--cached", "--quiet").returncode != 0:
-        commit = git(
-            "commit", "-m", message or "Publish latest property report results"
-        )
-        if commit.returncode != 0:
-            raise ManualPublishRequired(
-                "리포트 데이터를 커밋하지 못했습니다:\n"
-                + _tail(commit.stderr or commit.stdout)
-                + "\n\n"
-                + MANUAL_STEPS
-            )
-
-    push = git("push", DEPLOY_REMOTE, f"HEAD:{DEPLOY_BRANCH}")
-    if push.returncode != 0:
-        raise ManualPublishRequired(
-            f"{DEPLOY_REMOTE} 원격으로 push하지 못했습니다:\n"
-            + _tail(push.stderr or push.stdout)
-            + "\n\n"
-            + MANUAL_STEPS
-        )
-
-
 def _fetch(url: str, timeout: float) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": "real-estate-finder"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -155,13 +99,31 @@ def _fetch(url: str, timeout: float) -> str:
 
 
 def live_observed_at(report_url: str, timeout: float = 20.0) -> str | None:
-    """The `observedAt` the deployed page is actually serving, if it exposes one."""
+    """The `observedAt` the deployed page is serving.
+
+    `None` covers two different situations — the site was unreachable, and the
+    site answered with a build too old to carry the marker at all. Neither one
+    may put the button on a card, so both collapse to the same answer here;
+    `describe_live` is what tells them apart for a human.
+    """
     try:
         html = _fetch(report_url, timeout)
     except (urllib.error.URLError, TimeoutError, OSError):
         return None
     match = _OBSERVED_AT.search(html)
     return match.group(1) if match else None
+
+
+def describe_live(report_url: str, timeout: float = 20.0) -> str:
+    """A human-readable account of what the deployed page is serving."""
+    try:
+        html = _fetch(report_url, timeout)
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return f"사이트에 접속하지 못했습니다 ({exc})"
+    match = _OBSERVED_AT.search(html)
+    if match:
+        return match.group(1)
+    return "표시된 기준 시각 없음 (배포된 빌드가 오래된 버전입니다)"
 
 
 def _same_moment(left: str, right: str) -> bool:
@@ -182,12 +144,3 @@ def is_live(expected_observed_at: str, report_url: str, *, attempts: int = 1) ->
         if observed and _same_moment(observed, expected_observed_at):
             return True
     return False
-
-
-def publish_report(
-    expected_observed_at: str, report_url: str, *, site_dir: Path = SITE_DIR
-) -> bool:
-    """Build, deploy, and verify. True only when the live page shows this scan."""
-    build_site(site_dir)
-    deploy_site(site_dir)
-    return is_live(expected_observed_at, report_url, attempts=VERIFY_ATTEMPTS)

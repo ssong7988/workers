@@ -8,7 +8,6 @@ from unittest import mock
 from real_estate_finder import service as service_module
 from real_estate_finder.models import AppConfig, Listing, LowFloorRule, SearchCondition
 from real_estate_finder.notifier import KakaoNotifier
-from real_estate_finder.publish import ManualPublishRequired
 from real_estate_finder.service import FinderService
 from real_estate_finder.storage import FileStore
 
@@ -125,7 +124,7 @@ class ServiceTests(unittest.TestCase):
                 CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
             )
             with mock.patch.object(service_module, "write_report_data"), mock.patch.object(
-                service_module, "publish_report", return_value=True
+                service_module, "is_live", return_value=True
             ):
                 service.smoke_test()
             self.assertEqual(len(image_sender.calls), 1)
@@ -202,7 +201,7 @@ class CardPathTests(unittest.TestCase):
             mock.patch.object(service_module, "build_card_image", fake_build),
             # Never touch the real site checkout or run a deploy from a test.
             mock.patch.object(service_module, "write_report_data"),
-            mock.patch.object(service_module, "publish_report", return_value=True),
+            mock.patch.object(service_module, "is_live", return_value=True),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -237,13 +236,13 @@ class CardPathTests(unittest.TestCase):
         notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
         with tempfile.TemporaryDirectory() as directory:
             store = FileStore(Path(directory))
-            with mock.patch.object(service_module, "publish_report", return_value=False):
+            with mock.patch.object(service_module, "is_live", return_value=False):
                 self._card_service(store, notifier).scan()
 
         self.assertEqual(len(image_sender.calls), 1, "카드는 그대로 나가야 한다")
-        self.assertIsNone(image_sender.calls[0][3], "발행 전이면 리포트 링크를 빼야 한다")
+        self.assertIsNone(image_sender.calls[0][3], "라이브 반영 전이면 리포트 링크를 빼야 한다")
 
-    def test_publish_failure_never_holds_up_the_alert(self) -> None:
+    def test_live_check_failure_never_holds_up_the_alert(self) -> None:
         image_sender = RecordingImageSender()
         sent: list[str] = []
         notifier = KakaoNotifier(
@@ -252,13 +251,11 @@ class CardPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = FileStore(Path(directory))
             with mock.patch.object(
-                service_module,
-                "publish_report",
-                side_effect=ManualPublishRequired("push 실패"),
+                service_module, "is_live", side_effect=OSError("사이트 접속 실패")
             ):
                 self._card_service(store, notifier).scan()
 
-        self.assertEqual(len(image_sender.calls), 1, "발행이 실패해도 급매 알림은 나가야 한다")
+        self.assertEqual(len(image_sender.calls), 1, "확인이 실패해도 급매 알림은 나가야 한다")
         self.assertIsNone(image_sender.calls[0][3])
         self.assertEqual(sent, [], "텍스트 경로로 떨어지면 안 된다")
 

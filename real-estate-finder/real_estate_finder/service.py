@@ -17,7 +17,7 @@ from .notifier import (
     scan_summary_message,
 )
 from .parsing import matches_condition
-from .publish import MANUAL_STEPS, ManualPublishRequired, publish_report
+from .publish import MANUAL_STEPS, is_live
 from .report import write_report_data
 from .storage import FileStore
 
@@ -221,21 +221,18 @@ class FinderService:
     def _publish_report(self, observed_at: str) -> str | None:
         """The report URL, but only once the live site serves this scan.
 
-        The report page bakes its data in at build time, so an unpublished scan
-        leaves the button opening whatever was deployed last. A button onto a
-        stale report is worse than no button, and publishing must never be able
-        to hold up an urgent alert, so every failure here degrades to `None`.
+        Deploying is a manual step through the app-hosting UI, so a scan cannot
+        publish; it can only check. A button onto a stale report is worse than
+        no button, so an unpublished scan sends the card without one, and any
+        failure to check degrades the same way rather than holding up an alert.
         """
         try:
-            if publish_report(observed_at, REPORT_URL):
+            if is_live(observed_at, REPORT_URL):
                 return REPORT_URL
-            print("발행한 리포트가 아직 라이브에 반영되지 않았습니다.")
-        except ManualPublishRequired as exc:
-            print("리포트 자동 배포 실패:")
-            print(exc)
-        except Exception as exc:
-            print(f"리포트 발행 실패: {exc}")
+            print("이번 결과는 아직 라이브에 반영되지 않았습니다.")
             print(MANUAL_STEPS)
+        except Exception as exc:
+            print(f"라이브 리포트 확인 실패: {exc}")
         print("전체 매물 보기 버튼 없이 카드만 보냅니다.")
         return None
 
