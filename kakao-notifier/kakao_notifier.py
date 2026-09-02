@@ -16,6 +16,10 @@ load_env(BASE_DIR / ".env")
 REST_API_KEY = os.environ.get("KAKAO_REST_API_KEY", "").strip()
 CLIENT_SECRET = os.environ.get("KAKAO_CLIENT_SECRET", "").strip()
 TOKEN_FILE = Path(os.environ.get("KAKAO_TOKEN_FILE", "data/kakao-token.json"))
+REPORT_URL = os.environ.get(
+    "KAKAO_REPORT_URL",
+    "https://my-property-report-20260902.ssong7988.chatgpt.site",
+).strip()
 if not TOKEN_FILE.is_absolute():
     TOKEN_FILE = BASE_DIR / TOKEN_FILE
 
@@ -69,7 +73,7 @@ def _send(access_token: str, message: str, link_url: str) -> tuple[int, dict]:
             "web_url": link_url,
             "mobile_web_url": link_url,
         },
-        "button_title": "네이버 부동산 열기",
+        "button_title": "전체 매물 보기",
     }
     return post_form_json(
         "https://kapi.kakao.com/v2/api/talk/memo/default/send",
@@ -79,7 +83,7 @@ def _send(access_token: str, message: str, link_url: str) -> tuple[int, dict]:
 
 
 def send_to_me(
-    message: str, link_url: str = "https://fin.land.naver.com/"
+    message: str, link_url: str = REPORT_URL
 ) -> None:
     if not REST_API_KEY or not CLIENT_SECRET:
         raise RuntimeError(".env의 REST API 키와 클라이언트 시크릿을 확인하세요.")
@@ -105,7 +109,7 @@ def main() -> None:
     parser.add_argument(
         "message", nargs="?", default="자동화 프로그램 카카오톡 연결 테스트입니다. ✅"
     )
-    parser.add_argument("--link", default="https://fin.land.naver.com/")
+    parser.add_argument("--link", default=REPORT_URL)
     args = parser.parse_args()
     send_to_me(args.message, args.link)
     print("카카오톡 '나와의 채팅'으로 메시지를 보냈습니다.")

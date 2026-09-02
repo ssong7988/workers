@@ -83,7 +83,7 @@ class FinderService:
         if pending_notifications:
             self._safe_send(
                 batch_listing_message(pending_notifications),
-                "https://fin.land.naver.com/",
+                "https://my-property-report-20260902.ssong7988.chatgpt.site",
             )
         result.finished_at = iso_now()
         self.store.append_observations(observed)
@@ -100,12 +100,12 @@ class FinderService:
         if result.success and now.weekday() in self.config.digest_weekdays and now.hour == self.config.digest_hour:
             self.send_digest(result.matched)
         elif result.failed_conditions:
-            self._safe_send(scan_summary_message(result), "https://fin.land.naver.com/")
+            self._safe_send(scan_summary_message(result), "https://my-property-report-20260902.ssong7988.chatgpt.site")
         return result
 
     def smoke_test(self) -> ScanResult:
         result = self.scan(notify_urgent=False, smoke=True)
-        self._safe_send(scan_summary_message(result, smoke=True), "https://fin.land.naver.com/")
+        self._safe_send(scan_summary_message(result, smoke=True), "https://my-property-report-20260902.ssong7988.chatgpt.site")
         if result.success:
             for listing in sorted(result.matched, key=_sort_key):
                 self._safe_send(listing_message(listing, urgent=listing in result.urgent), listing.url)
@@ -120,7 +120,7 @@ class FinderService:
                 if payload.get("active")
             ]
         summary = f"☀️ 과천 관심 매물 {len(listings)}건\n급매 우선·가격순으로 전송합니다."
-        self._safe_send(summary, "https://fin.land.naver.com/")
+        self._safe_send(summary, "https://my-property-report-20260902.ssong7988.chatgpt.site")
         for listing in sorted(listings, key=_sort_key):
             urgent = (
                 listing.effective_urgent_price_won is not None

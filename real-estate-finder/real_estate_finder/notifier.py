@@ -72,7 +72,11 @@ class KakaoNotifier:
         self.kakao_dir = kakao_dir
         self._sender = sender
 
-    def send(self, message: str, link_url: str = "https://fin.land.naver.com/") -> None:
+    def send(
+        self,
+        message: str,
+        link_url: str = "https://my-property-report-20260902.ssong7988.chatgpt.site",
+    ) -> None:
         if self._sender:
             self._sender(message, link_url)
             return
