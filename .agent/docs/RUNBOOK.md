@@ -2,11 +2,14 @@
 
 ## 메인 엔트리 포인트
 
-에이전트 없이 매물을 한 번 조회하고 카카오톡으로 보내는 가장 간단한 방법은 다음 파일을 더블클릭하는 것이다.
+에이전트 없이 실행하는 더블클릭 진입점은 두 개다.
 
 ```text
-real-estate-finder\run-scan.bat
+real-estate-finder\run-scan.bat      매물 조회. 급매/신규가 있을 때만 카카오톡 전송
+real-estate-finder\send-report.bat   저장된 조건충족 매물 전체를 카카오톡 카드 1통으로 전송
 ```
+
+`run-scan.bat`은 급매나 신규 매물이 없으면 카카오톡을 보내지 않는다. 이때도 창에 미전송 사유가 출력되므로, 조용히 끝나는 것과 실패를 혼동하지 않는다. 급매가 아니어도 조사 결과 전체를 지금 받고 싶으면 `send-report.bat`을 실행한다.
 
 PowerShell에서 직접 실행하려면 저장소 루트에서 다음 명령을 사용한다.
 
@@ -19,7 +22,9 @@ PowerShell에서 직접 실행하려면 저장소 루트에서 다음 명령을 
 1. 디버깅 포트 `9222`를 사용하는 전용 Edge 프로필을 실행한다.
 2. 네이버 로그인 상태를 확인하고, 로그인이 필요하면 최대 5분 동안 기다린다.
 3. `python -m real_estate_finder scan-once`로 매물을 조회한다.
-4. 조건에 맞는 결과를 카카오톡으로 전송한다.
+4. 급매 또는 신규 매물이 있으면 카카오톡 카드를 보내고, 없으면 미전송 사유를 출력한다.
+
+`send-report.bat`은 `python -m real_estate_finder send-digest`만 실행한다. 저장된 `state.json`의 활성 매물을 쓰므로 Edge 기동과 네이버 로그인이 필요 없다.
 
 ## 최초 한 번만 준비
 
@@ -50,7 +55,7 @@ python -m real_estate_finder smoke-test
 # 한 번 조회하고 필요한 카카오 알림 전송
 python -m real_estate_finder scan-once
 
-# 저장된 현재 매물 전체 보고를 카카오톡으로 전송
+# 저장된 현재 매물 전체 보고를 카카오톡으로 전송 (send-report.bat과 같은 동작)
 python -m real_estate_finder send-digest
 ```
 

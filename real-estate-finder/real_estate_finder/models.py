@@ -82,6 +82,9 @@ class ScanResult:
     matched: list[Listing] = field(default_factory=list)
     urgent: list[Listing] = field(default_factory=list)
     excluded_count: int = 0
+    # Why a Kakao message did or did not go out. A quiet scan and a broken scan
+    # look identical from the console without this.
+    notification: str = ""
 
     @property
     def success(self) -> bool:

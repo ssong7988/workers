@@ -66,6 +66,7 @@ class FileStore:
             "matched_count": len(result.matched),
             "urgent_count": len(result.urgent),
             "excluded_count": result.excluded_count,
+            "notification": result.notification,
         }
         with self.runs_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")

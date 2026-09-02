@@ -47,6 +47,12 @@ class FinderService:
         result = ScanResult(started_at=started, finished_at=started)
         collected_by_condition: dict[str, list[Listing]] = {}
         pending_notifications: list[tuple[Listing, bool, bool]] = []
+        # Counted only to explain a scan that sends nothing. Without them the
+        # console cannot tell "nothing to report" apart from "something broke".
+        urgent_hit = 0
+        urgent_repeat = 0
+        new_seen = 0
+        new_muted = 0
         try:
             collected_by_condition = self.collector.collect_all(conditions)
             for condition in conditions:
@@ -79,6 +85,8 @@ class FinderService:
                     and listing.price_won <= listing.effective_urgent_price_won
                 )
                 is_new = not bool(old)
+                urgent_hit += is_urgent
+                new_seen += is_new
                 should_alert = is_urgent and (
                     last_alert_price is None or listing.price_won < int(last_alert_price)
                 )
@@ -89,6 +97,9 @@ class FinderService:
                         last_alert_price = listing.price_won
                 elif condition.notify_new and is_new and notify_urgent and not smoke:
                     pending_notifications.append((listing, False, True))
+                else:
+                    urgent_repeat += is_urgent
+                    new_muted += is_new and not condition.notify_new
                 payload = listing.to_dict()
                 payload.update(
                     {
@@ -112,8 +123,24 @@ class FinderService:
                 (listing, *flags.get(listing.key, (False, False)))
                 for listing in result.matched
             ]
-            self._safe_send_card(
+            channel = self._safe_send_card(
                 items, heading="오늘의 매물", alerts=pending_notifications
+            )
+            urgent_alerts = sum(urgent for _, urgent, _ in pending_notifications)
+            result.notification = (
+                f"카카오 전송 완료({channel}): 급매 {urgent_alerts}건 · "
+                f"신규 {len(pending_notifications) - urgent_alerts}건 · "
+                f"카드에 조건충족 {len(result.matched)}건"
+            )
+        elif smoke:
+            result.notification = "smoke 모드: 정규 급매 판정을 건너뛰고 전체 카드를 보냅니다"
+        else:
+            result.notification = _no_alert_reason(
+                result,
+                urgent_hit=urgent_hit,
+                urgent_repeat=urgent_repeat,
+                new_seen=new_seen,
+                new_muted=new_muted,
             )
         result.finished_at = iso_now()
         self.store.append_observations(observed)
@@ -128,9 +155,10 @@ class FinderService:
         result = self.scan(notify_urgent=True)
         now = datetime.now(ZoneInfo(self.config.timezone))
         if result.success and now.weekday() in self.config.digest_weekdays and now.hour == self.config.digest_hour:
-            self.send_digest(result.matched)
+            result.notification = f"{self.send_digest(result.matched)} (정기 보고)"
         elif result.failed_conditions:
             self._safe_send(scan_summary_message(result), REPORT_URL)
+            result.notification = "카카오 전송 완료(텍스트): 수집 실패 요약을 보냈습니다"
         return result
 
     def smoke_test(self) -> ScanResult:
@@ -140,13 +168,14 @@ class FinderService:
             # arrives as one Kakao message: the card, carrying the original
             # image and the full report as its two buttons. This used to send a
             # summary plus one text per listing, which was 42 messages.
-            self.send_digest(result.matched)
+            result.notification = self.send_digest(result.matched)
         else:
             # Only when there is no card to send does a text go out instead.
             self._safe_send(scan_summary_message(result, smoke=True), REPORT_URL)
+            result.notification = "카카오 전송 완료(텍스트): 조회 요약을 보냈습니다"
         return result
 
-    def send_digest(self, listings: list[Listing] | None = None) -> None:
+    def send_digest(self, listings: list[Listing] | None = None) -> str:
         if listings is None:
             state = self.store.load_state()
             listings = [
@@ -156,7 +185,7 @@ class FinderService:
             ]
         if not listings:
             self._safe_send("☀️ 과천 관심 매물이 없습니다.", REPORT_URL)
-            return
+            return "카카오 전송 완료(텍스트): 활성 매물이 0건이라 빈 보고를 보냈습니다"
         items: list[CardItem] = [
             (
                 listing,
@@ -166,7 +195,8 @@ class FinderService:
             )
             for listing in sorted(listings, key=_sort_key)
         ]
-        self._safe_send_card(items, heading="과천 관심 매물")
+        channel = self._safe_send_card(items, heading="과천 관심 매물")
+        return f"카카오 전송 완료({channel}): 매물 {len(items)}건"
 
     def _safe_send_card(
         self,
@@ -174,7 +204,7 @@ class FinderService:
         *,
         heading: str,
         alerts: list[CardItem] | None = None,
-    ) -> None:
+    ) -> str:
         """Send the listings as one card image, degrading to text on any failure.
 
         The image exists to escape Kakao's 200-character text limit, but an
@@ -182,7 +212,11 @@ class FinderService:
         fallback carries `alerts` when given: 200 characters cannot hold the
         full list, and losing the urgent listing to truncation is the worst
         possible outcome.
+
+        Returns the channel that carried the message, so the caller can tell the
+        user which one it was.
         """
+        channel = "텍스트"
         if self.use_cards:
             try:
                 report_output = (
@@ -217,10 +251,12 @@ class FinderService:
                     width,
                     height,
                 )
-                return
+                return "카드 이미지"
             except Exception as exc:
                 print(f"카드 전송 실패, 텍스트로 대체합니다: {exc}")
+                channel = "텍스트 폴백"
         self._safe_send(batch_listing_message(alerts or items), REPORT_URL)
+        return channel
 
     def _publish_report(self, observed_at: str) -> str | None:
         """Link the report only when the hosted UI already serves this scan.
@@ -245,6 +281,44 @@ class FinderService:
         except Exception as exc:
             self.store.enqueue_notification(message, link_url, str(exc))
             raise
+
+
+def _no_alert_reason(
+    result: ScanResult,
+    *,
+    urgent_hit: int,
+    urgent_repeat: int,
+    new_seen: int,
+    new_muted: int,
+) -> str:
+    """Explain a scan that sent nothing.
+
+    Sending only on an alert is the intended policy, but staying silent about it
+    made a perfectly normal run look like a failed one.
+    """
+    if result.failed_conditions:
+        return (
+            "카카오 미전송: 수집이 실패해 알림을 보내지 않았습니다 "
+            f"(실패 조건 {len(result.failed_conditions)}개)"
+        )
+    if not result.matched:
+        return "카카오 미전송: 조건을 충족한 매물이 0건입니다"
+
+    reasons: list[str] = []
+    if not urgent_hit:
+        reasons.append("급매 기준(urgent_price_won) 이하로 내려온 매물 없음")
+    elif urgent_repeat:
+        reasons.append(f"급매 {urgent_repeat}건은 이미 같은 가격 이하로 알림을 보냈습니다")
+    if not new_seen:
+        reasons.append("처음 보는 매물 없음 (모두 이전 스캔에서 확인)")
+    elif new_muted:
+        reasons.append(f"신규 {new_muted}건은 notify_new가 꺼진 조건이라 알리지 않습니다")
+    reasons.append(
+        "지금 전체 매물을 카톡으로 받으려면: send-report.bat "
+        "(또는 python -m real_estate_finder send-digest)"
+    )
+    head = f"카카오 미전송: 조건충족 {len(result.matched)}건 중 알림 대상 0건"
+    return "\n".join([head, *(f"  - {reason}" for reason in reasons)])
 
 
 def _sort_key(listing: Listing) -> tuple[bool, int, int]:

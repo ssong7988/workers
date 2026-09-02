@@ -9,6 +9,8 @@
 - `kakao-notifier/`가 카카오 인증 토큰을 관리하고 이미지형 카카오톡 카드를 전송한다.
 - `property-report-site/site-app/`가 전체 매물 웹 리포트를 렌더링한다. 이 디렉터리는 루트와 별도의 중첩 Git 저장소다.
 - 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
+- 급매가 아닌 전체 결과를 카카오톡으로 보내는 진입점은 `real-estate-finder/send-report.bat`이며 `send-digest`를 실행한다. 브라우저와 네이버 로그인이 필요 없다.
+- `scan-once`는 급매 또는 신규 매물이 있을 때만 카카오톡을 보낸다. 보내지 않은 경우에도 사유를 콘솔에 출력하고 `data/scan-runs.jsonl`의 `notification` 필드에 기록한다.
 - 검색 설정은 `config/searches.yaml`에 있고 런타임 데이터 및 생성 결과물은 Git에서 제외한다.
 - 신규/급매 알림 또는 전체 보고의 카드 전송 경로는 UI의 `app/report-data.json`을 갱신하지만 자동 빌드/배포하지 않는다. 알림이 없는 일반 스캔은 이 파일을 갱신하지 않을 수 있다.
 - 현재 UI는 Codex Sites에 배포한다. JSON이 빌드 시점에 번들되므로 공개 리포트를 갱신하려면 명시적인 재빌드와 재배포가 필요하다.
@@ -18,15 +20,16 @@
 
 - 공개 리포트 URL: `https://my-property-report-20260902.ssong7988.chatgpt.site`
 - Codex Sites 프로젝트 ID: `appgprj_6a9769c089308191b155c20de009e2b2`
-- 현재 확인된 배포 버전: 5
-- 최근 조회 시각: `2026-09-02T19:32:19+09:00`
-- 최근 결과: 수집 119건, 조건 일치 41건, 단지 6개, 수집 실패 0건, 신규 급매 알림 0건, 리포트 급매 일치 1건
-- 위 데이터 기준 Sites 버전 5 배포와 호스팅 시각 일치를 확인했고, 41건 결과 카카오 카드 전송을 완료했다.
+- 현재 확인된 배포 버전: 5 (`2026-09-02T19:32:19+09:00` 기준)
+- 최근 조회 시각: `2026-09-02T20:28:23+09:00`
+- 최근 결과: 수집 119건, 조건 일치 41건, 단지 6개, 수집 실패 0건, 신규 급매 알림 0건
+- `send-report.bat`으로 41건 카드 전송을 완료했다. 공개 사이트가 아직 19:32 기준이라 `전체 매물 보기` 버튼 없이 카드만 나갔다.
+- **배포 대기**: `property-report-site/site-app/app/report-data.json`은 20:28 스냅샷으로 갱신·커밋되었고 `publish-report` 빌드도 끝났지만, Codex Sites 배포는 아직 수행하지 않았다. 배포 후 `publish-report --verify-only`로 시각을 확인하고, 버튼이 필요하면 `send-report.bat`을 다시 실행한다.
 - 카카오 공개 리포트 URL은 기본값 또는 `KAKAO_REPORT_URL`로 정한다.
 - 카카오 이미지는 카카오 이미지 업로드 API를 사용한다.
-- 마지막 확인 시 Sites UI 빌드 성공, Python 단위 테스트 78개 통과, `npm ci` 성공 상태였다.
+- 마지막 확인 시 Sites UI 빌드 성공, Python 단위 테스트 80개 통과, `npm ci` 성공 상태였다.
 - 관련 루트 커밋: `5f8d536`, `2f97b84`, `2c4b5cf`, `dd12006`
-- 관련 UI 저장소 커밋: `7170035`, `4d563ce`, `2977cc2`
+- 관련 UI 저장소 커밋: `853469a`, `7170035`, `4d563ce`, `2977cc2`
 
 ## Active Work
 
@@ -42,6 +45,7 @@
 ## Known Issues
 
 - `app/report-data.json`이 빌드 시점에 포함되므로 새 조회 데이터가 공개 사이트에 자동 반영되지 않는다.
+- Codex Sites 배포를 대신할 로컬 명령이 없다. UI 저장소의 `sites` 리모트 tip에는 `app/report-data.json`이 없어 현재 공개 페이지의 소스가 아니므로, 그 리모트로 push해도 배포되지 않는다. 배포는 Codex Sites 기능으로 수행한다.
 - 휴대전화에서 `127.0.0.1`/`localhost`는 서버 PC를 가리키지 않으며 카카오 웹 도메인으로도 부적합하다.
 - 마지막 `npm audit` 결과는 취약점 11개(낮음 1, 보통 2, 높음 8)였다. 호환성 검토 없이 강제 수정하지 않는다.
 - 루트와 UI가 중첩 Git 저장소이므로 UI 커밋 누락 또는 루트 포인터만 변경되는 실수가 생길 수 있다.

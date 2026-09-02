@@ -81,6 +81,8 @@ UI 변경 시 순서는 반드시 다음과 같다.
 |---|---|---|
 | `run-scan.bat` | 더블클릭용 PowerShell 래퍼 | Windows 실행 진입점 변경 |
 | `run-scan.ps1` | Edge CDP 실행/확인, 로그인 확인, `scan-once` 실행 | 브라우저 시작, 사용자 실행 실패 |
+| `send-report.bat` | 더블클릭용 PowerShell 래퍼 | 전체 보고 진입점 변경 |
+| `send-report.ps1` | `send-digest` 실행. 브라우저와 로그인 불필요 | 급매가 아닌 전체 결과 전송 |
 | `real_estate_finder/__main__.py` | `python -m real_estate_finder`를 CLI로 연결 | 거의 읽을 필요 없음 |
 | `real_estate_finder/cli.py` | 명령 정의, 객체 조립, 명령별 분기 | 새 명령 추가, 실행 흐름 파악 |
 | `real_estate_finder/service.py` | 수집 이후 필터, 상태, 알림, digest 조정 | 업무 규칙과 전체 처리 순서 변경 |
@@ -170,6 +172,9 @@ FinderService.scan
 5. `notify_new`가 켜진 조건은 신규 매물도 알린다.
 6. 이번에 보이지 않은 기존 매물은 해당 조건 수집이 성공한 경우에만 `active: false`로 바꾼다.
 7. 관측과 실행 이력을 남기고, 성공한 조건이 하나라도 있을 때 현재 상태를 저장한다.
+8. 전송했든 안 했든 그 사유를 `ScanResult.notification`에 담는다. `cli.py`가 이를 출력하고 `scan-runs.jsonl`에도 기록한다.
+
+`scan-once`는 급매도 신규도 없으면 카카오톡을 보내지 않는다. 이는 의도된 정책이지만 과거에는 아무 출력 없이 끝나 실패와 구분되지 않았다. `service._no_alert_reason()`이 그 사유(급매 기준 미달, 이미 알린 급매, `notify_new` 꺼짐, 신규 없음)를 조립하므로, 미전송을 조사할 때는 먼저 콘솔 출력이나 `scan-runs.jsonl`의 `notification`을 읽는다.
 
 수집기는 현재 한 번의 관심부동산 수집 실패를 모든 활성 조건 실패로 기록한다. 조건별 부분 성공처럼 보이는 구조가 일부 있지만, 현재 수집 구현은 사실상 전체 스냅샷 단위다.
 
@@ -268,7 +273,7 @@ FinderService._safe_send_card
 | `scan-once` | 수집, 상태/이력 기록, 신규·급매가 있으면 카카오 전송 |
 | `smoke-test` | 수집과 상태 기록, 정규 급매 이력은 소모하지 않고 전체 카드 전송 |
 | `scheduled-run` | `scan-once` 성격 + 평일 설정 시각에 digest 전송 |
-| `send-digest` | `state.json`의 활성 매물로 전체 카드 전송; 새 수집 없음 |
+| `send-digest` | `state.json`의 활성 매물로 전체 카드 전송; 새 수집 없음. `send-report.bat`이 이 명령을 부른다 |
 | `preview-card` | 저장된 활성 매물로 PNG만 생성; 카카오 전송 없음 |
 | `publish-report` | 현재 JSON 확인 후 `npm run build`; 배포는 별도 |
 | `publish-report --verify-only` | 공개 사이트의 기준 시각만 비교 |
@@ -336,6 +341,7 @@ npm run build:local
 - 공개 리포트 시각 검증 없이 `전체 매물 보기` 버튼을 강제로 넣지 않는다.
 - 수집 실패 시 기존 매물을 전부 비활성화하지 않는다.
 - 알림 렌더링 실패가 중요한 급매 알림 유실로 이어지지 않도록 텍스트 폴백을 유지한다.
+- 카카오를 보내지 않는 모든 경로는 그 사유를 남긴다. 조용한 종료는 실패와 구분되지 않는다.
 - 리포트 JSON 필드를 바꾸면 Python 생산자(`report.py`)와 TypeScript 소비자(`app/page.tsx`)를 함께 변경한다.
 - UI 변경은 중첩 저장소와 루트 포인터의 두 커밋 경계를 지킨다.
 

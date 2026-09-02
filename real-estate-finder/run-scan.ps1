@@ -2,7 +2,9 @@
 #
 # 1) Start Edge with a dedicated profile if the debugging port is unavailable.
 # 2) Check the Naver login and wait for the user to sign in when necessary.
-# 3) Scan listings and send the result to KakaoTalk.
+# 3) Scan listings. KakaoTalk is sent only when an urgent or new listing
+#    turns up; the reason is printed either way.
+#    Use send-report.bat to send the full result on demand.
 #
 # Double-click run-scan.bat to launch this script.
 
@@ -76,7 +78,7 @@ Write-Host "[2/3] Checking the Naver login..." -ForegroundColor Cyan
 & $Python -m real_estate_finder browser-login
 if ($LASTEXITCODE -ne 0) { throw "Naver login failed." }
 
-Write-Host "[3/3] Scanning listings and sending the KakaoTalk message..." -ForegroundColor Cyan
+Write-Host "[3/3] Scanning listings (KakaoTalk goes out only when there is something to report)..." -ForegroundColor Cyan
 & $Python -m real_estate_finder scan-once
 if ($LASTEXITCODE -ne 0) { throw "The property scan failed." }
 

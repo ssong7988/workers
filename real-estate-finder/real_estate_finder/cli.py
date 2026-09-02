@@ -250,13 +250,15 @@ def main(argv: list[str] | None = None) -> None:
             elif args.command == "scheduled-run":
                 result = service.scheduled_run()
             else:
-                service.send_digest()
-                print("저장된 매물 보고를 전송했습니다.")
+                print(service.send_digest())
                 return
         print(
             f"조회 완료: 수집 {result.collected_count}, 조건충족 {len(result.matched)}, "
             f"급매 {len(result.urgent)}, 실패 {len(result.failed_conditions)}"
         )
+        # Always say whether Kakao went out and why. A silent finish used to be
+        # indistinguishable from a failure.
+        print(result.notification)
         if not result.success:
             raise SystemExit(1)
     except (RuntimeError, ValueError) as exc:

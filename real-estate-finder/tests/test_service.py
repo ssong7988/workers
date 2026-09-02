@@ -88,8 +88,12 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(len(sent), 1)
 
             same = text_service(CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier)
-            self.assertEqual(len(same.scan().urgent), 0)
+            repeat = same.scan()
+            self.assertEqual(len(repeat.urgent), 0)
             self.assertEqual(len(sent), 1)
+            # The quiet run has to say why it was quiet.
+            self.assertIn("미전송", repeat.notification)
+            self.assertIn("이미", repeat.notification)
 
             lower = text_service(CONFIG, FakeCollector(make_listing(2_490_000_000)), store, notifier)
             self.assertEqual(len(lower.scan().urgent), 1)
@@ -152,6 +156,20 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(len(image_sender.calls), 0)
             self.assertEqual(len(sent), 1)
             self.assertIn("실패", sent[0])
+            self.assertIn("전송 완료", result.notification)
+
+    def test_collection_failure_is_the_stated_reason(self) -> None:
+        class BrokenCollector:
+            def collect_all(self, _conditions):
+                raise RuntimeError("수집 실패")
+
+        notifier = KakaoNotifier(Path("."), sender=lambda *_: None)
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            result = text_service(CONFIG, BrokenCollector(), store, notifier).scan()
+
+        self.assertIn("미전송", result.notification)
+        self.assertIn("수집", result.notification)
 
     def test_notify_new_without_urgent_threshold(self) -> None:
         condition = SearchCondition(
@@ -221,10 +239,11 @@ class CardPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = FileStore(Path(directory))
             service = FinderService(CONFIG, FakeCollector(make_listing(1)), store, notifier)
-            service.send_digest(self._digest_listings(30))
+            summary = service.send_digest(self._digest_listings(30))
 
         self.assertEqual(len(image_sender.calls), 1, "digest must be one message, not one per listing")
         self.assertEqual(len(self.built[0]), 30, "no listing may be dropped")
+        self.assertIn("30건", summary)
 
     def _card_service(self, store, notifier):
         return FinderService(
@@ -362,6 +381,28 @@ class CardPathTests(unittest.TestCase):
         self.assertEqual(len(result.matched), 1)
         self.assertEqual(image_sender.calls, [], "알림이 없으면 카드도 보내지 않는다")
         self.assertEqual(sent, [])
+        # Sending nothing is the policy; saying nothing about it is the bug.
+        self.assertIn("미전송", result.notification)
+        self.assertIn("조건충족 1건", result.notification)
+        self.assertIn("notify_new", result.notification)
+        self.assertIn("send-report.bat", result.notification)
+
+    def test_second_quiet_scan_says_nothing_is_new(self) -> None:
+        """The reported case: every matched listing was already seen."""
+        image_sender = RecordingImageSender()
+        notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
+        plain = make_listing(2_550_000_000)
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                CONFIG, MappingCollector({"weverfield": [plain]}), store, notifier
+            )
+            service.scan()
+            result = service.scan()
+
+        self.assertEqual(image_sender.calls, [])
+        self.assertIn("급매 기준", result.notification)
+        self.assertIn("처음 보는 매물 없음", result.notification)
 
     def test_fallback_text_carries_alerts_only(self) -> None:
         image_sender = RecordingImageSender(error=RuntimeError("렌더 실패"))
@@ -395,10 +436,11 @@ class CardPathTests(unittest.TestCase):
             service = FinderService(
                 CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
             )
-            service.scan()
+            result = service.scan()
 
         self.assertEqual(len(image_sender.calls), 1)
         self.assertEqual(sent, [], "the text path must not also fire")
+        self.assertIn("전송 완료(카드 이미지)", result.notification)
         _path, title, _description, link_url = image_sender.calls[0]
         self.assertIn("급매 1", title)
         self.assertEqual(link_url, service_module.REPORT_URL)
