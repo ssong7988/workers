@@ -17,7 +17,7 @@ from .notifier import (
     scan_summary_message,
 )
 from .parsing import matches_condition
-from .publish import MANUAL_STEPS, is_live
+from .publish import MANUAL_STEPS, build_site, is_live
 from .report import write_report_data
 from .storage import FileStore
 
@@ -30,12 +30,15 @@ class FinderService:
         store: FileStore,
         notifier: KakaoNotifier,
         use_cards: bool = True,
+        build_report: bool = True,
     ) -> None:
         self.config = config
         self.collector = collector
         self.store = store
         self.notifier = notifier
         self.use_cards = use_cards
+        # Hourly scans will want this off, with the build on its own schedule.
+        self.build_report = build_report
 
     def scan(self, *, notify_urgent: bool = True, smoke: bool = False) -> ScanResult:
         started = iso_now()
@@ -219,13 +222,19 @@ class FinderService:
         self._safe_send(batch_listing_message(alerts or items), REPORT_URL)
 
     def _publish_report(self, observed_at: str) -> str | None:
-        """The report URL, but only once the live site serves this scan.
+        """Build the report site, then link it only if the live page serves this scan.
 
-        Deploying is a manual step through the app-hosting UI, so a scan cannot
-        publish; it can only check. A button onto a stale report is worse than
-        no button, so an unpublished scan sends the card without one, and any
-        failure to check degrades the same way rather than holding up an alert.
+        Building leaves the deploy ready to go out, but the deploy itself is a
+        manual step in the app-hosting UI, so the button still waits on the
+        live check — a button onto a stale report is worse than no button.
+        Neither the build nor the check may hold up an alert, so both degrade
+        to a card without a button.
         """
+        if self.build_report:
+            try:
+                build_site()
+            except Exception as exc:
+                print(f"리포트 빌드 실패: {exc}")
         try:
             if is_live(observed_at, REPORT_URL):
                 return REPORT_URL

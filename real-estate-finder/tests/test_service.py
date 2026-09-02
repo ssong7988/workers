@@ -125,7 +125,7 @@ class ServiceTests(unittest.TestCase):
             )
             with mock.patch.object(service_module, "write_report_data"), mock.patch.object(
                 service_module, "is_live", return_value=True
-            ):
+            ), mock.patch.object(service_module, "build_site"):
                 service.smoke_test()
             self.assertEqual(len(image_sender.calls), 1)
             self.assertEqual(len(sent), 0)
@@ -202,6 +202,7 @@ class CardPathTests(unittest.TestCase):
             # Never touch the real site checkout or run a deploy from a test.
             mock.patch.object(service_module, "write_report_data"),
             mock.patch.object(service_module, "is_live", return_value=True),
+            mock.patch.object(service_module, "build_site"),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -229,6 +230,52 @@ class CardPathTests(unittest.TestCase):
         return FinderService(
             CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
         )
+
+    def test_scan_builds_the_report_site(self) -> None:
+        """Running the program rebuilds the site so the deploy is ready to go."""
+        image_sender = RecordingImageSender()
+        notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            with mock.patch.object(service_module, "build_site") as build:
+                self._card_service(store, notifier).scan()
+
+        self.assertEqual(build.call_count, 1, "스캔은 사이트를 빌드해야 한다")
+
+    def test_build_failure_never_holds_up_the_alert(self) -> None:
+        image_sender = RecordingImageSender()
+        sent: list[str] = []
+        notifier = KakaoNotifier(
+            Path("."), sender=lambda message, _url: sent.append(message), image_sender=image_sender
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            with mock.patch.object(
+                service_module, "build_site", side_effect=RuntimeError("타입 오류")
+            ):
+                self._card_service(store, notifier).scan()
+
+        self.assertEqual(len(image_sender.calls), 1, "빌드가 깨져도 카드는 나가야 한다")
+        self.assertEqual(sent, [], "텍스트 경로로 떨어지면 안 된다")
+
+    def test_build_can_be_turned_off_for_frequent_scans(self) -> None:
+        """Hourly scans will run with the build on its own schedule instead."""
+        image_sender = RecordingImageSender()
+        notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                CONFIG,
+                FakeCollector(make_listing(2_500_000_000)),
+                store,
+                notifier,
+                build_report=False,
+            )
+            with mock.patch.object(service_module, "build_site") as build:
+                service.scan()
+
+        self.assertEqual(build.call_count, 0)
+        self.assertEqual(len(image_sender.calls), 1, "빌드를 껐어도 카드는 나가야 한다")
 
     def test_unpublished_report_drops_the_button(self) -> None:
         """A button onto the previously deployed report is worse than no button."""
