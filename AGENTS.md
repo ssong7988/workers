@@ -7,6 +7,7 @@
 - 의미 있는 작업을 시작하기 전에 반드시 `.agent/PROJECT_STATE.md`를 끝까지 읽는다.
 - 현재 아키텍처, 배포 상태, 진행 중인 일, 알려진 문제, 주요 결정은 `.agent/PROJECT_STATE.md`에 있다. 기억이나 추측보다 이 파일을 우선한다.
 - 더 자세한 문서가 필요하면 `.agent/docs/`를 확인한다.
+- 사람 또는 자동화가 에이전트 없이 실행하는 방법과 엔트리 포인트는 `.agent/docs/RUNBOOK.md`를 기준으로 한다.
 - 아키텍처, 배포 상태, 활성 작업, 알려진 문제 또는 결정이 실질적으로 바뀌면 작업 종료 전에 `.agent/PROJECT_STATE.md`도 갱신한다.
 - 비밀번호, 토큰, 쿠키, 인증 코드와 같은 비밀정보는 문서나 Git에 기록하지 않는다.
 
@@ -49,6 +50,7 @@
 
 ## 주요 검증 명령
 
+- 사용자용 메인 엔트리 포인트: 저장소 루트에서 `.\real-estate-finder\run-scan.ps1` 또는 `real-estate-finder\run-scan.bat` 더블클릭
 - 수집기 테스트: `real-estate-finder/`에서 `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`
 - Sites UI 빌드: `property-report-site/site-app/`에서 `npm run build`
 - 로컬 UI 개발: 같은 경로에서 `npm run dev:local`

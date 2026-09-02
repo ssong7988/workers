@@ -7,7 +7,7 @@
 - `real-estate-finder/`가 네이버 부동산 매물을 수집하고 검색 조건, 급매 조건, 이전 상태를 기준으로 결과를 만든다.
 - `kakao-notifier/`가 카카오 인증 토큰을 관리하고 이미지형 카카오톡 카드를 전송한다.
 - `property-report-site/site-app/`가 전체 매물 웹 리포트를 렌더링한다. 이 디렉터리는 루트와 별도의 중첩 Git 저장소다.
-- 조회 진입점은 `run-scan.bat` 또는 `run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
+- 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
 - 검색 설정은 `config/searches.yaml`에 있고 런타임 데이터 및 생성 결과물은 Git에서 제외한다.
 - 스캔 결과는 UI의 `app/report-data.json`을 갱신하지만 자동 빌드/배포하지 않는다.
 - 현재 UI는 Codex Sites에 배포한다. JSON이 빌드 시점에 번들되므로 공개 리포트를 갱신하려면 명시적인 재빌드와 재배포가 필요하다.
@@ -30,6 +30,7 @@
 ## Active Work
 
 - 당장 진행 중인 코드 변경은 없다.
+- 에이전트 없는 수동 실행 절차는 `.agent/docs/RUNBOOK.md`에서 관리한다.
 - 운영 시 새 데이터 조회 후 공개 리포트를 갱신해야 하는 경우에만 UI 빌드/배포하고, 그 배포 데이터와 조회 시각이 일치하는지 확인한 뒤 카카오톡을 전송한다.
 - 향후 수집 결과와 매물 이력을 PostgreSQL에 저장하도록 데이터 계층을 전환한다.
 - PostgreSQL 데이터를 조회하는 Django 웹 애플리케이션을 구축하고, 고정 도메인 또는 안정적인 공개 URL로 서비스한다.

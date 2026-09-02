@@ -17,3 +17,18 @@ outputs/
 
 각 앱의 설치 및 실행 방법은 해당 폴더의 README에서 관리합니다.
 
+## 가장 빠른 실행
+
+에이전트 없이 매물을 한 번 조회하고 카카오톡으로 보내려면 다음 파일을 더블클릭합니다.
+
+```text
+real-estate-finder\run-scan.bat
+```
+
+PowerShell에서는 저장소 루트에서 다음과 같이 실행할 수 있습니다.
+
+```powershell
+.\real-estate-finder\run-scan.ps1
+```
+
+이 스크립트가 전용 Edge 실행, 네이버 로그인 확인, 매물 조회, 카카오톡 전송을 순서대로 처리합니다. 최초 설치와 문제 해결, 웹 화면 실행 방법은 [수동 실행 매뉴얼](.agent/docs/RUNBOOK.md)을 참고하세요.
