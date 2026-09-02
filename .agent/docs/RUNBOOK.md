@@ -63,8 +63,61 @@ cd property-report-site\site-app
 
 브라우저에서 `http://127.0.0.1:3000`을 연다. 이 주소는 해당 PC에서만 접근할 수 있으므로 카카오톡의 공개 링크로 사용할 수 없다.
 
+## Codex에서 UI 빌드·배포하기
+
+현재 공개 리포트는 Codex Sites 프로젝트에 배포된다. UI 소스가 변경됐거나 `property-report-site/site-app/app/report-data.json`의 새 조회 결과를 공개해야 할 때만 빌드·배포한다. 단순 매물 조회 때마다 실행하지 않는다.
+
+Codex에 아래처럼 요청하면 된다.
+
+```text
+.agent/PROJECT_STATE.md와 .agent/docs/RUNBOOK.md를 읽고,
+property-report-site/site-app의 최신 report-data.json 기준으로 UI를 빌드한 뒤
+기존 Codex Sites 프로젝트에 배포해줘.
+배포 후 공개 사이트의 observedAt이 report-data.json과 같은지 검증해줘.
+```
+
+배포 후 전체 매물 링크가 포함된 카카오톡 카드까지 보내려면 마지막 줄을 추가한다.
+
+```text
+검증에 성공하면 저장된 전체 매물을 send-digest로 카카오톡에 보내줘.
+```
+
+Codex가 수행해야 하는 실제 순서는 다음과 같다.
+
+1. `property-report-site/site-app/app/report-data.json`의 `observedAt`과 변경 내용을 확인한다.
+2. `real-estate-finder/`에서 아래 명령으로 Codex Sites용 빌드를 만든다.
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m real_estate_finder publish-report
+   ```
+
+   이 명령은 내부적으로 `property-report-site/site-app/`에서 `npm run build`를 실행하지만 배포까지 하지는 않는다.
+3. `property-report-site/site-app/.openai/hosting.json`의 기존 `project_id`를 사용해 Codex Sites에 새 버전을 저장하고 배포한다.
+4. 배포가 성공하면 `real-estate-finder/`에서 아래 명령으로 공개 페이지의 기준 시각을 검증한다.
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m real_estate_finder publish-report --verify-only
+   ```
+
+5. 링크가 포함된 전체 결과를 다시 보낼 필요가 있으면 다음 명령을 실행한다.
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m real_estate_finder send-digest
+   ```
+
+### 사람이 직접 할 수 있는 범위
+
+에이전트 없이도 다음 명령으로 배포용 UI 빌드까지는 할 수 있다.
+
+```powershell
+cd property-report-site\site-app
+npm run build
+```
+
+하지만 현재 저장소에는 Codex Sites 배포 전체를 대신하는 고정된 로컬 명령이 없다. 실제 버전 저장과 배포는 Codex의 Sites 기능을 사용해야 한다. `sites` Git remote에 임의로 직접 push하지 말고 위 요청문으로 Codex에 배포를 맡긴다.
+
 ## 현재 공개 리포트의 제한
 
-매물 조회 스크립트는 UI를 자동 빌드하거나 Codex Sites에 배포하지 않는다. 새 조회 결과를 현재 공개 리포트 URL에 반영하려면 UI 빌드와 Codex Sites 재배포를 별도로 수행해야 한다. 호스팅된 데이터의 조회 시각이 최신 결과와 다르면 카카오 카드의 `전체 매물 보기` 버튼은 생략된다.
+매물 조회 스크립트는 UI를 자동 빌드하거나 Codex Sites에 배포하지 않는다. 새 조회 결과를 현재 공개 리포트 URL에 반영하려면 위 절차로 UI 빌드와 Codex Sites 재배포를 별도로 수행해야 한다. 호스팅된 데이터의 조회 시각이 최신 결과와 다르면 카카오 카드의 `전체 매물 보기` 버튼은 생략된다.
 
 향후 PostgreSQL과 Django 웹 애플리케이션으로 전환하면, 조회 데이터가 데이터베이스에 저장되고 Django의 공개 URL에서 바로 조회되도록 이 절차를 대체한다.
