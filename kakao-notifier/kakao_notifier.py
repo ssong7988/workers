@@ -69,6 +69,7 @@ def _send(access_token: str, message: str, link_url: str) -> tuple[int, dict]:
             "web_url": link_url,
             "mobile_web_url": link_url,
         },
+        "button_title": "네이버 부동산 열기",
     }
     return post_form_json(
         "https://kapi.kakao.com/v2/api/talk/memo/default/send",
@@ -78,7 +79,7 @@ def _send(access_token: str, message: str, link_url: str) -> tuple[int, dict]:
 
 
 def send_to_me(
-    message: str, link_url: str = "https://developers.kakao.com"
+    message: str, link_url: str = "https://fin.land.naver.com/"
 ) -> None:
     if not REST_API_KEY or not CLIENT_SECRET:
         raise RuntimeError(".env의 REST API 키와 클라이언트 시크릿을 확인하세요.")
@@ -104,7 +105,7 @@ def main() -> None:
     parser.add_argument(
         "message", nargs="?", default="자동화 프로그램 카카오톡 연결 테스트입니다. ✅"
     )
-    parser.add_argument("--link", default="https://developers.kakao.com")
+    parser.add_argument("--link", default="https://fin.land.naver.com/")
     args = parser.parse_args()
     send_to_me(args.message, args.link)
     print("카카오톡 '나와의 채팅'으로 메시지를 보냈습니다.")
