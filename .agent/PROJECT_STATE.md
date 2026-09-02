@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-02
+마지막 갱신: 2026-09-03
 
 ## Current Architecture
 
@@ -20,16 +20,16 @@
 
 - 공개 리포트 URL: `https://my-property-report-20260902.ssong7988.chatgpt.site`
 - Codex Sites 프로젝트 ID: `appgprj_6a9769c089308191b155c20de009e2b2`
-- 현재 확인된 배포 버전: 6 (`2026-09-02T21:29:14+09:00` 배포 완료)
-- 최근 조회 시각: `2026-09-02T20:28:23+09:00`
+- 현재 확인된 배포 버전: 7 (`2026-09-03T08:44:18+09:00` 배포 완료)
+- 최근 조회 시각: `2026-09-03T08:38:55+09:00`
 - 최근 결과: 수집 119건, 조건 일치 41건, 단지 6개, 수집 실패 0건, 신규 급매 알림 0건
-- `send-report.bat`으로 41건 카드 전송을 완료했다. 당시 공개 사이트가 19:32 기준이라 `전체 매물 보기` 버튼 없이 카드만 나갔다.
-- `property-report-site/site-app/app/report-data.json`의 20:28 스냅샷을 Codex Sites 버전 6으로 배포했고, `publish-report --verify-only`에서 공개 사이트의 `observedAt`이 `2026-09-02T20:28:23+09:00`로 일치함을 확인했다. 링크가 포함된 카드가 필요하면 `send-report.bat`을 다시 실행한다.
+- `data/state.json`의 최신 활성 매물 41건으로 `app/report-data.json`을 갱신해 Codex Sites 버전 7로 배포했다.
+- `publish-report --verify-only`에서 공개 사이트의 `observedAt`이 `2026-09-03T08:38:55+09:00`로 일치함을 확인한 뒤, `send-report.ps1`로 `전체 매물 보기` 링크가 포함된 카카오 카드 1통을 전송했다.
 - 카카오 공개 리포트 URL은 기본값 또는 `KAKAO_REPORT_URL`로 정한다.
 - 카카오 이미지는 카카오 이미지 업로드 API를 사용한다.
 - 마지막 확인 시 Sites UI 빌드 성공, Python 단위 테스트 80개 통과, `npm ci` 성공 상태였다.
 - 관련 루트 커밋: `5f8d536`, `2f97b84`, `2c4b5cf`, `dd12006`
-- 관련 UI 저장소 커밋: `853469a`, `7170035`, `4d563ce`, `2977cc2`
+- 관련 UI 저장소 커밋: `cae23b2`, `853469a`, `7170035`, `4d563ce`, `2977cc2`
 
 ## Active Work
 
