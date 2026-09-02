@@ -17,6 +17,7 @@ from .notifier import (
     scan_summary_message,
 )
 from .parsing import matches_condition
+from .publish import MANUAL_STEPS, ManualPublishRequired, publish_report
 from .report import write_report_data
 from .storage import FileStore
 
@@ -187,12 +188,14 @@ class FinderService:
                     / "app"
                     / "report-data.json"
                 )
+                observed_at = max(listing.observed_at for listing, _, _ in items)
                 write_report_data(
                     [listing for listing, _, _ in items],
                     self.config,
                     report_output,
-                    observed_at=max(listing.observed_at for listing, _, _ in items),
+                    observed_at=observed_at,
                 )
+                report_link = self._publish_report(observed_at)
                 image_path, width, height = build_card_image(
                     items,
                     self.store.data_dir / "cards" / "card.png",
@@ -206,7 +209,7 @@ class FinderService:
                     image_path,
                     card_heading(items),
                     card_caption(items),
-                    REPORT_URL,
+                    report_link,
                     width,
                     height,
                 )
@@ -214,6 +217,27 @@ class FinderService:
             except Exception as exc:
                 print(f"카드 전송 실패, 텍스트로 대체합니다: {exc}")
         self._safe_send(batch_listing_message(alerts or items), REPORT_URL)
+
+    def _publish_report(self, observed_at: str) -> str | None:
+        """The report URL, but only once the live site serves this scan.
+
+        The report page bakes its data in at build time, so an unpublished scan
+        leaves the button opening whatever was deployed last. A button onto a
+        stale report is worse than no button, and publishing must never be able
+        to hold up an urgent alert, so every failure here degrades to `None`.
+        """
+        try:
+            if publish_report(observed_at, REPORT_URL):
+                return REPORT_URL
+            print("발행한 리포트가 아직 라이브에 반영되지 않았습니다.")
+        except ManualPublishRequired as exc:
+            print("리포트 자동 배포 실패:")
+            print(exc)
+        except Exception as exc:
+            print(f"리포트 발행 실패: {exc}")
+            print(MANUAL_STEPS)
+        print("전체 매물 보기 버튼 없이 카드만 보냅니다.")
+        return None
 
     def _safe_send(self, message: str, link_url: str) -> None:
         try:

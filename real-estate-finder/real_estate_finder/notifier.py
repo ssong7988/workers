@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 from typing import Callable
 
 from .models import Listing, ScanResult
 
 
-REPORT_URL = "https://my-property-report-20260902.ssong7988.chatgpt.site"
+# Same environment variable the standalone kakao-notifier CLI reads, so the
+# hosted report lives at one address for both entry points.
+REPORT_URL = os.environ.get(
+    "KAKAO_REPORT_URL", "https://my-property-report-20260902.ssong7988.chatgpt.site"
+).strip()
 # Kakao feed templates cap the title and description; the card image carries
 # the detail, so these only ever hold a short summary.
 CAPTION_LIMIT = 180

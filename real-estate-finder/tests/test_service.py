@@ -8,6 +8,7 @@ from unittest import mock
 from real_estate_finder import service as service_module
 from real_estate_finder.models import AppConfig, Listing, LowFloorRule, SearchCondition
 from real_estate_finder.notifier import KakaoNotifier
+from real_estate_finder.publish import ManualPublishRequired
 from real_estate_finder.service import FinderService
 from real_estate_finder.storage import FileStore
 
@@ -123,7 +124,9 @@ class ServiceTests(unittest.TestCase):
             service = FinderService(
                 CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
             )
-            with mock.patch.object(service_module, "write_report_data"):
+            with mock.patch.object(service_module, "write_report_data"), mock.patch.object(
+                service_module, "publish_report", return_value=True
+            ):
                 service.smoke_test()
             self.assertEqual(len(image_sender.calls), 1)
             self.assertEqual(len(sent), 0)
@@ -195,9 +198,14 @@ class CardPathTests(unittest.TestCase):
             out_path.write_bytes(b"png")
             return out_path, 1080, 4992
 
-        patcher = mock.patch.object(service_module, "build_card_image", fake_build)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (
+            mock.patch.object(service_module, "build_card_image", fake_build),
+            # Never touch the real site checkout or run a deploy from a test.
+            mock.patch.object(service_module, "write_report_data"),
+            mock.patch.object(service_module, "publish_report", return_value=True),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _digest_listings(self, count: int) -> list[Listing]:
         listings = []
@@ -217,6 +225,51 @@ class CardPathTests(unittest.TestCase):
 
         self.assertEqual(len(image_sender.calls), 1, "digest must be one message, not one per listing")
         self.assertEqual(len(self.built[0]), 30, "no listing may be dropped")
+
+    def _card_service(self, store, notifier):
+        return FinderService(
+            CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
+        )
+
+    def test_unpublished_report_drops_the_button(self) -> None:
+        """A button onto the previously deployed report is worse than no button."""
+        image_sender = RecordingImageSender()
+        notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            with mock.patch.object(service_module, "publish_report", return_value=False):
+                self._card_service(store, notifier).scan()
+
+        self.assertEqual(len(image_sender.calls), 1, "카드는 그대로 나가야 한다")
+        self.assertIsNone(image_sender.calls[0][3], "발행 전이면 리포트 링크를 빼야 한다")
+
+    def test_publish_failure_never_holds_up_the_alert(self) -> None:
+        image_sender = RecordingImageSender()
+        sent: list[str] = []
+        notifier = KakaoNotifier(
+            Path("."), sender=lambda message, _url: sent.append(message), image_sender=image_sender
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            with mock.patch.object(
+                service_module,
+                "publish_report",
+                side_effect=ManualPublishRequired("push 실패"),
+            ):
+                self._card_service(store, notifier).scan()
+
+        self.assertEqual(len(image_sender.calls), 1, "발행이 실패해도 급매 알림은 나가야 한다")
+        self.assertIsNone(image_sender.calls[0][3])
+        self.assertEqual(sent, [], "텍스트 경로로 떨어지면 안 된다")
+
+    def test_published_report_keeps_the_button(self) -> None:
+        image_sender = RecordingImageSender()
+        notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            self._card_service(store, notifier).scan()
+
+        self.assertEqual(image_sender.calls[0][3], service_module.REPORT_URL)
 
     def _matched_set(self):
         """One urgent listing plus two that merely match the condition."""

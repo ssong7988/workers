@@ -15,6 +15,15 @@ from .config import load_config, validate_config
 from .models import Listing
 from .notifier import REPORT_URL, KakaoNotifier
 from .parsing import explain_condition
+from .publish import (
+    SITE_DIR,
+    VERIFY_ATTEMPTS,
+    ManualPublishRequired,
+    build_site,
+    deploy_site,
+    is_live,
+    live_observed_at,
+)
 from .service import FinderService
 from .storage import FileStore
 
@@ -80,6 +89,15 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument(
         "--out", type=Path, default=PROJECT_DIR / "data" / "card-preview.png"
     )
+    publish = commands.add_parser(
+        "publish-report",
+        help="현재 리포트 데이터를 빌드·배포하고 라이브에 반영됐는지 확인",
+    )
+    publish.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="빌드와 배포는 건너뛰고 라이브 반영 여부만 확인",
+    )
     explain = commands.add_parser(
         "explain-filters",
         help="수집된 매물이 조건을 통과했는지, 아니면 왜 빠졌는지 출력",
@@ -131,9 +149,45 @@ def _explain_filters(config, store: FileStore, show_passed: bool) -> None:
         print()
 
 
+def _publish_report(verify_only: bool) -> None:
+    """Publish the report the last scan wrote, then prove the live page shows it.
+
+    The page imports its data at build time, so "wrote the JSON" and "the button
+    opens the right report" are two different things; only the live check tells
+    them apart.
+    """
+    report_data = SITE_DIR / "app" / "report-data.json"
+    if not report_data.exists():
+        raise RuntimeError(f"리포트 데이터가 없습니다: {report_data}")
+    data = json.loads(report_data.read_text(encoding="utf-8"))
+    observed_at = data["observedAt"]
+    total = sum(len(item["listings"]) for item in data["complexes"])
+    print(
+        f"발행 대상: 단지 {len(data['complexes'])}개, 매물 {total}건, 기준 {observed_at}"
+    )
+    print(f"현재 라이브: {live_observed_at(REPORT_URL) or '확인 실패'}")
+
+    if not verify_only:
+        print("사이트를 빌드합니다...")
+        build_site()
+        try:
+            deploy_site()
+        except ManualPublishRequired as exc:
+            print(exc)
+
+    if is_live(observed_at, REPORT_URL, attempts=VERIFY_ATTEMPTS):
+        print(f"발행 완료: {REPORT_URL} 가 {observed_at} 결과를 보여줍니다.")
+        return
+    print(f"아직 반영되지 않았습니다: {REPORT_URL}")
+    raise SystemExit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "publish-report":
+            _publish_report(args.verify_only)
+            return
         if args.config.name == "searches.local.yaml" and not args.config.exists():
             args.config = PROJECT_DIR / "config" / "searches.yaml"
         config = load_config(args.config)
