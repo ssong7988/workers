@@ -19,6 +19,58 @@ EDGE_LAUNCH_COMMAND = (
 )
 
 
+# Naver states, on the screen itself, how much there is to collect: a bundled
+# card says how many agents registered the same unit, and the complex header
+# counts the cards per trade type. Both are used to prove nothing was skipped.
+AGENT_COUNT_RE = re.compile(r"중개사\s*(\d+)\s*곳")
+TRADE_COUNT_RE = re.compile(r"^(매매|전세|월세|단기)\s*([\d,]+)$")
+# The listing pane's own header, which counts what the current filters left.
+# The lookbehind keeps the agency advertisement's "단지 보유 매물 16개" out.
+LIST_COUNT_RE = re.compile(r"(?<!보유 )매물\s*([\d,]+)\s*개")
+
+# Shared browser-side helpers. Naver hashes its CSS module class names per
+# build, so use the stable list element and fall back to climbing from the
+# controls that every card carries.
+_CARD_HELPERS_JS = r"""
+    const hasArea = node => /전용\s*\d/.test(node.innerText || '');
+    const collectCards = () => {
+        const list = document.querySelector('ul[class*="ComplexArticleTab"]');
+        if (list) {
+            return [...list.children].filter(item => item.tagName === 'LI' && hasArea(item));
+        }
+        const found = new Set();
+        for (const root of document.querySelectorAll('button, a[href*="/articles/"]')) {
+            if (!(root.textContent || '').includes('매물목록') &&
+                !(root.getAttribute('href') || '').includes('/articles/')) continue;
+            let card = root.closest('li');
+            while (card && !hasArea(card)) card = card.parentElement?.closest('li') || null;
+            if (card) found.add(card);
+        }
+        return [...found];
+    };
+    const cardArticles = card => {
+        const byHref = new Map();
+        for (const anchor of card.querySelectorAll('a[href*="/articles/"]')) {
+            const href = anchor.getAttribute('href') || '';
+            if (!href) continue;
+            // Climb until the next parent would hold a second article link, so
+            // each row's own price stays beside its own href.
+            let item = anchor;
+            while (item.parentElement && item.parentElement !== card) {
+                const parent = item.parentElement;
+                if (parent.querySelectorAll('a[href*="/articles/"]').length > 1) break;
+                item = parent;
+            }
+            const text = (item.innerText || anchor.innerText || '').trim();
+            if (!byHref.has(href) || text.length > byHref.get(href).text.length) {
+                byHref.set(href, {href, text});
+            }
+        }
+        return [...byHref.values()];
+    };
+"""
+
+
 def _cdp_help(endpoint: str) -> str:
     """Explain how to start the browser this program attaches to.
 
@@ -61,8 +113,21 @@ class NaverBrowserCollector:
     LOGIN_WAIT_SECONDS = 300
     # Runaway guard only; the saved-complex count comes from the screen.
     MAX_FAVORITE_COMPLEXES = 30
-    MAX_LISTINGS_PER_COMPLEX = 120
-    WORLD_MARK_COMPLEX_IDS = {"104517"}
+    # Runaway guards only; the screen's own counts decide when a scan is done.
+    MAX_LISTINGS_PER_COMPLEX = 300
+    MAX_SCROLL_ROUNDS = 120
+    # Narrow the screen before collecting. 86 rather than 85 because
+    # explain_condition() passes 84-1 ~ 84+2 for every configured 84 type, and a
+    # tighter screen filter would drop those listings before Python ever saw them.
+    TRADE_TYPE = "매매"
+    SCREEN_AREA_MIN_M2 = 80
+    SCREEN_AREA_MAX_M2 = 86
+    MAX_AREA_OPTIONS = 40
+    TRADE_TYPE_NAMES = ("매매", "전세", "월세", "단기임대", "단기")
+    ALL_TRADE_TYPES_LABEL = "전체거래유형"
+    # Every trade type starts checked; narrowing to sales means unchecking
+    # the others rather than selecting 매매.
+    TRADE_OPTIONS_TO_CLEAR = ("전세", "월세", "단기임대")
 
     def __init__(
         self,
@@ -276,259 +341,568 @@ class NaverBrowserCollector:
         if heading.count() == 0:
             raise CollectionError(f"{complex_info['name']}: 단지 매물 화면 이동을 확인하지 못했습니다.")
 
-        # Worldmark is limited more tightly to exclusive 84~85㎡. The other
-        # configured 84 groups retain the user's broader 83~86㎡ UI selection.
-        if complex_info["complex_id"] in self.WORLD_MARK_COMPLEX_IDS:
-            self._select_similar_exclusive_area(page, minimum=84, maximum=85.999)
-        else:
-            self._select_similar_exclusive_area(page, minimum=83, maximum=86)
-
-        # Naver virtualizes this list: scrolling first and expanding afterwards
-        # leaves only the last few cards in the DOM. Capture each viewport before
-        # moving on so bundled cards that disappear are not lost.
-        rows: list[dict] = []
-        stable_scrolls = 0
-        previous_signature = ""
-        for _ in range(80):
-            rows.extend(self._expand_listing_groups(page))
-            rows.extend(self._visible_listing_rows(page))
-            signature = self._visible_listing_signature(page)
-            page.mouse.wheel(0, 1200)
-            page.wait_for_timeout(500)
-            current_signature = self._visible_listing_signature(page)
-            if current_signature == signature or current_signature == previous_signature:
-                stable_scrolls += 1
-            else:
-                stable_scrolls = 0
-            previous_signature = current_signature
-            if stable_scrolls >= 3:
-                break
-
-        rows.extend(self._expand_listing_groups(page))
-        rows.extend(self._visible_listing_rows(page))
+        expected = self._apply_screen_filters(page)
+        groups = self._collect_complex_cards(page, expected)
+        if len(groups) < expected:
+            # A card can still be missed when the list grows underneath the
+            # scroll position while a bundle expands. One more pass from the top
+            # merges into the same groups, so nothing already read is lost.
+            groups = self._collect_complex_cards(page, expected, groups)
+        if len(groups) < expected:
+            raise CollectionError(
+                f"{complex_info['name']}: 화면은 매물 {expected}건인데 "
+                f"{len(groups)}건만 읽었습니다."
+            )
 
         listings = []
-        seen: set[str] = set()
-        for row in rows:
-            listing_id, href = _pick_representative_article(row["articles"])
+        for group in groups:
+            articles = list(group["articles"].values())
+            listing_id, href = _pick_representative_article(articles)
             if not listing_id:
-                fingerprint = f"{complex_info['complex_id']}|{row['text']}"
+                fingerprint = f"{complex_info['complex_id']}|{group['text']}"
                 listing_id = "card-" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:20]
                 href = complex_info["href"]
-            if listing_id in seen:
-                continue
-            seen.add(listing_id)
             parsed = _parse_favorite_listing_text(
-                row["text"], listing_id, complex_info["name"], href
+                group["text"], listing_id, complex_info["name"], href
             )
             if parsed:
                 listings.append(parsed)
-            if len(listings) >= self.MAX_LISTINGS_PER_COMPLEX:
+        # card_count covers every trade type; listing_count only the sale cards
+        # _parse_favorite_listing_text keeps, so the two differ by design.
+        return {
+            **complex_info,
+            "expected_count": expected,
+            "card_count": len(groups),
+            "listing_count": len(listings),
+            "listings": listings,
+        }
+
+    def _collect_complex_cards(
+        self, page, expected: int, groups: list[dict] | None = None
+    ) -> list[dict]:
+        """Read the listing pane from top to bottom, expanding bundles on the way.
+
+        Every card is re-read on every pass and merged by article number, so a
+        bundle captured while it was still rendering gets completed later
+        instead of being lost.
+        """
+        groups = groups if groups is not None else []
+        self._scroll_listing_to_top(page)
+        stable = 0
+        seen_height = -1
+        seen_count = -1
+        for _ in range(self.MAX_SCROLL_ROUNDS):
+            for row in self._expand_listing_groups(page):
+                _merge_article_rows(groups, row)
+            for row in self._visible_listing_rows(page):
+                _merge_article_rows(groups, row)
+            if len(groups) >= expected and self._listing_scroll_state(page)["at_bottom"]:
+                return groups
+            state = self._scroll_listing_view(page)
+            page.wait_for_timeout(700)
+            # Reaching the bottom is not the end: this list appends more cards
+            # there, and the old 1.5s stall check gave up before they arrived.
+            grew = state["height"] > seen_height or len(groups) > seen_count
+            seen_height = max(seen_height, state["height"])
+            seen_count = max(seen_count, len(groups))
+            if state["at_bottom"] and not state["moved"] and not grew:
+                stable += 1
+            else:
+                stable = 0
+            if stable >= 3:
                 break
-        return {**complex_info, "listing_count": len(listings), "listings": listings}
+        return groups
+
+    def _apply_screen_filters(self, page) -> int:
+        """Narrow the screen to sale listings of the wanted area, and report how
+        many cards that leaves.
+
+        Collecting the unfiltered complex was correct but meant working through
+        every trade type and every area, around 83 cards per complex. These are
+        the filters a person would click, and the list header then states the
+        count the scan has to account for.
+        """
+        # A popover left open by an earlier complex would swallow these clicks.
+        self._close_filter_popover(page, self._area_filter_chip(page))
+        self._close_filter_popover(page, self._trade_filter_chip(page))
+        # Naver's single-page app remembers an area selection across complexes,
+        # so clear it before choosing again.
+        self._reset_exclusive_area_filter(page)
+        tabs = self._trade_tab_counts(page)
+        self._select_trade_type(page, tabs)
+        self._select_similar_exclusive_area(
+            page, self.SCREEN_AREA_MIN_M2, self.SCREEN_AREA_MAX_M2
+        )
+
+        expected = self._settled_list_card_count(page)
+        sale = tabs.get(self.TRADE_TYPE, 0)
+        if expected > sale:
+            raise CollectionError(
+                f"매매 {sale}건보다 많은 {expected}건이 목록에 남았습니다. "
+                "거래유형·면적 필터가 적용되지 않았습니다."
+            )
+        return expected
+
+    def _select_trade_type(self, page, tabs: dict[str, int]) -> None:
+        """Set the trade-type filter to sales only."""
+        chip = self._trade_filter_chip(page)
+        if chip is None:
+            raise CollectionError("매물 화면에서 거래유형 필터를 찾지 못했습니다.")
+        self._open_filter_popover(page, chip, "거래유형")
+
+        for name in self.TRADE_OPTIONS_TO_CLEAR:
+            option = self._filter_option(page, name)
+            if option is not None and self._filter_label_checked(option):
+                option.click()
+                page.wait_for_timeout(250)
+        option = self._filter_option(page, self.TRADE_TYPE)
+        if option is None:
+            raise CollectionError(
+                f"거래유형 필터에서 {self.TRADE_TYPE} 항목을 찾지 못했습니다."
+            )
+        if not self._filter_label_checked(option):
+            option.click()
+            page.wait_for_timeout(400)
+
+        # Leaving this popover open makes later scrolling move the menu rather
+        # than the listing list, and the list only refreshes once it closes.
+        self._close_filter_popover(page, self._trade_filter_chip(page))
+
+        # The header count is what the rest of the scan is measured against, so
+        # do not move on until it actually shows the sale-only list.
+        sale = tabs.get(self.TRADE_TYPE, 0)
+        self._wait_for_list_card_count(page, sale, f"거래유형 {self.TRADE_TYPE}")
+
+    def _trade_filter_chip(self, page):
+        """The trade-type filter chip.
+
+        Its label is whatever is selected, so it reads 전체거래유형, or 매매, or
+        a list such as "전세, 월세". Match on that shape rather than on a fixed
+        set of names.
+        """
+
+        def matches(label: str) -> bool:
+            if label == self.ALL_TRADE_TYPES_LABEL:
+                return True
+            parts = [part.strip() for part in label.split(",") if part.strip()]
+            return bool(parts) and all(part in self.TRADE_TYPE_NAMES for part in parts)
+
+        return self._filter_chip(page, matches)
+
+    def _area_filter_chip(self, page):
+        """The exclusive-area chip; its label becomes the selection once made."""
+        return self._filter_chip(
+            page, lambda label: "면적" in label or "㎡" in label
+        )
+
+    def _open_filter_popover(self, page, chip, what: str) -> None:
+        """Click a filter chip and wait for its options to render.
+
+        A fixed pause here was not enough: the options arrive a moment later,
+        and another popover may still be closing over them.
+        """
+        for _ in range(3):
+            if self._filter_popover_open(page):
+                return
+            chip.click()
+            for _ in range(10):
+                page.wait_for_timeout(300)
+                if self._filter_popover_open(page):
+                    return
+        raise CollectionError(f"{what} 필터 팝오버가 열리지 않았습니다.")
+
+    def _filter_popover_open(self, page) -> bool:
+        return (
+            self._first_visible(
+                page.locator('label[class*="CheckboxLayer"]'), min_size=8
+            )
+            is not None
+        )
+
+    def _close_filter_popover(self, page, chip) -> None:
+        """Close an open filter popover.
+
+        This matters twice over: an open popover swallows the scrolling meant
+        for the listing list, and the results only refresh once it closes.
+        """
+        if chip is not None and self._filter_popover_open(page):
+            chip.click()
+            page.wait_for_timeout(500)
+
+    def _wait_for_list_card_count(self, page, expected: int, what: str) -> None:
+        """Wait for the header to show the count a filter should have produced.
+
+        Sampling for a steady value instead would settle on the pre-filter
+        count whenever the refresh is slower than the sampling window.
+        """
+        count = -1
+        for _ in range(22):
+            count = self._list_card_count(page)
+            if count == expected:
+                return
+            page.wait_for_timeout(700)
+        raise CollectionError(
+            f"{what} 필터 후 목록이 {expected}건으로 갱신되지 않았습니다 (현재 {count}건)."
+        )
+
+    @staticmethod
+    def _filter_chip(page, matches):
+        """One of the filter chips above the listing list.
+
+        These chips expose no accessible name a role lookup can match -- their
+        text lives in a nested span -- so they are located by that rendered
+        text. The 매매65 summary tab is excluded by the chip class: it carries
+        its count, while the chip does not.
+        """
+        chips = page.locator('button[class*="ChipsItem"]')
+        for index in range(chips.count()):
+            chip = chips.nth(index)
+            if not chip.is_visible():
+                continue
+            if matches((chip.inner_text() or "").strip()):
+                return chip
+        return None
+
+    def _filter_option(self, page, name: str):
+        """One option inside an open filter popover.
+
+        Naver builds these as a label wrapping a hidden control, but falls back
+        to plain buttons in places; skip the chip that opened the popover, which
+        carries the same text once it is the current selection.
+        """
+        pattern = re.compile(rf"^{re.escape(name)}$")
+        for selector in ('label[class*="CheckboxLayer"]', "label"):
+            option = self._first_visible(
+                page.locator(selector).filter(has_text=pattern), min_size=8
+            )
+            if option is not None:
+                return option
+        buttons = page.locator("button").filter(has_text=pattern)
+        for index in range(buttons.count()):
+            candidate = buttons.nth(index)
+            if not candidate.is_visible():
+                continue
+            if candidate.get_attribute("aria-expanded") is not None:
+                continue
+            box = candidate.bounding_box()
+            if not box or box["width"] < 8 or box["height"] < 8:
+                continue
+            return candidate
+        return None
+
+    def _select_similar_exclusive_area(self, page, minimum: float, maximum: float) -> None:
+        """Leave only the area groups whose exclusive area is in range.
+
+        "전체면적" means every group is checked, so narrowing is a matter of
+        unchecking the ones outside the range -- selecting the ones inside it
+        changes nothing, which is why an earlier version applied no filter at
+        all while reporting success.
+        """
+        button = self._area_filter_chip(page)
+        if button is None:
+            raise CollectionError("매물 화면에서 전체면적 필터를 찾지 못했습니다.")
+        self._open_filter_popover(page, button, "전용면적")
+
+        # Not every complex offers similar-area grouping; when it is there,
+        # turn it on so one click covers a whole 평형.
+        grouping = self._first_visible(
+            page.locator("button").filter(has_text=re.compile(r"^유사면적 묶기$"))
+        )
+        if grouping is not None and "checked" not in (grouping.get_attribute("class") or ""):
+            grouping.click()
+            page.wait_for_timeout(300)
+
+        # Clicking rerenders the popover, so re-read it every round and fix the
+        # first option that is in the wrong state. The loop ends only when every
+        # option already matches the range, which is the verification.
+        wanted_seen = False
+        for _ in range(3 * self.MAX_AREA_OPTIONS):
+            options = page.locator('label[class*="CheckboxLayer"]')
+            wrong = None
+            wanted_seen = False
+            for index in range(options.count()):
+                option = options.nth(index)
+                if not option.is_visible():
+                    continue
+                text = " ".join((option.inner_text() or "").split())
+                wanted = _area_option_wanted(text, minimum, maximum)
+                if wanted is None:
+                    continue
+                wanted_seen = wanted_seen or wanted
+                if self._filter_label_checked(option) != wanted:
+                    wrong = option
+                    break
+            if wrong is None:
+                break
+            wrong.click()
+            page.wait_for_timeout(300)
+        else:
+            raise CollectionError("전용면적 필터 선택이 끝나지 않았습니다.")
+        if not wanted_seen:
+            raise CollectionError(
+                f"괄호 안 전용면적 {minimum:g}~{maximum:g}㎡ 항목을 찾지 못했습니다."
+            )
+
+        # This is a multi-select popover; close it so later scrolling reaches
+        # the listing list and the results refresh.
+        self._close_filter_popover(page, button)
+
+    @staticmethod
+    def _list_card_count(page) -> int:
+        """Read the listing pane's own count for the filters now applied."""
+        text = page.evaluate(
+            r"""() => {
+                const title = document.querySelector(
+                    '[class*="ArticleListWrapper"][class*="title"]');
+                const pane = document.querySelector('#complex_detail');
+                return ((title || pane || document.body).innerText || '')
+                    .replace(/\s+/g, ' ').trim();
+            }"""
+        )
+        match = LIST_COUNT_RE.search(text)
+        if not match:
+            raise CollectionError(
+                f"매물 목록 헤더에서 '매물 N개' 표시를 찾지 못했습니다: {text[:120]}"
+            )
+        return int(match.group(1).replace(",", ""))
+
+    def _settled_list_card_count(self, page) -> int:
+        """Wait for that count to stop moving; the list refreshes asynchronously."""
+        previous = -1
+        stable = 0
+        for _ in range(22):
+            count = self._list_card_count(page)
+            stable = stable + 1 if count == previous else 0
+            if stable >= 2:
+                return count
+            previous = count
+            page.wait_for_timeout(700)
+        return previous
+
+    @staticmethod
+    def _trade_tab_counts(page) -> dict[str, int]:
+        """The complex's own card count per trade type, kept as a cross-check.
+
+        These tabs count cards rather than articles: a unit several agents
+        registered is bundled into one card and counted once.
+        """
+        texts = page.evaluate(
+            r"""() => {
+                const pane = document.querySelector('#complex_detail') || document.body;
+                return [...pane.querySelectorAll('button')]
+                    .filter(button => button.getClientRects().length > 0)
+                    .map(button => (button.innerText || '').replace(/\s+/g, ' ').trim());
+            }"""
+        )
+        counts: dict[str, int] = {}
+        for text in texts:
+            match = TRADE_COUNT_RE.match(text)
+            if match:
+                counts[match.group(1)] = int(match.group(2).replace(",", ""))
+        if not counts:
+            raise CollectionError(
+                "단지 화면에서 매매·전세·월세·단기 매물 개수를 읽지 못했습니다."
+            )
+        return counts
 
     @staticmethod
     def _visible_listing_rows(page) -> list[dict]:
-        """Capture standalone cards currently rendered in the virtual list."""
-        return page.locator("body").evaluate(
-            r"""els => {
-                const cards = new Set();
-                const rows = [];
-                const roots = [
-                    ...document.querySelectorAll('button'),
-                    ...document.querySelectorAll('a[href*="/articles/"]')
-                ].filter(e =>
-                    (e.textContent || '').trim() === '매물목록 펼치기' ||
-                    (e.getAttribute('href') || '').includes('/articles/')
-                );
-                for (const root of roots) {
-                    let card = root.closest('li');
-                    while (card && !/전용\s*\d/.test(card.innerText || '')) {
-                        card = card.parentElement?.closest('li') || null;
-                    }
-                    if (!card || cards.has(card) || card.getClientRects().length === 0) continue;
-                    // Expanded bundle rows were captured immediately after the
-                    // click. Skip their collapsed/virtualized shells here.
-                    if ([...card.querySelectorAll('button')].some(button =>
-                        (button.textContent || '').includes('매물목록')
-                    )) continue;
-                    cards.add(card);
-                    // After expanding a bundle, capture each article link with
-                    // the text of its own row. Climb until the next parent would
-                    // contain multiple article links; that keeps the individual
-                    // price beside the correct href.
-                    const byHref = new Map();
-                    for (const anchor of card.querySelectorAll('a[href*="/articles/"]')) {
-                        const href = anchor.getAttribute('href') || '';
-                        if (!href) continue;
-                        let item = anchor;
-                        while (item.parentElement && item.parentElement !== card) {
-                            const parent = item.parentElement;
-                            if (parent.querySelectorAll('a[href*="/articles/"]').length > 1) break;
-                            item = parent;
-                        }
-                        const text = (item.innerText || anchor.innerText || '').trim();
-                        if (!byHref.has(href) || text.length > byHref.get(href).text.length) {
-                            byHref.set(href, {href, text});
-                        }
-                    }
-                    rows.push({
-                        articles: [...byHref.values()],
-                        text: (card.innerText || '').trim()
-                    });
-                }
-                return rows;
+        """Capture every rendered card, expanded bundles included.
+
+        Expanded cards used to be skipped here because their rows had been
+        captured once, at the moment of the click. That made a capture taken
+        before the bundle finished rendering permanent, which is how listings
+        went missing. They are read again on every pass and merged instead.
+        """
+        return page.evaluate(
+            "() => {"
+            + _CARD_HELPERS_JS
+            + """
+            return collectCards()
+                .filter(card => card.getClientRects().length > 0)
+                .map(card => ({
+                    articles: cardArticles(card),
+                    text: (card.innerText || '').trim()
+                }));
             }"""
         )
 
     @staticmethod
-    def _visible_listing_signature(page) -> str:
-        """Return visible card text so a virtual list's real end can be detected."""
-        return page.locator("body").evaluate(
-            r"""body => [...body.querySelectorAll('li')]
-                .filter(card => card.getClientRects().length > 0 && /전용\s*\d/.test(card.innerText || ''))
-                .map(card => (card.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 180))
-                .join('\n')"""
+    def _scroll_listing_to_top(page) -> None:
+        page.evaluate(
+            """() => {
+                const pane = document.querySelector('#complex_detail');
+                if (!pane) {
+                    window.scrollTo(0, 0);
+                    return;
+                }
+                pane.scrollTop = 0;
+                pane.dispatchEvent(new Event('scroll', {bubbles: true}));
+            }"""
+        )
+        page.wait_for_timeout(700)
+
+    @staticmethod
+    def _listing_scroll_state(page) -> dict:
+        return page.evaluate(
+            """() => {
+                const pane = document.querySelector('#complex_detail');
+                if (!pane) {
+                    return {
+                        at_bottom: window.scrollY + window.innerHeight
+                            >= document.body.scrollHeight - 4,
+                        height: document.body.scrollHeight
+                    };
+                }
+                return {
+                    at_bottom: pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 4,
+                    height: pane.scrollHeight
+                };
+            }"""
         )
 
     @staticmethod
-    def _listing_root_count(page) -> int:
-        """Count loaded card roots, including bundles that have no article link yet."""
-        return page.locator("body").evaluate(
-            """body => [...body.querySelectorAll('button, a')].filter(element =>
-                (element.textContent || '').trim() === '매물목록 펼치기' ||
-                (element.getAttribute('href') || '').includes('/articles/')
-            ).length"""
+    def _scroll_listing_view(page) -> dict:
+        """Advance the listing pane and report whether the list is exhausted.
+
+        Scrolls the pane itself rather than whichever element happens to sit
+        under the mouse, and overlaps each step so a card taller than one step
+        cannot fall between two viewports.
+        """
+        return page.evaluate(
+            """() => {
+                const pane = document.querySelector('#complex_detail');
+                if (!pane || pane.scrollHeight <= pane.clientHeight + 20) {
+                    const before = window.scrollY;
+                    window.scrollBy(0, Math.max(400, Math.floor(window.innerHeight * 0.6)));
+                    return {
+                        moved: window.scrollY > before,
+                        at_bottom: window.scrollY + window.innerHeight
+                            >= document.body.scrollHeight - 4,
+                        height: document.body.scrollHeight
+                    };
+                }
+                const before = pane.scrollTop;
+                pane.scrollTop = Math.min(
+                    pane.scrollHeight - pane.clientHeight,
+                    before + Math.max(400, Math.floor(pane.clientHeight * 0.6))
+                );
+                pane.dispatchEvent(new Event('scroll', {bubbles: true}));
+                return {
+                    moved: pane.scrollTop > before,
+                    at_bottom: pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 4,
+                    height: pane.scrollHeight
+                };
+            }"""
         )
 
     def _expand_listing_groups(self, page) -> list[dict]:
-        """Open bundles and capture their article rows before Naver virtualizes them."""
+        """Open bundles and capture their rows only once every row has rendered."""
         rows: list[dict] = []
         for _ in range(self.MAX_LISTINGS_PER_COMPLEX):
             # Find the button, its owning card and invoke the click atomically.
             # React replaces this part of the DOM as bundles expand, so holding
             # a Locator across separate find/scroll/click calls races that render.
-            card_handle = page.locator("body").evaluate_handle(
-                r"""body => {
-                    const button = [...body.querySelectorAll('button')].find(element =>
-                        (element.textContent || '').trim() === '매물목록 펼치기' &&
-                        element.getClientRects().length > 0
-                    );
-                    if (!button) return null;
-                    let card = button.closest('li');
-                    while (card && !/전용\s*\d/.test(card.innerText || '')) {
-                        card = card.parentElement?.closest('li') || null;
-                    }
-                    if (!card) return null;
-                    // Naver's sticky filter header can cover the button after
-                    // scrolling. Calling the same visible control's handler
-                    // avoids pointer interception by that fixed overlay.
-                    button.click();
-                    return card;
+            card_handle = page.evaluate_handle(
+                "() => {"
+                + _CARD_HELPERS_JS
+                + """
+                const card = collectCards().find(item =>
+                    [...item.querySelectorAll('button')].some(button =>
+                        (button.textContent || '').trim() === '매물목록 펼치기' &&
+                        button.getClientRects().length > 0));
+                if (!card) return null;
+                const button = [...card.querySelectorAll('button')].find(item =>
+                    (item.textContent || '').trim() === '매물목록 펼치기');
+                // Naver's sticky filter header can cover the button after
+                // scrolling. Calling the same visible control's handler avoids
+                // pointer interception by that fixed overlay.
+                button.click();
+                return card;
                 }"""
             ).as_element()
             if card_handle is None:
                 break
-            for _ in range(32):
-                if card_handle.query_selector('a[href*="/articles/"]') is not None:
-                    break
-                page.wait_for_timeout(250)
-            else:
-                summary = " ".join(
-                    (card_handle.inner_text() or "").split()
-                )[:160]
-                raise CollectionError(
-                    "매물목록을 펼쳤지만 개별 매물 링크가 나타나지 않았습니다: "
-                    f"{summary}"
-                )
             rows.append(
-                card_handle.evaluate(
-                    r"""card => {
-                        const byHref = new Map();
-                        for (const anchor of card.querySelectorAll('a[href*="/articles/"]')) {
-                            const href = anchor.getAttribute('href') || '';
-                            if (!href) continue;
-                            let item = anchor;
-                            while (item.parentElement && item.parentElement !== card) {
-                                const parent = item.parentElement;
-                                if (parent.querySelectorAll('a[href*="/articles/"]').length > 1) break;
-                                item = parent;
-                            }
-                            const text = (item.innerText || anchor.innerText || '').trim();
-                            if (!byHref.has(href) || text.length > byHref.get(href).text.length) {
-                                byHref.set(href, {href, text});
-                            }
-                        }
-                        return {
-                            articles: [...byHref.values()],
-                            text: (card.innerText || '').trim()
-                        };
-                    }"""
-                )
+                {
+                    "articles": self._settled_bundle_articles(page, card_handle),
+                    "text": (card_handle.inner_text() or "").strip(),
+                }
             )
-        remaining = page.locator("body").evaluate(
-            """body => [...body.querySelectorAll('button')].some(element =>
+        remaining = page.evaluate(
+            """() => [...document.querySelectorAll('button')].some(element =>
                 (element.textContent || '').trim() === '매물목록 펼치기' &&
-                element.getClientRects().length > 0
-            )"""
+                element.getClientRects().length > 0)"""
         )
         if remaining:
             raise CollectionError(
                 "매물목록 펼치기가 비정상적으로 많이 반복되어 수집을 중단했습니다."
             )
-        # The expanded agent rows are populated asynchronously after the click.
-        page.wait_for_timeout(800)
         return rows
 
-    def _select_similar_exclusive_area(self, page, minimum: float, maximum: float) -> None:
-        area_button = page.get_by_role("button", name="전체면적", exact=True)
-        button = self._first_visible(area_button)
+    @staticmethod
+    def _settled_bundle_articles(page, card_handle) -> list[dict]:
+        """Wait until an expanded bundle has rendered all of its agent rows.
+
+        Returning as soon as the first /articles/ link appeared was the main
+        source of missing listings: a bundle renders its rows one after another.
+        The card says how many agents registered the unit, so wait for exactly
+        that many distinct article numbers rather than for a fixed delay.
+
+        Counting anchors would not do: a partner row adds a second link, such as
+        /articles/2646568041/out-link-bridge, to an article already counted.
+        """
+        match = AGENT_COUNT_RE.search(card_handle.inner_text() or "")
+        expected = int(match.group(1)) if match else None
+        stable = 0
+        count = 0
+        articles: list[dict] = []
+        for _ in range(32):
+            articles = card_handle.evaluate(
+                "card => {" + _CARD_HELPERS_JS + " return cardArticles(card);}"
+            )
+            numbers = {_extract_listing_id(article["href"]) for article in articles}
+            numbers.discard("")
+            if expected is not None:
+                if len(numbers) >= expected:
+                    return articles
+            else:
+                # No agent count on this card: settle on an unchanging row count.
+                stable = stable + 1 if numbers and len(numbers) == count else 0
+                if stable >= 3:
+                    return articles
+            count = len(numbers)
+            page.wait_for_timeout(250)
+        summary = " ".join((card_handle.inner_text() or "").split())[:160]
+        raise CollectionError(
+            f"매물목록을 펼쳤지만 매물 {expected}건 중 {count}건만 나타났습니다: {summary}"
+        )
+
+    def _reset_exclusive_area_filter(self, page) -> None:
+        """Reset Naver's SPA-persisted area selection to the unfiltered list."""
+        button = self._area_filter_chip(page)
         if button is None:
             raise CollectionError("매물 화면에서 전체면적 필터를 찾지 못했습니다.")
-        button.click()
-        page.wait_for_timeout(300)
-
-        group_button = page.locator("button").filter(
-            has_text=re.compile(r"^유사면적 묶기$")
+        self._open_filter_popover(page, button, "전용면적")
+        all_label = self._first_visible(
+            page.locator("label").filter(has_text=re.compile(r"^전체면적"))
         )
-        grouping = self._first_visible(group_button)
-        if grouping is None:
-            raise CollectionError("면적 필터에서 유사면적 묶기를 찾지 못했습니다.")
-        group_class = grouping.get_attribute("class") or ""
-        if "checked" not in group_class:
-            grouping.click()
-            page.wait_for_timeout(300)
-
-        all_labels = page.locator("label").filter(has_text=re.compile(r"^전체면적"))
-        all_label = self._first_visible(all_labels)
         if all_label is None:
             raise CollectionError("면적 필터에서 전체면적 선택 항목을 찾지 못했습니다.")
-        if "is-checked" in (all_label.get_attribute("class") or ""):
+        if not self._filter_label_checked(all_label):
             all_label.click()
-            page.wait_for_timeout(300)
+            page.wait_for_timeout(500)
+        self._close_filter_popover(page, button)
+        page.wait_for_timeout(900)
 
-        selected = 0
-        labels = page.locator("label")
-        for index in range(labels.count()):
-            label = labels.nth(index)
-            if not label.is_visible():
-                continue
-            text = label.inner_text(timeout=3_000).strip()
-            match = re.search(r"\((\d+(?:\.\d+)?)\)", text)
-            target = bool(match) and minimum <= float(match.group(1)) <= maximum
-            checked = "is-checked" in (label.get_attribute("class") or "")
-            if checked != target:
-                label.click()
-                page.wait_for_timeout(250)
-            if target:
-                selected += 1
-                if "is-checked" not in (label.get_attribute("class") or ""):
-                    raise CollectionError(f"전용면적 {text} 선택을 확인하지 못했습니다.")
-        if not selected:
-            raise CollectionError(
-                f"괄호 안 전용면적 {minimum:g}~{maximum:g}㎡ 항목을 찾지 못했습니다."
-            )
-        page.wait_for_timeout(700)
+    @staticmethod
+    def _filter_label_checked(label) -> bool:
+        """Read the real form control state; Naver no longer always marks labels."""
+        control = label.locator("input")
+        if control.count():
+            return control.first.is_checked()
+        classes = label.get_attribute("class") or ""
+        return "is-checked" in classes or label.get_attribute("aria-checked") == "true"
 
     @staticmethod
     def _raise_if_blocked(page) -> None:
@@ -806,6 +1180,66 @@ def _pick_representative_article(articles: list[dict[str, str]]) -> tuple[str, s
         _, listing_id, href = max(unpriced)
         return listing_id, href
     return "", ""
+
+
+def _area_option_wanted(text: str, minimum: float, maximum: float) -> bool | None:
+    """Whether one area option belongs in range, or None when it is not one.
+
+    Naver labels these as supply area with the exclusive area in parentheses,
+    e.g. "115㎡ (84)1,011세대", and groups several sizes as "145~146㎡ (110~111)".
+    A group counts as wanted when any of its exclusive areas is in range.
+    """
+    if text.startswith("전체면적"):
+        return None
+    match = re.search(r"\(([\d.~\s]+)\)", text)
+    if not match:
+        return None
+    areas = [float(value) for value in re.findall(r"\d+(?:\.\d+)?", match.group(1))]
+    if not areas:
+        return None
+    return any(minimum <= area <= maximum for area in areas)
+
+
+def _merge_article_rows(groups: list[dict], row: dict) -> None:
+    """Fold one captured card into the cards collected so far.
+
+    The same card is read on every scroll pass, and an expanded bundle may have
+    been captured before all of its rows rendered. Article numbers are unique
+    across Naver, so two captures sharing one describe the same card; the union
+    keeps the cheapest listing findable even when a pass saw only part of the
+    bundle. Cards are not keyed by their text: two different listings can print
+    exactly the same building, price, area, floor and direction.
+    """
+    numbers = {_extract_listing_id(article.get("href", "")) for article in row["articles"]}
+    numbers.discard("")
+    if not numbers:
+        # A card with no article link at all; its text is all we can key on.
+        if any(not group["numbers"] and group["text"] == row["text"] for group in groups):
+            return
+        groups.append({"numbers": set(), "articles": {}, "text": row["text"]})
+        return
+
+    matched = [group for group in groups if group["numbers"] & numbers]
+    if not matched:
+        target = {"numbers": set(), "articles": {}, "text": ""}
+        groups.append(target)
+    else:
+        target = matched[0]
+        for other in matched[1:]:
+            target["numbers"] |= other["numbers"]
+            target["articles"].update(other["articles"])
+            if len(other["text"]) > len(target["text"]):
+                target["text"] = other["text"]
+            groups.remove(other)
+
+    target["numbers"] |= numbers
+    for article in row["articles"]:
+        current = target["articles"].get(article["href"])
+        if current is None or len(article["text"]) > len(current["text"]):
+            target["articles"][article["href"]] = article
+    # An expanded card carries more text than its collapsed shell.
+    if len(row["text"]) > len(target["text"]):
+        target["text"] = row["text"]
 
 
 def _extract_price_text(text: str) -> str:

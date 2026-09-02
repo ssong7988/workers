@@ -160,9 +160,11 @@ def main(argv: list[str] | None = None) -> None:
             )
             temporary.replace(output)
             total = sum(item["listing_count"] for item in snapshot["complexes"])
+            cards = sum(item["card_count"] for item in snapshot["complexes"])
+            expected = sum(item["expected_count"] for item in snapshot["complexes"])
             print(
                 f"관심부동산 수집 완료: 단지 {len(snapshot['complexes'])}개, "
-                f"매물 {total}건, {output}"
+                f"카드 {cards}/{expected}개, 매매 매물 {total}건, {output}"
             )
             return
 
