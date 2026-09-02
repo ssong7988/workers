@@ -4,12 +4,13 @@
 
 ## Current Architecture
 
+- 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.agent/docs/ARCHITECTURE.md`에 정리되어 있다.
 - `real-estate-finder/`가 네이버 부동산 매물을 수집하고 검색 조건, 급매 조건, 이전 상태를 기준으로 결과를 만든다.
 - `kakao-notifier/`가 카카오 인증 토큰을 관리하고 이미지형 카카오톡 카드를 전송한다.
 - `property-report-site/site-app/`가 전체 매물 웹 리포트를 렌더링한다. 이 디렉터리는 루트와 별도의 중첩 Git 저장소다.
 - 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
 - 검색 설정은 `config/searches.yaml`에 있고 런타임 데이터 및 생성 결과물은 Git에서 제외한다.
-- 스캔 결과는 UI의 `app/report-data.json`을 갱신하지만 자동 빌드/배포하지 않는다.
+- 신규/급매 알림 또는 전체 보고의 카드 전송 경로는 UI의 `app/report-data.json`을 갱신하지만 자동 빌드/배포하지 않는다. 알림이 없는 일반 스캔은 이 파일을 갱신하지 않을 수 있다.
 - 현재 UI는 Codex Sites에 배포한다. JSON이 빌드 시점에 번들되므로 공개 리포트를 갱신하려면 명시적인 재빌드와 재배포가 필요하다.
 - 로컬 대안은 `dev:local`, `build:local`, `start:local` 및 `run-local.ps1`/`run-local.bat`로 보존되어 있다. 향후 고정 도메인과 Cloudflare Tunnel 같은 공개 터널을 연결할 수 있다.
 
