@@ -283,22 +283,54 @@ class NaverBrowserCollector:
         else:
             self._select_similar_exclusive_area(page, minimum=83, maximum=86)
 
+        # Naver virtualizes this list: scrolling first and expanding afterwards
+        # leaves only the last few cards in the DOM. Capture each viewport before
+        # moving on so bundled cards that disappear are not lost.
+        rows: list[dict] = []
         stable_scrolls = 0
-        for _ in range(40):
-            before = self._listing_root_count(page)
-            page.mouse.wheel(0, 1400)
+        previous_signature = ""
+        for _ in range(80):
+            rows.extend(self._expand_listing_groups(page))
+            rows.extend(self._visible_listing_rows(page))
+            signature = self._visible_listing_signature(page)
+            page.mouse.wheel(0, 1200)
             page.wait_for_timeout(500)
-            after = self._listing_root_count(page)
-            if after == before:
+            current_signature = self._visible_listing_signature(page)
+            if current_signature == signature or current_signature == previous_signature:
                 stable_scrolls += 1
             else:
                 stable_scrolls = 0
+            previous_signature = current_signature
             if stable_scrolls >= 3:
                 break
 
-        expanded_rows = self._expand_listing_groups(page)
+        rows.extend(self._expand_listing_groups(page))
+        rows.extend(self._visible_listing_rows(page))
 
-        standalone_rows = page.locator("body").evaluate(
+        listings = []
+        seen: set[str] = set()
+        for row in rows:
+            listing_id, href = _pick_representative_article(row["articles"])
+            if not listing_id:
+                fingerprint = f"{complex_info['complex_id']}|{row['text']}"
+                listing_id = "card-" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:20]
+                href = complex_info["href"]
+            if listing_id in seen:
+                continue
+            seen.add(listing_id)
+            parsed = _parse_favorite_listing_text(
+                row["text"], listing_id, complex_info["name"], href
+            )
+            if parsed:
+                listings.append(parsed)
+            if len(listings) >= self.MAX_LISTINGS_PER_COMPLEX:
+                break
+        return {**complex_info, "listing_count": len(listings), "listings": listings}
+
+    @staticmethod
+    def _visible_listing_rows(page) -> list[dict]:
+        """Capture standalone cards currently rendered in the virtual list."""
+        return page.locator("body").evaluate(
             r"""els => {
                 const cards = new Set();
                 const rows = [];
@@ -314,7 +346,7 @@ class NaverBrowserCollector:
                     while (card && !/전용\s*\d/.test(card.innerText || '')) {
                         card = card.parentElement?.closest('li') || null;
                     }
-                    if (!card || cards.has(card)) continue;
+                    if (!card || cards.has(card) || card.getClientRects().length === 0) continue;
                     // Expanded bundle rows were captured immediately after the
                     // click. Skip their collapsed/virtualized shells here.
                     if ([...card.querySelectorAll('button')].some(button =>
@@ -348,28 +380,16 @@ class NaverBrowserCollector:
                 return rows;
             }"""
         )
-        rows = [*expanded_rows, *standalone_rows]
-        listings = []
-        seen: set[str] = set()
-        for row in rows:
-            listing_id, href = _pick_representative_article(row["articles"])
-            if not listing_id:
-                fingerprint = f"{complex_info['complex_id']}|{row['text']}"
-                listing_id = "card-" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:20]
-                # No article link on this card. Send the reader to the complex's
-                # own listing page rather than the site home, which is useless.
-                href = complex_info["href"]
-            if listing_id in seen:
-                continue
-            seen.add(listing_id)
-            parsed = _parse_favorite_listing_text(
-                row["text"], listing_id, complex_info["name"], href
-            )
-            if parsed:
-                listings.append(parsed)
-            if len(listings) >= self.MAX_LISTINGS_PER_COMPLEX:
-                break
-        return {**complex_info, "listing_count": len(listings), "listings": listings}
+
+    @staticmethod
+    def _visible_listing_signature(page) -> str:
+        """Return visible card text so a virtual list's real end can be detected."""
+        return page.locator("body").evaluate(
+            r"""body => [...body.querySelectorAll('li')]
+                .filter(card => card.getClientRects().length > 0 && /전용\s*\d/.test(card.innerText || ''))
+                .map(card => (card.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 180))
+                .join('\n')"""
+        )
 
     @staticmethod
     def _listing_root_count(page) -> int:

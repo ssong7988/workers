@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .card import CardItem, build_card_image
@@ -17,6 +18,7 @@ from .notifier import (
     scan_summary_message,
 )
 from .parsing import matches_condition
+from .report import write_report_data
 from .storage import FileStore
 
 
@@ -174,6 +176,19 @@ class FinderService:
         """
         if self.use_cards:
             try:
+                report_output = (
+                    Path(__file__).resolve().parents[2]
+                    / "property-report-site"
+                    / "site-app"
+                    / "app"
+                    / "report-data.json"
+                )
+                write_report_data(
+                    [listing for listing, _, _ in items],
+                    self.config,
+                    report_output,
+                    observed_at=max(listing.observed_at for listing, _, _ in items),
+                )
                 image_path, width, height = build_card_image(
                     items,
                     self.store.data_dir / "cards" / "card.png",
