@@ -104,7 +104,52 @@ class ServiceTests(unittest.TestCase):
             service.smoke_test()
             state = store.load_state()
             self.assertIsNone(state["listings"]["weverfield:123"]["last_urgent_alert_price_won"])
-            self.assertEqual(len(sent), 2)
+            # One message, whichever path it takes. This once sent a summary
+            # plus one text per listing, which reached 42 messages on a real run.
+            self.assertEqual(len(sent), 1)
+
+    def test_smoke_sends_one_card_with_the_report_link(self) -> None:
+        """The card is one Kakao message, and REPORT_URL is what adds its
+        second button beside the full-resolution image."""
+        sent: list[str] = []
+        image_sender = RecordingImageSender()
+        notifier = KakaoNotifier(
+            Path("."),
+            sender=lambda message, _url: sent.append(message),
+            image_sender=image_sender,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
+            )
+            with mock.patch.object(service_module, "write_report_data"):
+                service.smoke_test()
+            self.assertEqual(len(image_sender.calls), 1)
+            self.assertEqual(len(sent), 0)
+            self.assertEqual(image_sender.calls[0][3], service_module.REPORT_URL)
+
+    def test_smoke_failure_sends_one_text_and_no_card(self) -> None:
+        sent: list[str] = []
+        image_sender = RecordingImageSender()
+        notifier = KakaoNotifier(
+            Path("."),
+            sender=lambda message, _url: sent.append(message),
+            image_sender=image_sender,
+        )
+
+        class BrokenCollector:
+            def collect_all(self, _conditions):
+                raise RuntimeError("수집 실패")
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(CONFIG, BrokenCollector(), store, notifier)
+            result = service.smoke_test()
+            self.assertFalse(result.success)
+            self.assertEqual(len(image_sender.calls), 0)
+            self.assertEqual(len(sent), 1)
+            self.assertIn("실패", sent[0])
 
     def test_notify_new_without_urgent_threshold(self) -> None:
         condition = SearchCondition(

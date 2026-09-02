@@ -21,22 +21,6 @@ def format_eok(price_won: int) -> str:
     return f"{eok}억" if not man else f"{eok}억 {man:,}만"
 
 
-def listing_message(listing: Listing, urgent: bool = False, new: bool = False) -> str:
-    kind = "🚨 급매" if urgent else ("🆕 신규" if new else "🏠 매물")
-    floor_kind = "저층" if listing.is_low_floor else "일반층"
-    thresholds = "전체 매매 집계"
-    if listing.effective_max_price_won is not None:
-        thresholds = f"조사 {format_eok(listing.effective_max_price_won)}"
-        if listing.effective_urgent_price_won is not None:
-            thresholds += f" / 급매 {format_eok(listing.effective_urgent_price_won)}"
-    message = (
-        f"{kind} | {listing.complex_name} {listing.type_name}\n"
-        f"{format_eok(listing.price_won)} · {listing.floor_text} · {listing.direction}\n"
-        f"{floor_kind} {thresholds}"
-    )
-    return message[:200]
-
-
 def batch_listing_message(items: list[tuple[Listing, bool, bool]]) -> str:
     """Build one compact Kakao message for every alert found in one scan."""
     urgent_count = sum(urgent for _, urgent, _ in items)

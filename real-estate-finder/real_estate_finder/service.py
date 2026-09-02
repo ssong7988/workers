@@ -14,7 +14,6 @@ from .notifier import (
     batch_listing_message,
     card_caption,
     card_heading,
-    listing_message,
     scan_summary_message,
 )
 from .parsing import matches_condition
@@ -131,10 +130,15 @@ class FinderService:
 
     def smoke_test(self) -> ScanResult:
         result = self.scan(notify_urgent=False, smoke=True)
-        self._safe_send(scan_summary_message(result, smoke=True), REPORT_URL)
-        if result.success:
-            for listing in sorted(result.matched, key=_sort_key):
-                self._safe_send(listing_message(listing, urgent=listing in result.urgent), listing.url)
+        if result.success and result.matched:
+            # The same path scan() and send_digest() take, so a smoke test
+            # arrives as one Kakao message: the card, carrying the original
+            # image and the full report as its two buttons. This used to send a
+            # summary plus one text per listing, which was 42 messages.
+            self.send_digest(result.matched)
+        else:
+            # Only when there is no card to send does a text go out instead.
+            self._safe_send(scan_summary_message(result, smoke=True), REPORT_URL)
         return result
 
     def send_digest(self, listings: list[Listing] | None = None) -> None:

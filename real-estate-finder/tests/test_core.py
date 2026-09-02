@@ -16,7 +16,7 @@ from real_estate_finder.collector import (
     _pick_representative_article,
 )
 from real_estate_finder.models import Listing, LowFloorRule, SearchCondition
-from real_estate_finder.notifier import batch_listing_message, listing_message
+from real_estate_finder.notifier import batch_listing_message
 from real_estate_finder.parsing import (
     explain_condition,
     matches_condition,
@@ -397,11 +397,6 @@ class FilteringTests(unittest.TestCase):
 
     def test_unknown_floor_excluded(self) -> None:
         self.assertFalse(matches_condition(listing(2_000_000_000, "미상"), CONDITION, RULE))
-
-    def test_message_limit(self) -> None:
-        item = listing(2_400_000_000, "3층")
-        self.assertTrue(matches_condition(item, CONDITION, RULE))
-        self.assertLessEqual(len(listing_message(item, urgent=True)), 200)
 
     def test_batch_message_limit(self) -> None:
         items = [(listing(2_400_000_000 + index * 10_000), index % 2 == 0, index % 2 == 1) for index in range(30)]
