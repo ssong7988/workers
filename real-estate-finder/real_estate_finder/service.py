@@ -5,18 +5,35 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from .card import CardItem, build_card_image
 from .models import AppConfig, Listing, ScanResult, iso_now
-from .notifier import KakaoNotifier, batch_listing_message, listing_message, scan_summary_message
+from .notifier import (
+    REPORT_URL,
+    KakaoNotifier,
+    batch_listing_message,
+    card_caption,
+    card_heading,
+    listing_message,
+    scan_summary_message,
+)
 from .parsing import matches_condition
 from .storage import FileStore
 
 
 class FinderService:
-    def __init__(self, config: AppConfig, collector, store: FileStore, notifier: KakaoNotifier) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        collector,
+        store: FileStore,
+        notifier: KakaoNotifier,
+        use_cards: bool = True,
+    ) -> None:
         self.config = config
         self.collector = collector
         self.store = store
         self.notifier = notifier
+        self.use_cards = use_cards
 
     def scan(self, *, notify_urgent: bool = True, smoke: bool = False) -> ScanResult:
         started = iso_now()
@@ -81,10 +98,7 @@ class FinderService:
                     payload["active"] = False
 
         if pending_notifications:
-            self._safe_send(
-                batch_listing_message(pending_notifications),
-                "https://my-property-report-20260902.ssong7988.chatgpt.site",
-            )
+            self._safe_send_card(pending_notifications, heading="오늘의 매물 알림")
         result.finished_at = iso_now()
         self.store.append_observations(observed)
         self.store.append_run(result)
@@ -100,12 +114,12 @@ class FinderService:
         if result.success and now.weekday() in self.config.digest_weekdays and now.hour == self.config.digest_hour:
             self.send_digest(result.matched)
         elif result.failed_conditions:
-            self._safe_send(scan_summary_message(result), "https://my-property-report-20260902.ssong7988.chatgpt.site")
+            self._safe_send(scan_summary_message(result), REPORT_URL)
         return result
 
     def smoke_test(self) -> ScanResult:
         result = self.scan(notify_urgent=False, smoke=True)
-        self._safe_send(scan_summary_message(result, smoke=True), "https://my-property-report-20260902.ssong7988.chatgpt.site")
+        self._safe_send(scan_summary_message(result, smoke=True), REPORT_URL)
         if result.success:
             for listing in sorted(result.matched, key=_sort_key):
                 self._safe_send(listing_message(listing, urgent=listing in result.urgent), listing.url)
@@ -119,14 +133,49 @@ class FinderService:
                 for payload in state.get("listings", {}).values()
                 if payload.get("active")
             ]
-        summary = f"☀️ 과천 관심 매물 {len(listings)}건\n급매 우선·가격순으로 전송합니다."
-        self._safe_send(summary, "https://my-property-report-20260902.ssong7988.chatgpt.site")
-        for listing in sorted(listings, key=_sort_key):
-            urgent = (
+        if not listings:
+            self._safe_send("☀️ 과천 관심 매물이 없습니다.", REPORT_URL)
+            return
+        items: list[CardItem] = [
+            (
+                listing,
                 listing.effective_urgent_price_won is not None
-                and listing.price_won <= listing.effective_urgent_price_won
+                and listing.price_won <= listing.effective_urgent_price_won,
+                False,
             )
-            self._safe_send(listing_message(listing, urgent=urgent), listing.url)
+            for listing in sorted(listings, key=_sort_key)
+        ]
+        self._safe_send_card(items, heading="과천 관심 매물")
+
+    def _safe_send_card(self, items: list[CardItem], *, heading: str) -> None:
+        """Send the listings as one card image, degrading to text on any failure.
+
+        The image exists to escape Kakao's 200-character text limit, but an
+        alert that cannot be rendered still has to reach the user.
+        """
+        if self.use_cards:
+            try:
+                image_path, width, height = build_card_image(
+                    items,
+                    self.store.data_dir / "cards" / "card.png",
+                    heading=heading,
+                    report_url=REPORT_URL,
+                    timezone=self.config.timezone,
+                )
+                # No link_url: the card opens the full-resolution original, since
+                # the image in the chat is scaled down.
+                self.notifier.send_image(
+                    image_path,
+                    card_heading(items),
+                    card_caption(items),
+                    None,
+                    width,
+                    height,
+                )
+                return
+            except Exception as exc:
+                print(f"카드 전송 실패, 텍스트로 대체합니다: {exc}")
+        self._safe_send(batch_listing_message(items), REPORT_URL)
 
     def _safe_send(self, message: str, link_url: str) -> None:
         try:

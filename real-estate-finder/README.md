@@ -46,8 +46,23 @@ python -m real_estate_finder collect-favorites
 python -m real_estate_finder scan-once
 python -m real_estate_finder scheduled-run
 python -m real_estate_finder send-digest
+python -m real_estate_finder preview-card
 python -m unittest discover -s tests -v
 ```
+
+## 카카오 알림은 이미지 카드로 나갑니다
+
+카카오 기본 텍스트 템플릿은 200자를 넘길 수 없어, 매물이 몇 건만 넘어가도 알림에서 목록이 잘려 나갔습니다. 그래서 `scan-once`의 급매·신규 알림과 `send-digest`의 전체 보고는 매물 목록을 카드 이미지 한 장으로 렌더링해 보냅니다. `send-digest`도 매물당 한 통이 아니라 한 통으로 끝납니다.
+
+렌더링은 `real_estate_finder/card.py`가 담당합니다. 자기완결형 HTML을 만들어 headless Edge로 스크린샷하며, 브라우저 프로필은 OS 임시 폴더에 만들고 끝나면 지웁니다(저장소 안을 가리키면 `edge-shot-profile` 같은 찌꺼기가 남습니다).
+
+`preview-card`는 저장된 매물로 이미지만 만들고 전송하지 않습니다. 디자인을 확인할 때 씁니다.
+
+```powershell
+python -m real_estate_finder preview-card --out data\card-preview.png
+```
+
+렌더링이나 전송이 실패하면 기존 텍스트 메시지로 자동 대체되므로 알림 자체가 사라지지는 않습니다. 이미지 경로를 아예 끄려면 `--text-only`를 붙입니다.
 
 `collect-favorites`는 로그인된 Edge에서 네이버 홈의 `부동산` 링크를 클릭한 뒤
 `관심부동산`에 저장된 6개 단지의 `매물보기` 화면을 순서대로 확인합니다. 단지

@@ -27,3 +27,6 @@ property-report-site/.tools/
 property-report-site/node-v*.zip
 property-report-site/node-shasums.txt
 property-report-site/*.tar.gz
+
+# Browser profiles left behind by screenshot tooling
+**/edge-shot-profile*/

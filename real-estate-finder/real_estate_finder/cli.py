@@ -7,15 +7,38 @@ import json
 import sys
 from pathlib import Path
 
+from .card import CardItem, build_card_image
 from .collector import NaverBrowserCollector
 from .config import load_config, validate_config
-from .notifier import KakaoNotifier
+from .models import Listing
+from .notifier import REPORT_URL, KakaoNotifier
 from .service import FinderService
 from .storage import FileStore
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 ROOT_DIR = PROJECT_DIR.parent
+
+
+def _stored_card_items(store: FileStore) -> list[CardItem]:
+    """Rebuild card items from the last successful scan."""
+    state = store.load_state()
+    listings = [
+        Listing.from_dict(payload)
+        for payload in state.get("listings", {}).values()
+        if payload.get("active")
+    ]
+    if not listings:
+        raise RuntimeError("저장된 활성 매물이 없습니다. 먼저 scan-once를 실행하세요.")
+    return [
+        (
+            listing,
+            listing.effective_urgent_price_won is not None
+            and listing.price_won <= listing.effective_urgent_price_won,
+            False,
+        )
+        for listing in listings
+    ]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="http://127.0.0.1:9222",
         help="현재 실행 중인 Edge DevTools 주소 (빈 문자열이면 전용 프로필 사용)",
     )
+    parser.add_argument(
+        "--text-only",
+        action="store_true",
+        help="카드 이미지 대신 기존 텍스트 메시지로 전송",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("validate-config", help="설정 검증")
     commands.add_parser("browser-login", help="Edge 로그인 프로필 준비")
@@ -42,6 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "collect-favorites",
         help="로그인된 화면에서 관심부동산 6개 단지 매물을 JSON으로 저장",
+    )
+    preview = commands.add_parser(
+        "preview-card", help="저장된 매물로 카드 이미지만 만들고 전송하지 않음"
+    )
+    preview.add_argument(
+        "--out", type=Path, default=PROJECT_DIR / "data" / "card-preview.png"
     )
     return parser
 
@@ -82,8 +116,24 @@ def main(argv: list[str] | None = None) -> None:
             return
 
         store = FileStore(PROJECT_DIR / "data")
+
+        if args.command == "preview-card":
+            items = _stored_card_items(store)
+            image_path, width, height = build_card_image(
+                items,
+                args.out,
+                heading="과천 관심 매물",
+                report_url=REPORT_URL,
+                timezone=config.timezone,
+            )
+            print(
+                f"카드 이미지 생성: {image_path} "
+                f"({width}x{height}px, {image_path.stat().st_size / 1024:.0f}KB, 매물 {len(items)}건)"
+            )
+            return
+
         notifier = KakaoNotifier(ROOT_DIR / "kakao-notifier")
-        service = FinderService(config, collector, store, notifier)
+        service = FinderService(config, collector, store, notifier, use_cards=not args.text_only)
         with store.run_lock():
             if args.command == "scan-once":
                 result = service.scan()

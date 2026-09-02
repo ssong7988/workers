@@ -9,6 +9,12 @@ from typing import Callable
 from .models import Listing, ScanResult
 
 
+REPORT_URL = "https://my-property-report-20260902.ssong7988.chatgpt.site"
+# Kakao feed templates cap the title and description; the card image carries
+# the detail, so these only ever hold a short summary.
+CAPTION_LIMIT = 180
+
+
 def format_eok(price_won: int) -> str:
     eok, remainder = divmod(price_won, 100_000_000)
     man = remainder // 10_000
@@ -67,19 +73,39 @@ def scan_summary_message(result: ScanResult, smoke: bool = False) -> str:
     )[:200]
 
 
+def card_heading(items: list[tuple[Listing, bool, bool]]) -> str:
+    """Short feed title. The card image carries the full list."""
+    urgent_count = sum(urgent for _, urgent, _ in items)
+    new_count = sum(new for _, _, new in items)
+    parts = [f"🏠 매물 알림 {len(items)}건"]
+    if urgent_count:
+        parts.append(f"급매 {urgent_count}")
+    if new_count:
+        parts.append(f"신규 {new_count}")
+    return " · ".join(parts)[:CAPTION_LIMIT]
+
+
+def card_caption(items: list[tuple[Listing, bool, bool]]) -> str:
+    if not items:
+        return ""
+    cheapest = min(listing.price_won for listing, _, _ in items)
+    names = list(dict.fromkeys(listing.complex_name for listing, _, _ in items))
+    where = names[0] if len(names) == 1 else f"{names[0]} 외 {len(names) - 1}단지"
+    return f"최저 {format_eok(cheapest)} · {where}"[:CAPTION_LIMIT]
+
+
 class KakaoNotifier:
-    def __init__(self, kakao_dir: Path, sender: Callable[[str, str], None] | None = None) -> None:
+    def __init__(
+        self,
+        kakao_dir: Path,
+        sender: Callable[[str, str], None] | None = None,
+        image_sender: Callable[..., None] | None = None,
+    ) -> None:
         self.kakao_dir = kakao_dir
         self._sender = sender
+        self._image_sender = image_sender
 
-    def send(
-        self,
-        message: str,
-        link_url: str = "https://my-property-report-20260902.ssong7988.chatgpt.site",
-    ) -> None:
-        if self._sender:
-            self._sender(message, link_url)
-            return
+    def _load_module(self):
         module_path = self.kakao_dir / "kakao_notifier.py"
         spec = importlib.util.spec_from_file_location("project_kakao_notifier", module_path)
         if not spec or not spec.loader:
@@ -90,6 +116,29 @@ class KakaoNotifier:
         sys.path.insert(0, str(self.kakao_dir))
         try:
             spec.loader.exec_module(module)
-            module.send_to_me(message, link_url)
         finally:
             sys.path.pop(0)
+        return module
+
+    def send(self, message: str, link_url: str = REPORT_URL) -> None:
+        if self._sender:
+            self._sender(message, link_url)
+            return
+        self._load_module().send_to_me(message, link_url)
+
+    def send_image(
+        self,
+        image_path: Path,
+        title: str,
+        description: str,
+        link_url: str | None = None,
+        image_width: int | None = None,
+        image_height: int | None = None,
+    ) -> None:
+        """Send the card. With no link_url it opens the full-resolution original."""
+        if self._image_sender:
+            self._image_sender(image_path, title, description, link_url)
+            return
+        self._load_module().send_card_to_me(
+            image_path, title, description, link_url, image_width, image_height
+        )

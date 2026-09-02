@@ -3,7 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from real_estate_finder import service as service_module
 from real_estate_finder.models import AppConfig, Listing, LowFloorRule, SearchCondition
 from real_estate_finder.notifier import KakaoNotifier
 from real_estate_finder.service import FinderService
@@ -56,22 +58,40 @@ class MappingCollector:
         return self.mapping
 
 
+def text_service(config, collector, store, notifier) -> FinderService:
+    """Service on the text path, so these tests never launch a browser."""
+    return FinderService(config, collector, store, notifier, use_cards=False)
+
+
+class RecordingImageSender:
+    """Stands in for the Kakao image send, capturing what it was handed."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[tuple] = []
+
+    def __call__(self, image_path, title, description, link_url) -> None:
+        self.calls.append((image_path, title, description, link_url))
+        if self.error:
+            raise self.error
+
+
 class ServiceTests(unittest.TestCase):
     def test_first_urgent_and_further_drop_only(self) -> None:
         sent: list[str] = []
         notifier = KakaoNotifier(Path("."), sender=lambda message, _url: sent.append(message))
         with tempfile.TemporaryDirectory() as directory:
             store = FileStore(Path(directory))
-            first = FinderService(CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier)
+            first = text_service(CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier)
             result = first.scan()
             self.assertEqual(len(result.urgent), 1)
             self.assertEqual(len(sent), 1)
 
-            same = FinderService(CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier)
+            same = text_service(CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier)
             self.assertEqual(len(same.scan().urgent), 0)
             self.assertEqual(len(sent), 1)
 
-            lower = FinderService(CONFIG, FakeCollector(make_listing(2_490_000_000)), store, notifier)
+            lower = text_service(CONFIG, FakeCollector(make_listing(2_490_000_000)), store, notifier)
             self.assertEqual(len(lower.scan().urgent), 1)
             self.assertEqual(len(sent), 2)
 
@@ -80,7 +100,7 @@ class ServiceTests(unittest.TestCase):
         notifier = KakaoNotifier(Path("."), sender=lambda message, _url: sent.append(message))
         with tempfile.TemporaryDirectory() as directory:
             store = FileStore(Path(directory))
-            service = FinderService(CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier)
+            service = text_service(CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier)
             service.smoke_test()
             state = store.load_state()
             self.assertIsNone(state["listings"]["weverfield:123"]["last_urgent_alert_price_won"])
@@ -107,7 +127,7 @@ class ServiceTests(unittest.TestCase):
         notifier = KakaoNotifier(Path("."), sender=lambda message, _url: sent.append(message))
         with tempfile.TemporaryDirectory() as directory:
             store = FileStore(Path(directory))
-            service = FinderService(
+            service = text_service(
                 config, MappingCollector({"worldmark": [item]}), store, notifier
             )
             first = service.scan()
@@ -116,6 +136,97 @@ class ServiceTests(unittest.TestCase):
             self.assertIn("신규", sent[0])
             service.scan()
             self.assertEqual(len(sent), 1)
+
+
+class CardPathTests(unittest.TestCase):
+    """The card exists to carry more than Kakao's 200-character text limit."""
+
+    def setUp(self) -> None:
+        self.built: list[list] = []
+
+        def fake_build(items, out_path, **_kwargs):
+            self.built.append(list(items))
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(b"png")
+            return out_path, 1080, 4992
+
+        patcher = mock.patch.object(service_module, "build_card_image", fake_build)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _digest_listings(self, count: int) -> list[Listing]:
+        listings = []
+        for index in range(count):
+            listing = make_listing(2_400_000_000 + index * 1_000_000)
+            listing.listing_id = str(index)
+            listings.append(listing)
+        return listings
+
+    def test_digest_sends_one_card_with_every_listing(self) -> None:
+        image_sender = RecordingImageSender()
+        notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(CONFIG, FakeCollector(make_listing(1)), store, notifier)
+            service.send_digest(self._digest_listings(30))
+
+        self.assertEqual(len(image_sender.calls), 1, "digest must be one message, not one per listing")
+        self.assertEqual(len(self.built[0]), 30, "no listing may be dropped")
+
+    def test_scan_alert_uses_the_card(self) -> None:
+        image_sender = RecordingImageSender()
+        sent: list[str] = []
+        notifier = KakaoNotifier(
+            Path("."), sender=lambda message, _url: sent.append(message), image_sender=image_sender
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
+            )
+            service.scan()
+
+        self.assertEqual(len(image_sender.calls), 1)
+        self.assertEqual(sent, [], "the text path must not also fire")
+        _path, title, _description, link_url = image_sender.calls[0]
+        self.assertIn("급매 1", title)
+        # No link means the card opens the uploaded original, not the report site.
+        self.assertIsNone(link_url)
+
+    def test_card_failure_falls_back_to_text(self) -> None:
+        image_sender = RecordingImageSender(error=RuntimeError("업로드 실패"))
+        sent: list[str] = []
+        notifier = KakaoNotifier(
+            Path("."), sender=lambda message, _url: sent.append(message), image_sender=image_sender
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
+            )
+            service.scan()
+
+        self.assertEqual(len(sent), 1, "an alert must still reach the user")
+        self.assertIn("급매", sent[0])
+
+    def test_total_failure_is_queued(self) -> None:
+        def explode(*_args, **_kwargs):
+            raise RuntimeError("카카오 다운")
+
+        notifier = KakaoNotifier(
+            Path("."), sender=explode, image_sender=RecordingImageSender(RuntimeError("렌더 실패"))
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStore(Path(directory))
+            service = FinderService(
+                CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
+            )
+            with self.assertRaises(RuntimeError):
+                service.scan()
+            queued = store.queue_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual(len(queued), 1)
+        self.assertIn("급매", queued[0])
 
 
 if __name__ == "__main__":
