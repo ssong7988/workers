@@ -21,3 +21,9 @@ Thumbs.db
 **/*.log
 real-estate-finder/data/
 real-estate-finder/config/searches.local.yaml
+
+# Hosted report workspace (tracked separately)
+property-report-site/.tools/
+property-report-site/node-v*.zip
+property-report-site/node-shasums.txt
+property-report-site/*.tar.gz
