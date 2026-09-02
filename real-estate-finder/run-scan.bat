@@ -1,12 +1,12 @@
 @echo off
-chcp 65001 >nul
-title 과천 관심 매물 조회
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-scan.ps1"
-set EXITCODE=%ERRORLEVEL%
+setlocal
+title Real Estate Scan
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-scan.ps1"
+set "EXITCODE=%ERRORLEVEL%"
 echo.
 if not "%EXITCODE%"=="0" (
-    echo [실패] 위 메시지를 확인하세요.
+    echo [FAILED] Review the messages above.
 )
-echo 창을 닫으려면 아무 키나 누르세요.
+echo Press any key to close this window.
 pause >nul
 exit /b %EXITCODE%
