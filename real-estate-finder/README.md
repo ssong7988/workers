@@ -64,22 +64,23 @@ Edge 창에서 네이버 로그인을 완료하면 **자동으로 이어집니�
 
 기본 모드의 `browser-login`은 CDP로 연결된 기존 Edge에서 네이버 로그인 상태를 확인합니다. 예약 실행 중 로그인 만료가 감지되면 조회를 중단하며, 별도 프로필 방식은 `--edge-cdp ""`를 지정한 경우에만 사용합니다.
 
-## 로컬 리포트 UI
+## 리포트 UI
 
-리포트 UI는 Codex Sites에 배포하지 않고 PC에서 별도로 실행합니다.
+현재 카카오톡의 `전체 매물 보기`는 Codex Sites 공개 주소를 사용합니다. 매물
+스캔에서는 UI 빌드를 실행하지 않으며, 공개 리포트를 갱신할 때만 별도로 빌드하고
+배포합니다.
 
 ```powershell
 cd ..\property-report-site\site-app
-.\run-local.ps1
+npm run build
 ```
 
-브라우저에서 `http://127.0.0.1:3000`을 열어 확인합니다. `scan-once`나
-`send-digest`가 `app/report-data.json`을 갱신하면 개발 화면에도 자동 반영됩니다.
-스캔 과정에서는 UI 빌드를 실행하지 않습니다.
+향후 DNS와 Tunnel을 준비하면 아래 로컬 방식을 다시 기본값으로 전환할 수 있도록
+스크립트를 유지합니다.
 
-다른 기기에서 리포트에 접속해야 한다면 `KAKAO_REPORT_URL`을 그 기기가 접근할
-수 있는 PC의 LAN 주소로 지정해야 합니다. 기본값인 `127.0.0.1`은 현재 PC에서만
-접속할 수 있습니다.
+```powershell
+.\run-local.ps1
+```
 
 ## 정규 명령과 테스트
 
