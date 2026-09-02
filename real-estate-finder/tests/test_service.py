@@ -231,8 +231,8 @@ class CardPathTests(unittest.TestCase):
             CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
         )
 
-    def test_scan_builds_the_report_site(self) -> None:
-        """Running the program rebuilds the site so the deploy is ready to go."""
+    def test_scan_does_not_build_the_local_ui(self) -> None:
+        """The UI has its own local lifecycle; a scan only refreshes its data."""
         image_sender = RecordingImageSender()
         notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
         with tempfile.TemporaryDirectory() as directory:
@@ -240,7 +240,7 @@ class CardPathTests(unittest.TestCase):
             with mock.patch.object(service_module, "build_site") as build:
                 self._card_service(store, notifier).scan()
 
-        self.assertEqual(build.call_count, 1, "스캔은 사이트를 빌드해야 한다")
+        self.assertEqual(build.call_count, 0, "스캔이 로컬 UI 빌드를 실행하면 안 된다")
 
     def test_build_failure_never_holds_up_the_alert(self) -> None:
         image_sender = RecordingImageSender()

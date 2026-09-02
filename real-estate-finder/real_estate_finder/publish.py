@@ -1,10 +1,8 @@
-"""Check whether the hosted report site already serves a given scan.
+"""Build and check the local property-report UI.
 
 `app/page.tsx` imports `report-data.json` at build time, so writing that file
-changes nothing until the site is rebuilt and deployed. Deploying is a manual
-step through the ChatGPT app-hosting UI, so nothing here can publish on its
-own; what it can do is tell the truth about what is live. Only a page that
-already serves this scan may be put behind the 전체 매물 보기 button.
+is picked up automatically by the Next.js development server. A production
+run still needs a fresh local build before `npm start`.
 """
 
 from __future__ import annotations
@@ -25,23 +23,22 @@ SITE_ROOT = ROOT_DIR / "property-report-site"
 SITE_DIR = SITE_ROOT / "site-app"
 
 BUILD_TIMEOUT_SECONDS = 900
-# A deploy takes a moment to go live, so the verify after a build retries.
+# A freshly started local server can take a moment to become ready.
 VERIFY_ATTEMPTS = 4
 VERIFY_INTERVAL_SECONDS = 6.0
 
 _OBSERVED_AT = re.compile(r'data-observed-at="([^"]+)"')
 
 MANUAL_STEPS = (
-    "리포트는 ChatGPT 앱 호스팅 UI에서 직접 배포해야 합니다:\n"
+    "로컬 UI를 먼저 실행해 주세요:\n"
     f"  1) cd {SITE_DIR}\n"
-    "  2) npm run build\n"
-    "  3) 앱 호스팅 UI에서 배포하기\n"
-    "  4) python -m real_estate_finder publish-report --verify-only"
+    "  2) .\\run-local.ps1\n"
+    "  3) 브라우저에서 http://127.0.0.1:3000 열기"
 )
 
 
 class ManualPublishRequired(RuntimeError):
-    """The site was built, but the deploy has to be finished by hand."""
+    """Backward-compatible error type retained for older callers."""
 
 
 def _node_path() -> str | None:
@@ -78,7 +75,7 @@ def _run(
 
 
 def build_site(site_dir: Path = SITE_DIR) -> None:
-    """Rebuild the site so the page picks up the freshly written JSON."""
+    """Create a production build of the local Next.js UI."""
     env = _build_env()
     npm = shutil.which("npm", path=env["PATH"])
     if not npm:
@@ -99,10 +96,10 @@ def _fetch(url: str, timeout: float) -> str:
 
 
 def live_observed_at(report_url: str, timeout: float = 20.0) -> str | None:
-    """The `observedAt` the deployed page is serving.
+    """The `observedAt` the running local page is serving.
 
     `None` covers two different situations — the site was unreachable, and the
-    site answered with a build too old to carry the marker at all. Neither one
+    server answered with a build too old to carry the marker at all. Neither one
     may put the button on a card, so both collapse to the same answer here;
     `describe_live` is what tells them apart for a human.
     """
@@ -136,7 +133,7 @@ def _same_moment(left: str, right: str) -> bool:
 
 
 def is_live(expected_observed_at: str, report_url: str, *, attempts: int = 1) -> bool:
-    """Whether the deployed report already shows this scan."""
+    """Whether the running local report already shows this scan."""
     for attempt in range(attempts):
         if attempt:
             time.sleep(VERIFY_INTERVAL_SECONDS)

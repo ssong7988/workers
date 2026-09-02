@@ -30,14 +30,15 @@ class FinderService:
         store: FileStore,
         notifier: KakaoNotifier,
         use_cards: bool = True,
-        build_report: bool = True,
+        build_report: bool = False,
     ) -> None:
         self.config = config
         self.collector = collector
         self.store = store
         self.notifier = notifier
         self.use_cards = use_cards
-        # Hourly scans will want this off, with the build on its own schedule.
+        # Kept for API compatibility. UI builds are now an explicit local task;
+        # scans only refresh app/report-data.json.
         self.build_report = build_report
 
     def scan(self, *, notify_urgent: bool = True, smoke: bool = False) -> ScanResult:
@@ -222,26 +223,19 @@ class FinderService:
         self._safe_send(batch_listing_message(alerts or items), REPORT_URL)
 
     def _publish_report(self, observed_at: str) -> str | None:
-        """Build the report site, then link it only if the live page serves this scan.
+        """Link the report only when the local UI already serves this scan.
 
-        Building leaves the deploy ready to go out, but the deploy itself is a
-        manual step in the app-hosting UI, so the button still waits on the
-        live check — a button onto a stale report is worse than no button.
-        Neither the build nor the check may hold up an alert, so both degrade
-        to a card without a button.
+        The scanner writes the JSON but never builds or deploys the UI. Next.js
+        development mode notices the changed file by itself. A stopped or stale
+        local server simply means the Kakao card has no report button.
         """
-        if self.build_report:
-            try:
-                build_site()
-            except Exception as exc:
-                print(f"리포트 빌드 실패: {exc}")
         try:
             if is_live(observed_at, REPORT_URL):
                 return REPORT_URL
-            print("이번 결과는 아직 라이브에 반영되지 않았습니다.")
+            print("이번 결과는 아직 로컬 UI에 반영되지 않았습니다.")
             print(MANUAL_STEPS)
         except Exception as exc:
-            print(f"라이브 리포트 확인 실패: {exc}")
+            print(f"로컬 UI 확인 실패: {exc}")
         print("전체 매물 보기 버튼 없이 카드만 보냅니다.")
         return None
 

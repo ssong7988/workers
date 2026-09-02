@@ -90,12 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     publish = commands.add_parser(
         "publish-report",
-        help="현재 리포트 데이터를 빌드·배포하고 라이브에 반영됐는지 확인",
+        help="현재 리포트 데이터로 로컬 UI 프로덕션 빌드 생성",
     )
     publish.add_argument(
         "--verify-only",
         action="store_true",
-        help="빌드와 배포는 건너뛰고 라이브 반영 여부만 확인",
+        help="빌드를 건너뛰고 로컬 UI 반영 여부만 확인",
     )
     explain = commands.add_parser(
         "explain-filters",
@@ -149,11 +149,10 @@ def _explain_filters(config, store: FileStore, show_passed: bool) -> None:
 
 
 def _publish_report(verify_only: bool) -> None:
-    """Build the report the last scan wrote, then prove the live page shows it.
+    """Build the local UI from the report written by the last scan.
 
-    The page imports its data at build time and the deploy itself happens in the
-    ChatGPT app-hosting UI, so "wrote the JSON" and "the button opens the right
-    report" are two different things; only the live check tells them apart.
+    Development mode reloads JSON changes automatically. This command is for a
+    production-style local run (`npm start`), where data is captured at build time.
     """
     report_data = SITE_DIR / "app" / "report-data.json"
     if not report_data.exists():
@@ -164,18 +163,19 @@ def _publish_report(verify_only: bool) -> None:
     print(
         f"발행 대상: 단지 {len(data['complexes'])}개, 매물 {total}건, 기준 {observed_at}"
     )
-    print(f"현재 라이브: {describe_live(REPORT_URL)}")
+    print(f"현재 로컬 UI: {describe_live(REPORT_URL)}")
 
     if not verify_only:
-        print("사이트를 빌드합니다...")
+        print("로컬 UI를 빌드합니다...")
         build_site()
-        print("빌드 완료. 이제 앱 호스팅 UI에서 배포하세요.")
+        print("빌드 완료. `npm start`로 로컬 UI를 실행할 수 있습니다.")
         print(MANUAL_STEPS)
-
-    if is_live(observed_at, REPORT_URL, attempts=VERIFY_ATTEMPTS if verify_only else 1):
-        print(f"발행 완료: {REPORT_URL} 가 {observed_at} 결과를 보여줍니다.")
         return
-    print(f"아직 반영되지 않았습니다: {REPORT_URL}")
+
+    if is_live(observed_at, REPORT_URL, attempts=VERIFY_ATTEMPTS):
+        print(f"확인 완료: {REPORT_URL} 가 {observed_at} 결과를 보여줍니다.")
+        return
+    print(f"로컬 UI가 실행 중이 아니거나 아직 반영되지 않았습니다: {REPORT_URL}")
     raise SystemExit(1)
 
 

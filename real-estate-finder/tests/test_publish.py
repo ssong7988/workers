@@ -86,11 +86,10 @@ class BuildTests(unittest.TestCase):
 
 
 class ManualStepsTests(unittest.TestCase):
-    def test_points_at_the_hosting_ui_not_a_git_push(self) -> None:
-        """Pushing to the git remote does not deploy this site; the UI does."""
-        self.assertIn("앱 호스팅 UI", publish.MANUAL_STEPS)
-        self.assertIn("--verify-only", publish.MANUAL_STEPS)
-        self.assertNotIn("push", publish.MANUAL_STEPS)
+    def test_points_at_the_local_runner(self) -> None:
+        self.assertIn("run-local.ps1", publish.MANUAL_STEPS)
+        self.assertIn("127.0.0.1:3000", publish.MANUAL_STEPS)
+        self.assertNotIn("호스팅", publish.MANUAL_STEPS)
 
 
 if __name__ == "__main__":

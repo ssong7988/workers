@@ -10,10 +10,10 @@ from typing import Callable
 from .models import Listing, ScanResult
 
 
-# Same environment variable the standalone kakao-notifier CLI reads, so the
-# hosted report lives at one address for both entry points.
+# The report UI now runs locally. Override this with a LAN URL when another
+# device (for example, the phone opening a Kakao button) must reach the PC.
 REPORT_URL = os.environ.get(
-    "KAKAO_REPORT_URL", "https://my-property-report-20260902.ssong7988.chatgpt.site"
+    "KAKAO_REPORT_URL", "http://127.0.0.1:3000"
 ).strip()
 # Kakao feed templates cap the title and description; the card image carries
 # the detail, so these only ever hold a short summary.
