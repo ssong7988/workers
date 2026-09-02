@@ -27,13 +27,38 @@ Copy-Item config\searches.yaml config\searches.local.yaml
 
 ## 최초 실행
 
+Edge를 먼저 띄우고(아래 참고), 그다음 순서대로 실행합니다.
+
 ```powershell
 python -m real_estate_finder browser-login
 python -m real_estate_finder validate-config
 python -m real_estate_finder smoke-test
 ```
 
-기본 실행은 새 브라우저를 만들지 않고 `http://127.0.0.1:9222`에서 이미 실행 중인 Edge에 연결합니다. 이 연결을 사용하려면 Edge가 처음부터 원격 디버깅 옵션과 함께 실행되어 있어야 하며, 이미 일반 모드로 실행 중인 Edge에는 실행 도중 연결을 추가할 수 없습니다. 연결한 Edge와 탭은 프로그램 종료 후에도 닫지 않습니다.
+### 시작 지점: Edge를 직접 띄우고 거기에 로그인한다
+
+이 프로그램은 브라우저를 새로 만들지 않습니다. **사용자가 띄운 Edge에 붙습니다.** 그래서 모든 실행의 출발점은 아래 명령입니다.
+
+```powershell
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" `
+  --remote-debugging-port=9222 --user-data-dir="$env:LOCALAPPDATA\naver-land-edge"
+```
+
+이 Edge 창을 **켜 둔 채로** 조회 명령을 실행합니다. 프로그램은 여기 붙어서 화면을 조작하고, 끝나도 창과 탭을 닫지 않습니다.
+
+**`--user-data-dir`는 생략할 수 없습니다.** Chrome 136(Edge도 동일)부터 보안상 기본 프로필에서는 `--remote-debugging-port`가 조용히 무시됩니다. 평소 쓰던 Edge 프로필에는 붙을 수 없다는 뜻입니다. 경로는 **저장소 밖**을 쓰세요 — 저장소 안을 가리키면 프로필 파일 수천 개가 작업 트리에 쌓입니다.
+
+전용 프로필이라 처음에는 네이버에 로그인돼 있지 않습니다. 한 번만 로그인하면 그 프로필에 남습니다.
+
+```powershell
+python -m real_estate_finder browser-login
+```
+
+Edge 창에서 네이버 로그인을 완료하면 **자동으로 이어집니다**(최대 5분 대기). 이미 로그인돼 있으면 확인만 하고 끝납니다.
+
+이미 다른 Edge가 일반 모드로 실행 중이면 위 명령이 새 창만 띄우고 포트가 열리지 않을 수 있습니다. 그럴 때는 그 Edge를 모두 닫고 다시 실행하세요.
+
+> 참고: `--edge-cdp ""`를 주면 프로그램이 `data/browser-profile`로 Edge를 직접 띄우는 대체 모드로 동작합니다. 사용자가 브라우저를 통제하지 않게 되므로 기본 경로는 아닙니다.
 
 `smoke-test`는 오전까지 기다리지 않고 세 조건을 즉시 한 번 조회합니다. 조회 성공 여부와 조건 충족 매물을 본인 카카오톡으로 전송하며 정규 급매 발송 이력은 소모하지 않습니다.
 

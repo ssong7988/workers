@@ -12,6 +12,30 @@ from .models import Listing, SearchCondition, iso_now
 from .parsing import normalize_type_name, parse_price_won
 
 
+EDGE_LAUNCH_COMMAND = (
+    '& "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" '
+    "--remote-debugging-port=9222 "
+    '--user-data-dir="$env:LOCALAPPDATA\\naver-land-edge"'
+)
+
+
+def _cdp_help(endpoint: str) -> str:
+    """Explain how to start the browser this program attaches to.
+
+    Saying only "make sure Edge is running with remote debugging" left the
+    actual command undocumented, and every scan failed here.
+    """
+    return (
+        f"디버깅 포트로 열린 Edge를 찾지 못했습니다: {endpoint}\n"
+        "  Edge를 아래 명령으로 직접 실행한 뒤 다시 시도하세요.\n"
+        f"    {EDGE_LAUNCH_COMMAND}\n"
+        "  · --user-data-dir은 필수입니다. Chrome 136(Edge 동일)부터 기본 프로필에서는\n"
+        "    --remote-debugging-port가 조용히 무시됩니다. 저장소 밖 경로를 쓰세요.\n"
+        "  · 이 전용 프로필에서 네이버에 한 번 로그인하면 그대로 유지됩니다.\n"
+        "    로그인은 browser-login으로 진행하세요."
+    )
+
+
 class CollectionError(RuntimeError):
     pass
 
@@ -31,8 +55,12 @@ class NaverBrowserCollector:
     ARTICLE_LINK_SELECTOR = "a[href*='/articles/'], a[href*='articleNo=']"
     FAVORITES_LINK_RE = re.compile(r"^관심부동산(?:\s+현재 위치)?$")
     FAVORITE_ARTICLE_HREF_RE = re.compile(r"^/complexes/(\d+)\?tab=article$")
+    FAVORITE_COUNT_RE = re.compile(r"총\s*(\d+)\s*개")
+    COMPLEX_TAB_NAME = "단지"
     BETWEEN_COMPLEX_DELAY_MS = 8_000
-    MAX_FAVORITE_COMPLEXES = 6
+    LOGIN_WAIT_SECONDS = 300
+    # Runaway guard only; the saved-complex count comes from the screen.
+    MAX_FAVORITE_COMPLEXES = 30
     MAX_LISTINGS_PER_COMPLEX = 120
     WORLD_MARK_COMPLEX_IDS = {"104517"}
 
@@ -54,15 +82,20 @@ class NaverBrowserCollector:
                 try:
                     browser = playwright.chromium.connect_over_cdp(self.cdp_endpoint)
                 except Exception as exc:
-                    raise CollectionError(
-                        "현재 Edge에 연결할 수 없습니다. Edge가 원격 디버깅 포트와 함께 "
-                        f"실행 중인지 확인하세요: {self.cdp_endpoint}"
-                    ) from exc
+                    raise CollectionError(_cdp_help(self.cdp_endpoint)) from exc
                 if not browser.contexts:
                     raise CollectionError("연결된 Edge에서 브라우저 컨텍스트를 찾지 못했습니다.")
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else context.new_page()
+                if self._is_logged_in(page):
+                    print("연결된 Edge가 이미 네이버에 로그인돼 있습니다.")
+                    return
+                # This is the entry point: the user launches Edge themselves and
+                # signs in there. Walk them through it rather than telling them
+                # to re-run the very command they are already running.
+                self._wait_for_login(page, url)
                 self._verify_login(page)
+                print("네이버 로그인을 확인했습니다. 이 Edge를 켜 둔 채로 조회를 실행하세요.")
                 return
             context = playwright.chromium.launch_persistent_context(
                 str(self.profile_dir),
@@ -71,35 +104,13 @@ class NaverBrowserCollector:
                 viewport={"width": 1440, "height": 1000},
             )
             page = context.pages[0] if context.pages else context.new_page()
-            page.goto(self.NAVER_HOME_URL, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(1_500)
-            if "로그아웃" in page.locator("body").inner_text(timeout=10_000):
+            try:
+                if not self._is_logged_in(page):
+                    self._wait_for_login(page, url)
+                    self._verify_login(page)
+            except Exception:
                 context.close()
-                return
-            page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-            input("브라우저에서 네이버 로그인을 완료한 뒤 Enter를 누르세요: ")
-            # The login page may still be completing its own redirect when the
-            # user confirms. Let that navigation settle before opening home.
-            page.wait_for_timeout(2_000)
-            for attempt in range(3):
-                try:
-                    page.goto(
-                        self.NAVER_HOME_URL,
-                        wait_until="domcontentloaded",
-                        timeout=60_000,
-                    )
-                    break
-                except Exception:
-                    if attempt == 2:
-                        context.close()
-                        raise
-                    page.wait_for_timeout(1_500)
-            page.wait_for_timeout(2_000)
-            if "로그아웃" not in page.locator("body").inner_text():
-                context.close()
-                raise CollectionError(
-                    "네이버 로그인 상태를 확인하지 못했습니다. browser-login을 다시 실행하세요."
-                )
+                raise
             # Closing a persistent context flushes the authenticated browser profile
             # to disk. Later scheduled runs reuse this exact profile directory.
             context.close()
@@ -149,9 +160,7 @@ class NaverBrowserCollector:
                 try:
                     browser = playwright.chromium.connect_over_cdp(self.cdp_endpoint)
                 except Exception as exc:
-                    raise CollectionError(
-                        f"실행 중인 Edge에 연결하지 못했습니다: {self.cdp_endpoint}"
-                    ) from exc
+                    raise CollectionError(_cdp_help(self.cdp_endpoint)) from exc
                 if not browser.contexts:
                     raise CollectionError("연결된 Edge에서 브라우저 컨텍스트를 찾지 못했습니다.")
                 context = browser.contexts[0]
@@ -167,12 +176,12 @@ class NaverBrowserCollector:
             try:
                 self._verify_login(page)
                 self._open_land_from_naver_home(page)
-                self._open_favorites(page)
-                complexes = self._favorite_complexes(page)
-                if len(complexes) != self.MAX_FAVORITE_COMPLEXES:
+                expected = self._open_favorites(page)
+                complexes = self._favorite_complexes(page, expected)
+                if len(complexes) != expected:
                     raise CollectionError(
-                        f"관심단지 {self.MAX_FAVORITE_COMPLEXES}개를 예상했지만 "
-                        f"{len(complexes)}개를 찾았습니다. 화면을 확인하세요."
+                        f"관심단지 화면은 {expected}개라고 표시하는데 "
+                        f"{len(complexes)}개만 읽었습니다. 화면을 확인하세요."
                     )
 
                 collected = []
@@ -180,40 +189,51 @@ class NaverBrowserCollector:
                     if index:
                         page.wait_for_timeout(self.BETWEEN_COMPLEX_DELAY_MS)
                     collected.append(self._collect_favorite_complex(page, complex_info))
-                    if index < len(complexes) - 1:
-                        self._open_favorites(page)
 
                 return {"observed_at": iso_now(), "complexes": collected}
             finally:
                 if not externally_managed:
                     context.close()
 
-    def _open_favorites(self, page) -> None:
+    def _open_favorites(self, page) -> int:
+        """Open 관심부동산 → 단지 and return how many complexes are saved."""
         self._raise_if_blocked(page)
         links = page.get_by_role("link", name=self.FAVORITES_LINK_RE)
         link = self._first_visible(links)
         if link is None:
             raise CollectionError("부동산 화면에서 관심부동산 링크를 찾지 못했습니다.")
         link.click()
-        page.wait_for_timeout(1_500)
+        page.wait_for_timeout(2_500)
         self._raise_if_blocked(page)
         if "관심부동산" not in page.locator("body").inner_text(timeout=10_000):
             raise CollectionError("관심부동산 화면으로 이동하지 못했습니다.")
 
-        # Favorites opens on '최근조회' by default. Click the visible '단지'
-        # label just as the user does; clicking the hidden radio itself is less
-        # reliable on the current SPA.
-        complex_labels = page.get_by_text("단지", exact=True)
-        complex_label = self._first_visible(complex_labels)
-        if complex_label is None:
-            raise CollectionError("관심부동산에서 단지 탭을 찾지 못했습니다.")
-        complex_label.click()
-        page.wait_for_timeout(1_200)
-        self._raise_if_blocked(page)
-        if "총 6개" not in page.locator("body").inner_text(timeout=10_000):
-            raise CollectionError("관심부동산 단지 탭에서 총 6개 표시를 확인하지 못했습니다.")
+        # Favorites opens on '최근조회' by default. The tabs are chips: a label
+        # wrapping a hidden radio, so click the label as the user does.
+        text = ""
+        for attempt in range(3):
+            if attempt:
+                page.wait_for_timeout(1_500)
+            chip = self._first_visible(
+                page.get_by_text(self.COMPLEX_TAB_NAME, exact=True), min_size=8
+            )
+            if chip is None:
+                continue
+            chip.click()
+            page.wait_for_timeout(1_500)
+            self._raise_if_blocked(page)
+            text = page.locator("body").inner_text(timeout=10_000)
+            match = self.FAVORITE_COUNT_RE.search(text)
+            if match:
+                return int(match.group(1))
 
-    def _favorite_complexes(self, page) -> list[dict[str, str]]:
+        snippet = " | ".join(line.strip() for line in text.splitlines() if line.strip())[:300]
+        raise CollectionError(
+            "관심부동산 단지 탭으로 전환하지 못했습니다. "
+            f"'총 N개' 표시를 찾을 수 없습니다. 현재 화면: {snippet}"
+        )
+
+    def _favorite_complexes(self, page, limit: int | None = None) -> list[dict[str, str]]:
         rows = page.locator("a").evaluate_all(
             """els => els.map(a => ({
                 href: a.getAttribute('href') || '',
@@ -233,15 +253,23 @@ class NaverBrowserCollector:
             complexes.append(
                 {"complex_id": match.group(1), "name": name, "href": row["href"]}
             )
-        return complexes[: self.MAX_FAVORITE_COMPLEXES]
+        # Follow whatever the screen reports; MAX_FAVORITE_COMPLEXES is only a
+        # runaway guard, so adding or removing a favorite needs no code change.
+        cap = min(limit or self.MAX_FAVORITE_COMPLEXES, self.MAX_FAVORITE_COMPLEXES)
+        return complexes[:cap]
 
     def _collect_favorite_complex(self, page, complex_info: dict[str, str]) -> dict:
-        href = complex_info["href"]
-        link = page.locator(f'a[href="{href}"]').first
-        if link.count() == 0 or not link.is_visible():
-            raise CollectionError(f"{complex_info['name']}: 매물보기 링크를 찾지 못했습니다.")
-        link.click()
-        page.wait_for_timeout(2_000)
+        # The favorites panel is read once to learn these addresses; going back
+        # to it between complexes proved unreliable, because clicking 관심부동산
+        # lands on a different panel depending on the page we came from. This is
+        # the same public page the panel's own link opens, not a private
+        # endpoint, and the heading check below confirms where we landed.
+        page.goto(
+            urljoin(self.HOME_URL, complex_info["href"]),
+            wait_until="domcontentloaded",
+            timeout=60_000,
+        )
+        page.wait_for_timeout(2_500)
         self._raise_if_blocked(page)
 
         heading = page.get_by_role("heading", name=complex_info["name"], exact=True)
@@ -281,9 +309,13 @@ class NaverBrowserCollector:
                     }
                     if (!card || cards.has(card)) continue;
                     cards.add(card);
-                    const representative = card.querySelector('a[href*="/articles/"]');
+                    // A bundled card holds one link per agent listing; return
+                    // them all so the caller can choose which one to keep.
+                    const hrefs = [...card.querySelectorAll('a[href*="/articles/"]')]
+                        .map(a => a.getAttribute('href') || '')
+                        .filter(Boolean);
                     rows.push({
-                        href: representative?.getAttribute('href') || '',
+                        hrefs: hrefs,
                         text: (card.innerText || '').trim()
                     });
                 }
@@ -293,15 +325,18 @@ class NaverBrowserCollector:
         listings = []
         seen: set[str] = set()
         for row in rows:
-            listing_id = _extract_listing_id(row["href"])
+            listing_id, href = _pick_representative_article(row["hrefs"])
             if not listing_id:
                 fingerprint = f"{complex_info['complex_id']}|{row['text']}"
                 listing_id = "card-" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:20]
+                # No article link on this card. Send the reader to the complex's
+                # own listing page rather than the site home, which is useless.
+                href = complex_info["href"]
             if listing_id in seen:
                 continue
             seen.add(listing_id)
             parsed = _parse_favorite_listing_text(
-                row["text"], listing_id, complex_info["name"], row["href"]
+                row["text"], listing_id, complex_info["name"], href
             )
             if parsed:
                 listings.append(parsed)
@@ -368,12 +403,37 @@ class NaverBrowserCollector:
         if "로그인" in text and "로그아웃" not in text and "내정보 보기" not in text:
             raise CollectionError("네이버 로그인 상태가 만료되어 수집을 중단했습니다.")
 
-    def _verify_login(self, page) -> None:
+    def _is_logged_in(self, page) -> bool:
         page.goto(self.NAVER_HOME_URL, wait_until="domcontentloaded", timeout=60_000)
         page.wait_for_timeout(1_500)
-        if "로그아웃" not in page.locator("body").inner_text():
+        return "로그아웃" in page.locator("body").inner_text(timeout=10_000)
+
+    def _wait_for_login(self, page, url: str) -> None:
+        """Open Naver's login form and wait for the user to finish signing in.
+
+        Waiting on stdin would make this unusable wherever there is no terminal,
+        so watch the page instead: Naver leaves nid.naver.com once the login
+        succeeds. Polling the URL avoids navigating away from the form while the
+        user is still filling it in.
+        """
+        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        print(
+            "브라우저에서 네이버 로그인을 완료하세요. "
+            f"완료되면 자동으로 이어집니다 (최대 {self.LOGIN_WAIT_SECONDS // 60}분 대기)."
+        )
+        deadline = time.monotonic() + self.LOGIN_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            page.wait_for_timeout(2_000)
+            if "nid.naver.com" not in (page.url or ""):
+                # Let Naver's own post-login redirect settle.
+                page.wait_for_timeout(2_000)
+                return
+        raise CollectionError("로그인 대기 시간이 지났습니다. browser-login을 다시 실행하세요.")
+
+    def _verify_login(self, page) -> None:
+        if not self._is_logged_in(page):
             raise CollectionError(
-                "저장된 네이버 로그인이 만료됐습니다. browser-login을 다시 실행하세요."
+                "네이버 로그인이 안 된 Edge입니다. browser-login을 실행해 로그인하세요."
             )
 
     def _collect_condition(self, page, condition: SearchCondition) -> list[Listing]:
@@ -499,11 +559,22 @@ class NaverBrowserCollector:
             raise CollectionError("네이버 홈의 부동산 링크 클릭 후 이동을 확인하지 못했습니다.")
 
     @staticmethod
-    def _first_visible(locator):
+    def _first_visible(locator, min_size: int = 0):
+        """First on-screen match, optionally ignoring hairline elements.
+
+        Naver ships screen-reader-only `span.blind` copies of its labels. They
+        are 1x1 but still report as visible, so a plain is_visible() check can
+        hand back an element that swallows the click.
+        """
         for index in range(locator.count()):
             candidate = locator.nth(index)
-            if candidate.is_visible():
-                return candidate
+            if not candidate.is_visible():
+                continue
+            if min_size:
+                box = candidate.bounding_box()
+                if not box or box["width"] < min_size or box["height"] < min_size:
+                    continue
+            return candidate
         return None
 
     @staticmethod
@@ -564,6 +635,27 @@ def _extract_listing_id(text: str) -> str:
         if match:
             return match.group(1)
     return ""
+
+
+def _pick_representative_article(hrefs: list[str]) -> tuple[str, str]:
+    """Choose which listing a card should link to.
+
+    Naver bundles several agents' listings into a single card whose price is
+    shown as a range; the card text we parse already carries the cheapest of
+    them. Among the links on the card we keep the newest, since article numbers
+    grow over time — a heuristic, but the numbers are not otherwise ordered.
+
+    Returns `(listing_id, href)`, both empty when the card links to no article.
+    """
+    best_id = ""
+    best_href = ""
+    for href in hrefs:
+        listing_id = _extract_listing_id(href)
+        if not listing_id:
+            continue
+        if not best_id or int(listing_id) > int(best_id):
+            best_id, best_href = listing_id, href
+    return best_id, best_href
 
 
 def _extract_price_text(text: str) -> str:

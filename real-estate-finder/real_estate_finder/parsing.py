@@ -32,15 +32,22 @@ def parse_price_won(text: str) -> int:
 
 
 def parse_floor(text: str, rule: LowFloorRule) -> tuple[int | None, bool, bool]:
+    """Read a listing's own floor from Naver's `<floor>/<building height>층` text.
+
+    Only the part before the slash describes the listing; the number after it is
+    how tall the building is. Matching anywhere in the string would read
+    "중/23층" as floor 23 instead of an unnumbered middle floor.
+    """
     normalized = text.strip().replace(" ", "")
+    head = normalized.partition("/")[0]
     for label in rule.labels:
-        if label and label in normalized:
+        if label and label in head:
             return None, True, True
-    match = re.search(r"(?<!\d)(\d{1,3})(?:층|/)", normalized)
+    match = re.match(r"(\d{1,3})", head)
     if match:
         floor = int(match.group(1))
         return floor, floor in rule.numeric_floors, True
-    if any(label in normalized for label in ("중층", "고층", "중", "고")):
+    if any(label in head for label in ("중층", "고층", "중", "고")):
         return None, False, True
     return None, False, False
 

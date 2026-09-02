@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 
 from real_estate_finder.config import load_config, validate_config
-from real_estate_finder.collector import _parse_favorite_listing_text
+from real_estate_finder.collector import (
+    NaverBrowserCollector,
+    _parse_favorite_listing_text,
+    _pick_representative_article,
+)
 from real_estate_finder.models import Listing, LowFloorRule, SearchCondition
 from real_estate_finder.notifier import batch_listing_message, listing_message
 from real_estate_finder.parsing import matches_condition, parse_floor, parse_price_won
@@ -87,8 +91,60 @@ class FloorTests(unittest.TestCase):
                 self.assertTrue(known)
                 self.assertFalse(low)
 
+    def test_building_height_is_not_the_listing_floor(self) -> None:
+        """"중/23층" is a middle floor of a 23-storey building, not floor 23."""
+        for text in ("중/23층", "고/25층", "저/20층"):
+            with self.subTest(text=text):
+                floor, _low, known = parse_floor(text, RULE)
+                self.assertTrue(known)
+                self.assertIsNone(floor)
+
+    def test_numbered_floor_ignores_building_height(self) -> None:
+        self.assertEqual(parse_floor("9/23층", RULE)[0], 9)
+        self.assertEqual(parse_floor("21/25층", RULE)[0], 21)
+
     def test_unknown_floor(self) -> None:
         self.assertEqual(parse_floor("정보없음", RULE), (None, False, False))
+
+
+class FavoriteCountTests(unittest.TestCase):
+    """Naver splits the number and its unit into separate elements."""
+
+    def _count(self, text: str):
+        match = NaverBrowserCollector.FAVORITE_COUNT_RE.search(text)
+        return int(match.group(1)) if match else None
+
+    def test_reads_count_across_layouts(self) -> None:
+        for text, expected in (
+            ("총 6개", 6),
+            ("단지\n총 6\n개\n래미안", 6),  # what innerText actually returns
+            ("총12개", 12),
+            ("총  30  개", 30),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(self._count(text), expected)
+
+    def test_no_count_present(self) -> None:
+        self.assertIsNone(self._count("최근조회\n래미안과천센트럴스위트"))
+
+
+class RepresentativeArticleTests(unittest.TestCase):
+    def test_picks_the_newest_of_a_bundle(self) -> None:
+        listing_id, href = _pick_representative_article(
+            ["/articles/2645262271", "/articles/2647101276", "/articles/2646599402"]
+        )
+        self.assertEqual(listing_id, "2647101276")
+        self.assertEqual(href, "/articles/2647101276")
+
+    def test_single_link(self) -> None:
+        self.assertEqual(
+            _pick_representative_article(["/articles/2647057443"]),
+            ("2647057443", "/articles/2647057443"),
+        )
+
+    def test_no_article_link(self) -> None:
+        self.assertEqual(_pick_representative_article([]), ("", ""))
+        self.assertEqual(_pick_representative_article(["/complexes/104517?tab=article"]), ("", ""))
 
 
 class FilteringTests(unittest.TestCase):
