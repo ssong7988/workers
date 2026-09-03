@@ -1,20 +1,20 @@
 # Project State
 
-마지막 갱신: 2026-09-03
+마지막 갱신: 2026-09-03 (가격 통계 기능 추가)
 
 ## Current Architecture
 
 - 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.agent/docs/ARCHITECTURE.md`에 정리되어 있다.
 - `real-estate-finder/`는 네이버 부동산 매물을 수집해 `report-site` API로 넘기기만 한다. 조건 판정·상태·표현·전송 코드는 없다.
-- `report-site/properties/`가 카드 생성·전송 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. finder 쪽 중복 코드는 8단계에서 삭제했다.
-- `report-site/`(Django + waitress)가 PostgreSQL의 활성 `Listing`을 요청마다 읽어 전체 매물 웹 리포트를 렌더링한다. 빌드나 배포 단계는 없다.
+- `report-site/properties/`가 카카오 메시지 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. finder 쪽 중복 코드는 8단계에서 삭제했다.
+- `report-site/`(Django + waitress)가 PostgreSQL을 요청마다 읽어 화면 둘을 렌더링한다. `r/<TOKEN>/`은 활성 `Listing`으로 매물 리포트를, `r/<TOKEN>/stats/`는 `Observation` 이력으로 날짜별 호가 분포를 그린다. 빌드나 배포 단계는 없다.
 - `property-report-site/site-app/`(예전 Next.js/Codex Sites UI)은 서빙 경로에서 은퇴했다. 루트와 별도 중첩 Git 저장소이며 삭제하지 않고 참고용으로만 남겼다.
 - 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
 - 급매가 아닌 전체 결과를 카카오톡으로 보내는 진입점은 `real-estate-finder/send-report.bat`이며 `report-site`의 `manage.py send_digest`를 실행한다. 브라우저·로그인·웹 서버가 필요 없고 DB만 있으면 된다.
 - 리포트 서버 실행 진입점은 `report-site/run-site.bat` 또는 `report-site/run-site.ps1`이다.
 - `scan-once`는 수집 결과를 `POST /api/scans/`로 넘기고, Django가 급매 또는 신규가 있을 때만 카카오톡을 보낸다. 보내지 않은 경우에도 사유가 응답의 `scan.notification`으로 돌아와 콘솔에 출력되고 `Scan` 행에도 남는다.
 - 검색 설정은 PostgreSQL의 `SearchCondition`이며 Django admin에서 고친다. `report-site/properties/seed/searches.yaml`은 초기 시드일 뿐이다.
-- `record_scan()`의 트랜잭션이 알림 전송보다 먼저 커밋된다. 그래야 카드가 `is_live()`로 확인하는 시점에 이미 이번 조회 결과가 서빙되고 있다.
+- `record_scan()`의 트랜잭션이 알림 전송보다 먼저 커밋된다. 그래야 `is_live()`로 확인하는 시점에 이미 이번 조회 결과가 서빙되고 있다.
 - `is_live()`(`report-site/properties/publish.py`)는 리포트 서버(그리고 Tailscale Funnel)가 살아있고 이번 조회를 서빙 중인지만 확인한다.
 - 외부 공개는 Tailscale Funnel로 `report-site/`의 8000번 포트를 노출해 고정 HTTPS 주소(`https://<pc>.<tailnet>.ts.net`)를 얻는 방식이다. 접근 제어는 추측 불가능한 경로 토큰(`REPORT_PATH_TOKEN`)이다.
 - `KAKAO_REPORT_URL`은 루트 `.env`(`load-env.ps1`이 `run-scan.ps1`/`send-report.ps1`/`report-site/run-site.ps1`에 공유)로 관리하고, `REPORT_PATH_TOKEN`은 `report-site/.env`로 관리한다. 둘 다 Git에서 제외한다.
@@ -31,8 +31,8 @@
 - `check-report`로 공개 주소가 `data/state.json`의 기준 시각(`2026-09-03T08:38:55+09:00`, 활성 매물 41건)과 일치함을 확인했다.
 - `send-report.ps1`로 실제 카카오톡 카드 1통(매물 41건)을 전송해 `전체 매물 보기` 버튼 동작까지 사용자가 휴대폰에서 확인했다.
 - 리포트 화면은 관심 단지 6개, 확인 매물 41건, 급매 1건을 정확히 렌더링한다.
-- 카카오 이미지는 카카오 이미지 업로드 API를 사용한다(변경 없음).
-- 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`)와 Django 테스트 49개 전부 통과, `manage.py check`, `makemigrations --check` 통과.
+- 카카오는 이미지를 보내지 않는다. 텍스트 1통에 `통계 보기`·`전체 매물 보기` 버튼 2개를 붙인다(2026-09-03 통계 기능과 함께 변경).
+- 마지막 확인 시 finder 테스트 32개와 Django 테스트 84개 전부 통과, `manage.py check`, `makemigrations --check` 통과. Django 테스트는 DB 생성 권한이 필요하다(아래 Known Issues 참고).
 - PostgreSQL 서비스 `postgresql-x64-18`이 자동 시작으로 등록돼 실행 중이며, `property_report` 역할/DB 생성과 Django 마이그레이션 적용을 완료했다.
 - `import_searches`와 `import_state`를 실행해 공통 규칙 1개, 검색조건 6개, 수집 실행 27개, 원본 관측 1,304개, 전체 매물 62개를 이관했다. 활성 매물 41개, 활성 급매 1개이며 `last_urgent_alert_price_won`이 있는 기존 매물 2개의 기록도 보존됐다.
 - 이관 명령은 두 번 실행해 중복이 생기지 않음을 확인했다. DB 기반 Django 테스트 16개와 `manage.py check`, `makemigrations --check`가 통과했다.
@@ -43,7 +43,19 @@
 - **새 구조로 실제 네이버 수집을 1회 완주했다(2026-09-03 14:35~14:40 KST, 약 5분).** 6개 조건 전부 성공, 실패 0. 수집 120건 · 조건충족 42건 · 제외 78건(대부분 `가격 초과`)이 모두 DB에 기록됐다. `Scan` 27→28, `Observation` 1,304→1,424, `Listing` 62→74, 활성 41→42.
 - **급매 알림 중복 방지가 실제로 동작했다.** 활성 급매 1건이 있었지만 `import_state`가 옮겨 온 `last_urgent_alert_price_won` 때문에 재전송되지 않았다. 이관에서 가장 잃기 쉬웠던 이력이 실제로 보존됐음을 확인한 셈이다.
 - 이번 스캔은 카카오톡을 보내지 않았고 그 사유가 `Scan.notification`에 남았다 — "급매 1건은 이미 같은 가격 이하로 알림을 보냈습니다 / 신규 12건은 notify_new가 꺼진 조건이라 알리지 않습니다". 의도된 정책이며 조용한 종료가 아니다.
-- Django admin 접속 경로(`.../r/<REPORT_PATH_TOKEN>/admin/`)와 `admin` 슈퍼유저 로그인을 확인했다. `Observation`의 `exclusion_reason` 필터로 제외 사유를 조회할 수 있다.
+- Django admin 접속 경로(`.../r/<REPORT_PATH_TOKEN>/admin/`)와 `admin` 슈퍼유저 로그인을 확인했다. `Observation`의 `exclusion_code` 필터로 제외 사유를 구분해 조회할 수 있다.
+
+### 가격 통계 기능 (2026-09-03 추가)
+
+- `r/<TOKEN>/stats/`가 날짜별 호가 분포를 캔들(최저~최고 심지, 1분위~3분위 상자, 평균 가로선)로 보여준다. 서버가 좌표까지 계산하는 inline SVG이며 JS 의존성이 없다.
+- 기간은 월 선택 또는 시작일/종료일이고 기본값은 최근 1개월, 범위는 전체/지역/단지이고 기본값은 과천 전체다. 잘못된 질의 문자열은 예외 대신 기본값으로 되돌리고 화면에 사유를 적는다.
+- **모집단은 리포트보다 넓다.** `exclusion_code in ("", "price")` — 면적·타입은 통과했고 가격 상한에서만 잘린 매물까지 포함한다. 상한가에서 자르면 최고가와 3분위가 시세가 아니라 사용자의 예산을 나타내게 되기 때문이다.
+- **하루에 스캔이 여러 번 도므로 `(조건, 매물, 로컬 날짜)`당 마지막 관측 하나만 센다.** 이것을 빠뜨리면 자주 조회된 매물이 분위수를 지배한다.
+- `SearchCondition.region`(과천 5 / 광교 1)과 `Observation.exclusion_code`를 추가하고 기존 행을 백필했다.
+- **이관된 과거 관측이 전부 "조건 충족"으로 잘못 표시돼 있었다.** `Scan`의 집계는 맞았지만 행별 `exclusion_reason`이 옮겨오지 않아, 7~27번 스캔의 1,304행이 모두 통과로 읽혔다. 모집단 면적이 35.93~137.21㎡로 벌어져 59㎡와 137㎡가 한 분포에 섞였다. `reclassify_observations`로 다시 판정했다 — 실제로 판정된 28번 스캔 120건을 한 건도 어긋나지 않고 재현한 뒤 나머지 971건을 고쳤다. 지금 모집단은 84.57~84.99㎡다.
+- 확인된 수치(2026-09-03): 과천 9/2 160건 21.5~29.5억, 9/3 145건 21.5~29.5억. 광교 9/2 4건, 9/3 2건. 통계 표본(145)이 조건충족(42)보다 많은 것이 정상이다.
+- 카카오는 카드 PNG 대신 텍스트 1통 + 버튼 2개를 보낸다. **카카오 기본 텍스트 템플릿이 `buttons` 배열을 받는다는 것을 실제 전송 1회로 확인했다.** 200자 예산은 통계 한 줄과 매물 목록이 나눠 쓴다.
+- `properties/card.py`, `preview_card`, `test_card.py`를 삭제했다. headless Edge 렌더링 의존이 사라졌다.
 
 ## Completed Migration: 수집기 / 애플리케이션 역할 분리 (2026-09-03)
 
@@ -199,6 +211,10 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 | 급매 알림 이력이 보존됐는가 | 활성 급매 1건이 재전송되지 않음 |
 | admin에서 조회되는가 | 토큰 경로 admin 로그인과 `exclusion_reason` 필터 확인 |
 
+#### 이후 추가된 작업
+
+- 2026-09-03: 가격 통계 화면과 카카오 메시지 개편. 위 "가격 통계 기능" 절 참고.
+
 #### 남은 결정
 
 `kakao-image-card` 브랜치를 `main`에 병합할지 결정한다. 그 외에 계획된 작업은 없다.
@@ -274,7 +290,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ## Known Issues
 
-- **`report-site/run-site.bat`이 실행 중이 아니면 공개 리포트 주소가 죽는다.** PC 종료·절전도 마찬가지다. 자동 시작을 등록하지 않기로 했으므로(Key Decisions 참고) 리포트를 외부에서 열어야 할 때 사용자가 직접 켜야 한다. 다행히 조용히 깨지지는 않는다 — 서버가 없으면 `is_live()`가 실패해 카카오 카드에서 버튼이 빠진다.
+- **`report-site/run-site.bat`이 실행 중이 아니면 공개 리포트 주소가 죽는다.** PC 종료·절전도 마찬가지다. 자동 시작을 등록하지 않기로 했으므로(Key Decisions 참고) 리포트를 외부에서 열어야 할 때 사용자가 직접 켜야 한다. 다행히 조용히 깨지지는 않는다 — 서버가 없으면 `is_live()`가 실패해 카카오 메시지에서 두 버튼이 빠지고 텍스트만 나간다.
 - **이제 스캔 자체가 리포트 서버 실행을 요구한다.** `run-scan.ps1`의 1단계 `check-api`가 실패하면 브라우저를 열지 않고 멈춘다. 예전처럼 "서버가 꺼져 있어도 스캔은 된다"가 더 이상 성립하지 않는다. 자동 시작(작업 스케줄러 로그온 트리거) 등록 여부를 다시 판단할 시점이다.
 - **전환 후 Django admin이 공개 URL에 노출된다.** 토큰 경로 뒤에 두더라도 로그인 화면이 인터넷에 열린다. 강한 비밀번호가 필요하다.
 - 예전 Codex Sites 주소(`https://my-property-report-20260902.ssong7988.chatgpt.site`)는 더 이상 갱신되지 않는다. 루트 `.env`의 `KAKAO_REPORT_URL`을 지우면 이 오래된 주소로 폴백하므로 비우지 않는다.
@@ -284,6 +300,8 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - **급매가 아니면 대부분 카카오톡이 오지 않는다. 정상이다.** `notify_new`가 켜진 조건은 `gwanggyo-prugio-worldmark-84-85`(광교푸르지오월드마크) 하나뿐이라, 나머지 5개 과천 단지는 신규 매물이 나와도 알리지 않는다. 이미 같은 가격 이하로 알린 급매도 더 내려가지 않으면 다시 알리지 않는다. 사유는 항상 콘솔과 `Scan.notification`에 남으므로, 조용하다고 느껴지면 먼저 그것을 읽는다. 지금 전체를 받고 싶으면 `send-report.bat`이다.
 - 루트와 예전 UI(`property-report-site/site-app/`)가 중첩 Git 저장소로 남아 있다. 그 디렉터리를 다시 건드릴 일이 생기면 UI 커밋 누락이나 루트 포인터만 변경되는 실수에 유의한다.
 - 마지막 `npm audit` 결과는 취약점 11개(낮음 1, 보통 2, 높음 8)였다(예전 UI 저장소 기준, 더 이상 서빙 경로가 아니므로 우선순위 낮음).
+- **Django 테스트에는 DB 생성 권한이 필요하다.** `property_report` 역할에 `CREATEDB`가 없어 `manage.py test`가 테스트 DB를 만들지 못한다. 테스트 동안만 부여했다가 되돌린다(`ALTER ROLE property_report CREATEDB;` → `NOCREATEDB;`).
+- **검색 조건을 admin에서 바꾸면 과거 관측은 옛 기준으로 판정된 채 남는다.** 통계가 새 조건과 어긋나므로 `manage.py reclassify_observations`로 다시 판정한다. 다시 판정은 *현재* 조건을 쓰므로 당시 조건과 다를 수 있다 — 의도된 절충이다.
 - 공개 리포트에는 매물 정보가 노출되므로 민감한 개인 데이터나 인증 정보를 포함하지 않아야 한다.
 
 ## Key Decisions

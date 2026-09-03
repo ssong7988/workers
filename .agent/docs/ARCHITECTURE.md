@@ -16,12 +16,12 @@ real-estate-finder            수집 전용. 판정하지 않는다
         |
         v
 report-site                   애플리케이션 (Django + PostgreSQL)
-  properties/  도메인: 모델, 판정, 카드, 카카오 전송, admin, 관리 명령
+  properties/  도메인: 모델, 판정, 통계, 카카오 전송, admin, 관리 명령
   api/         경계:   finder 전용 JSON (Bearer 토큰)
-  report/      화면:   공개 HTML 리포트
+  report/      화면:   공개 HTML 리포트 + 가격 통계
         |
         +--> PostgreSQL (원본 관측 전량 + 현재 매물 상태)
-        +--> kakao-notifier -> 카카오톡 카드
+        +--> kakao-notifier -> 카카오톡 메시지 (통계/매물 버튼 2개)
         +--> tailscale funnel -> 공개 HTTPS 주소
 ```
 
@@ -114,7 +114,7 @@ cli.main (scan-once)
 | `browser-login` | Edge 로그인 상태 확인, 필요하면 사용자 로그인 대기 |
 | `collect-favorites` | 브라우저 수집 후 `data/favorites-latest.json`만 저장. 서버 전송 없음 |
 | `scan-once` | 수집 후 서버에 전달. 서버가 급매·신규가 있으면 카카오톡 전송 |
-| `smoke-test` | 수집 후 전달하되 급매 알림 이력을 소모하지 않고 전체 카드 전송 |
+| `smoke-test` | 수집 후 전달하되 급매 알림 이력을 소모하지 않고 전체 매물 전송 |
 
 `scan-once`와 `smoke-test`는 외부 카카오 메시지를 보낼 수 있다. 단순 코드 검증을 위해 임의로 실행하지 않는다.
 
@@ -127,7 +127,7 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 | 파일/경로 | 책임 |
 |---|---|
 | `report_site/settings.py` | PostgreSQL, admin 배선, whitenoise, 필수 토큰 두 개, 루트 `.env`까지 로드 |
-| `report_site/urls.py` | `r/<TOKEN>/` 리포트, `r/<TOKEN>/admin/` admin, `api/` 수집기 API |
+| `report_site/urls.py` | `r/<TOKEN>/` 리포트, `r/<TOKEN>/stats/` 가격 통계, `r/<TOKEN>/admin/` admin, `api/` 수집기 API |
 | `run-site.ps1`, `run-site.bat` | `check` → `migrate --check` → `collectstatic` → waitress `127.0.0.1:8000` |
 
 ### properties — 도메인 (b/e)
@@ -135,21 +135,21 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 | 파일 | 핵심 |
 |---|---|
 | `models.py` | `GlobalRule`(단일 행), `SearchCondition`, `Scan`, `Observation`, `Listing`, `NotificationFailure`. `PropertyFields`가 관측과 매물의 공통 필드를 담는다 |
-| `matching.py` | `explain_condition`, `matches_condition`, `parse_floor`, `parse_price_won`, `normalize_type_name` |
+| `matching.py` | `explain_condition`, `matches_condition`, `classify_exclusion`, `parse_floor`, `parse_price_won`, `normalize_type_name` |
 | `scanning.py` | `record_scan()` — 저장과 판정을 한 트랜잭션으로. `ScanDecision`, `AlertDecision`, `_no_alert_reason` |
-| `report.py` | `build_report_payload`, `price_text`, `rule_text` — 카드와 웹 리포트가 함께 쓰는 표현 |
-| `card.py` | `render_card_html`, `render_card_png`, `build_card_image` — 자기완결형 HTML을 임시 headless Edge로 PNG 렌더링 |
-| `notifier.py` | `format_eok`, `batch_listing_message`, `card_heading`, `card_caption`, `KakaoNotifier` 어댑터 |
+| `report.py` | `build_report_payload`, `price_text`, `rule_text` — 카카오 메시지와 웹 화면이 함께 쓰는 표현 |
+| `statistics.py` | `collect_series`, `summarize_period`, `build_chart`, `default_summary` — 날짜별 호가 분포와 차트 좌표 |
+| `notifier.py` | `format_eok`, `batch_listing_message`, `stats_headline`, `KakaoNotifier` 어댑터 |
 | `publish.py` | `is_live`, `describe_live`, `is_public_report_url` — 공개 URL이 이번 조회를 서빙 중인지 확인 |
-| `delivery.py` | `DeliveryService` — 카드 전송, 텍스트 폴백, 실패 기록 조정 |
+| `delivery.py` | `DeliveryService` — 버튼 2개 메시지 전송, 링크 없는 폴백, 실패 기록 조정 |
 | `admin.py` | 조건 편집과 수집 결과 조회 화면 |
 | `seed/searches.yaml` | 최초 시드. **운영 소스가 아니다** — 조건은 DB에 있고 admin에서 고친다 |
-| `management/commands/` | `import_searches`, `import_state`, `send_digest`, `preview_card`, `check_report` |
+| `management/commands/` | `import_searches`, `import_state`, `reclassify_observations`, `send_digest`, `check_report` |
 
 `record_scan()`의 순서가 업무 규칙 전체다.
 
 1. `Scan`을 만들고 수집 매물을 **전량** `Observation`으로 저장한다 (조건 통과 여부 무관).
-2. 단지명 별칭으로 조건에 매핑하고 `explain_condition()`을 실행해 탈락 사유를 `Observation.exclusion_reason`에 남긴다.
+2. 단지명 별칭으로 조건에 매핑하고 `explain_condition()`을 실행해 탈락 사유를 `Observation.exclusion_reason`에, 그 안정적 코드를 `exclusion_code`에 남긴다.
 3. 통과분은 `Listing`에 upsert한다. `first_seen_at`은 보존하고 `last_seen_at`과 가격 등을 갱신한다.
 4. `is_urgent` = 가격이 유효 급매가 이하. `is_new` = 기존 행 없음.
 5. `should_alert` = 급매이면서 이전에 알린 적이 없거나 그보다 **더 내려간** 경우. `notify_new` 조건은 신규도 알림 대상.
@@ -169,16 +169,20 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 
 사이트가 Tailscale Funnel로 인터넷에 열려 있으므로 `/api/`도 외부에서 닿는다. 인증은 선택이 아니다. Bearer로 인증된 POST는 CSRF 토큰 없이 쓴다(`csrf_exempt`).
 
-`POST /api/scans/`는 `record_scan()` 트랜잭션이 끝난 뒤 **같은 요청 안에서 동기로** 카드를 전송한다. 큐가 없는 대신 요청이 수 초~수십 초 걸린다. 클라이언트 타임아웃은 600초다.
+`POST /api/scans/`는 `record_scan()` 트랜잭션이 끝난 뒤 **같은 요청 안에서 동기로** 카카오 메시지를 전송한다. 큐가 없는 대신 `is_live()`의 왕복 확인만큼 요청이 길어진다. 클라이언트 타임아웃은 600초다.
 
 ### report — 화면 (f/e)
 
 | 파일 | 책임 |
 |---|---|
-| `views.py` | 활성 조건·활성 `Listing` 조회 → `build_report_payload` → 렌더. `Cache-Control: no-store` |
-| `templates/report/index.html` | 마크업 + 인라인 CSS/SVG. 정적 파일 없음 |
+| `views.py` | `index`(활성 `Listing` → `build_report_payload`)와 `stats`(기간·범위 → `collect_series` → `build_chart`). 둘 다 `Cache-Control: no-store` |
+| `stats_params.py` | 질의 문자열 → 기간과 범위. 사람이 손으로 고칠 수 있는 값이므로 **예외를 던지지 않고** 기본값으로 되돌린 뒤 화면에 사유를 적는다 |
+| `templates/report/index.html` | 매물 리포트. 마크업 + 인라인 CSS/SVG. 정적 파일 없음 |
+| `templates/report/stats.html` | 가격 통계. 캔들 차트는 뷰가 넘긴 좌표를 그리는 inline SVG이며 JS가 없다 |
 
-템플릿의 `data-observed-at` 속성은 `properties/publish.py`의 정규식이 긁는 계약이다. 이름을 바꾸면 카카오 카드에서 `전체 매물 보기` 버튼이 조용히 사라진다.
+`index.html`의 `data-observed-at` 속성은 `properties/publish.py`의 정규식이 긁는 계약이다. 이름을 바꾸면 카카오 메시지에서 버튼이 조용히 사라진다. `stats.html`에는 이 속성이 없다 — 라이브 판정은 리포트 한 곳에서만 한다.
+
+통계 화면이 세는 대상은 리포트와 다르다. 리포트는 조건을 통과한 현재 활성 매물이고, 통계는 **면적·타입은 통과했고 가격 상한에서만 잘린 매물까지** 포함한 `Observation` 이력이다. 상한가에서 분포를 자르면 최고가와 3분위가 시세가 아니라 사용자의 예산을 나타내게 되기 때문이다. 하루에 스캔이 여러 번 도므로 `(조건, 매물, 로컬 날짜)`당 마지막 관측 하나만 센다.
 
 활성 매물이 없으면 성공한 조건이 하나라도 있었던 최근 `Scan` 시각을 대신 쓴다.
 
@@ -190,12 +194,12 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 |---|---|
 | `auth.py` | OAuth 인증 코드 수신, 최초 토큰 발급과 저장 |
 | `common.py` | `.env` 로드, form/multipart HTTP 요청 공통 코드 |
-| `kakao_notifier.py` | 토큰 갱신, 이미지 업로드, feed/text 템플릿 전송, CLI |
+| `kakao_notifier.py` | 토큰 갱신, text/feed 템플릿 전송, 이미지 업로드(현재 미사용), CLI |
 | `.env`, `data/kakao-token.json` | 앱 키·시크릿·토큰. Git 제외 |
 
-`report-site/properties/notifier.py`가 이 모듈을 패키지 의존성이 아니라 파일 경로에서 동적으로 불러온다. 결합 지점은 `send_to_me(message, link_url)`와 `send_card_to_me(image_path, title, description, link_url, width, height)` 두 함수다.
+`report-site/properties/notifier.py`가 이 모듈을 패키지 의존성이 아니라 파일 경로에서 동적으로 불러온다. 결합 지점은 `send_to_me(message, link_url)`와 `send_links_to_me(message, buttons)` 두 함수다. 후자가 현재 주 경로이며, 카카오 기본 텍스트 템플릿의 `buttons` 배열(최대 2개)을 쓴다.
 
-카카오 feed 카드의 이미지 URL은 카카오 이미지 업로드 API의 원본 URL이다. 등록되지 않은 도메인은 카카오가 조용히 다른 주소로 치환할 수 있으므로, URL을 바꿀 때는 `.env`만 고치고 끝내지 말고 카카오 개발자 콘솔의 웹 도메인도 함께 확인한다.
+버튼 링크의 도메인은 카카오 개발자 콘솔의 **웹 도메인**에 등록돼 있어야 한다. 등록되지 않은 도메인은 카카오가 조용히 다른 주소로 치환하므로, URL을 바꿀 때는 `.env`만 고치고 끝내지 말고 콘솔도 함께 확인한다.
 
 ## 6. 작업별 최소 읽기 경로
 
@@ -206,8 +210,10 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 | 검색 단지/가격/스케줄 변경 | Django admin이 먼저. 스키마를 바꿔야 하면 `properties/models.py` | `properties/tests/test_models.py` |
 | 조건에서 매물이 빠지는 이유 | admin의 `Observation.exclusion_reason` 필터, `properties/matching.py` | `properties/tests/test_matching.py` |
 | 신규/급매 중복 알림 | `properties/scanning.py`, `properties/models.py` | `properties/tests/test_scanning.py` |
-| 카카오 문구·카드 디자인 | `properties/notifier.py`, `properties/card.py` | `test_card.py`, `manage.py preview_card` |
-| 카드 전송·폴백·실패 기록 | `properties/delivery.py` | `properties/tests/test_delivery.py` |
+| 카카오 문구 | `properties/notifier.py` | `properties/tests/test_delivery.py` |
+| 전송·버튼·폴백·실패 기록 | `properties/delivery.py` | `properties/tests/test_delivery.py` |
+| 통계 수치가 이상함 | `properties/statistics.py`, `Observation.exclusion_code` | `properties/tests/test_statistics.py` |
+| 통계 화면·차트 | `report/stats_params.py`, `templates/report/stats.html` | `report/tests/test_stats_view.py` |
 | 리포트 표시 로직 | `properties/report.py` | `report/tests/test_views.py` |
 | 웹 리포트 화면 디자인 | `report/templates/report/index.html` | `manage.py test`, 육안 확인 |
 | 라우팅/토큰/설정 | `report_site/settings.py`, `urls.py`, `.env` | `manage.py check` |
@@ -228,7 +234,7 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 ## 7. 검증 범위
 
 ```powershell
-# 애플리케이션 전체 (모델, 판정, 카드, 전송, API, 리포트)
+# 애플리케이션 전체 (모델, 판정, 통계, 전송, API, 화면)
 cd report-site
 ..\real-estate-finder\.venv\Scripts\python.exe manage.py check
 ..\real-estate-finder\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run
@@ -259,7 +265,7 @@ cd ..\kakao-notifier
 - 알림 렌더링 실패가 급매 알림 유실로 이어지지 않도록 텍스트 폴백을 유지한다. 텍스트마저 실패하면 `NotificationFailure`에 남기고 오류를 올린다.
 - 카카오를 보내지 않는 모든 경로는 사유를 남긴다. 조용한 종료는 실패와 구분되지 않는다.
 - `data-observed-at` 속성 이름을 바꾸지 않는다.
-- `build_report_payload`는 숫자 매물번호 + `/articles/` 직접 링크만 포함한다. 묶음 카드의 해시 id가 리포트에서 빠지는 것은 의도된 동작이다.
+- `build_report_payload`는 숫자 매물번호 + `/articles/` 직접 링크만 포함한다. 묶음 카드의 해시 id가 리포트에서 빠지는 것은 의도된 동작이다. 통계는 이 필터를 쓰지 않으므로 해시 id 매물도 분포에 들어간다.
 - 검색 조건 스키마를 바꾸면 `properties/models.py`, `import_searches`, `api/views.py`의 조건 직렬화, 수집기의 `SearchCondition.from_api`를 함께 확인한다.
 - `property-report-site/site-app/`을 건드릴 일이 생기면 중첩 저장소와 루트 포인터의 두 커밋 경계를 지킨다.
 

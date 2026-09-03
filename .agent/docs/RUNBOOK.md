@@ -7,10 +7,10 @@
 ```text
 report-site\run-site.bat             애플리케이션 서버. 나머지 둘보다 먼저 켠다
 real-estate-finder\run-scan.bat      매물 조회. 급매/신규가 있을 때만 카카오톡 전송
-real-estate-finder\send-report.bat   현재 조건충족 매물 전체를 카카오톡 카드 1통으로 전송
+real-estate-finder\send-report.bat   현재 조건충족 매물 전체를 카카오톡 1통으로 전송
 ```
 
-**`run-site.bat`을 먼저 켠다.** 데이터베이스와 판정, 카드 전송이 모두 그쪽에 있어서 수집 결과가 갈 곳이 필요하다. 서버가 없으면 `run-scan.bat`은 브라우저를 열기 전에 멈추고 무엇을 켜야 하는지 알려준다.
+**`run-site.bat`을 먼저 켠다.** 데이터베이스와 판정, 카카오 전송이 모두 그쪽에 있어서 수집 결과가 갈 곳이 필요하다. 서버가 없으면 `run-scan.bat`은 브라우저를 열기 전에 멈추고 무엇을 켜야 하는지 알려준다.
 
 `run-scan.bat`은 급매나 신규 매물이 없으면 카카오톡을 보내지 않는다. 이때도 창에 미전송 사유가 출력되므로, 조용히 끝나는 것과 실패를 혼동하지 않는다. 급매가 아니어도 조사 결과 전체를 지금 받고 싶으면 `send-report.bat`을 실행한다.
 
@@ -26,7 +26,7 @@ PowerShell에서 직접 실행하려면 저장소 루트에서 다음 명령을 
 2. 디버깅 포트 `9222`를 사용하는 전용 Edge 프로필을 실행한다.
 3. 네이버 로그인 상태를 확인하고, 로그인이 필요하면 최대 5분 동안 기다린다.
 4. `python -m real_estate_finder scan-once`로 매물을 수집해 서버에 넘긴다.
-5. 서버가 조건 판정 후 급매 또는 신규 매물이 있으면 카카오톡 카드를 보낸다. 없으면 미전송 사유가 창에 출력된다.
+5. 서버가 조건 판정 후 급매 또는 신규 매물이 있으면 카카오톡을 보낸다. 없으면 미전송 사유가 창에 출력된다.
 
 `send-report.bat`은 `report-site`의 `manage.py send_digest`를 실행한다. 데이터베이스의 활성 매물을 쓰므로 Edge 기동, 네이버 로그인, 웹 서버 실행이 모두 필요 없다.
 
@@ -76,15 +76,15 @@ python -m real_estate_finder scan-once
 python -m real_estate_finder collect-favorites
 ```
 
-카드와 전송은 `report-site/`에서 다룬다.
+전송과 통계는 `report-site/`에서 다룬다.
 
 ```powershell
 cd ..\report-site
 # 현재 매물 전체 보고를 카카오톡으로 전송 (send-report.bat과 같은 동작)
 ..\real-estate-finder\.venv\Scripts\python.exe manage.py send_digest
 
-# 전송 없이 카드 이미지만 생성 (디자인 확인용)
-..\real-estate-finder\.venv\Scripts\python.exe manage.py preview_card
+# 저장된 수집 원본을 현재 검색 조건으로 다시 판정 (조건을 바꾼 뒤 통계를 맞출 때)
+..\real-estate-finder\.venv\Scripts\python.exe manage.py reclassify_observations --dry-run
 ```
 
 ## 웹 리포트 서버 실행
@@ -107,7 +107,7 @@ cd report-site
 .\run-site.ps1
 ```
 
-더블클릭하려면 `run-site.bat`을 쓴다. 실행하면 콘솔에 로컬 주소(`http://127.0.0.1:8000/r/<토큰>/`)와, `KAKAO_REPORT_URL`이 설정돼 있으면 공개 주소도 함께 출력한다. 이 로컬 주소는 같은 PC에서만 열린다 — 카카오톡의 공개 링크로는 쓸 수 없다(아래 Tailscale Funnel 절차 필요).
+더블클릭하려면 `run-site.bat`을 쓴다. 실행하면 콘솔에 로컬 주소(`http://127.0.0.1:8000/r/<토큰>/`)와, `KAKAO_REPORT_URL`이 설정돼 있으면 공개 주소도 함께 출력한다. 가격 통계는 그 주소 뒤에 `stats/`를 붙인 곳에 있고, 리포트 헤더의 `가격 통계` 링크로도 간다. 이 로컬 주소는 같은 PC에서만 열린다 — 카카오톡의 공개 링크로는 쓸 수 없다(아래 Tailscale Funnel 절차 필요).
 
 Ctrl+C로 멈춘다. **이 서버가 꺼져 있으면 스캔도 되지 않는다.** 데이터베이스와 판정이 여기 있어서 `run-scan.bat`이 수집 결과를 넘길 곳이 없기 때문이다. 예전에는 스캔이 파일에 저장하고 끝나서 서버 없이도 돌았지만 지금은 그렇지 않다.
 
@@ -131,11 +131,32 @@ cd report-site
 | 화면 | 무엇을 보는가 |
 |---|---|
 | Search condition | 단지, 가격 상한, 급매가, 전용면적, `notify_new`. 여기서 고치면 다음 스캔부터 적용된다 |
-| Observation | 수집한 원본 전량. `exclusion_reason` 필터로 조건에서 빠진 이유를 본다 |
+| Observation | 수집한 원본 전량. `exclusion_code` 필터로 조건에서 빠진 이유를 본다(가격/면적/타입/층/단지명) |
 | Listing | 현재 매물 상태. `active` 필터, `first_seen_at`, `last_urgent_alert_price_won` |
 | Scan | 실행 이력과 카카오 미전송 사유 |
 
 admin은 Tailscale Funnel 공개 주소로도 열린다(같은 토큰 경로 + `/admin/`). 로그인 화면이 인터넷에 노출돼 있으므로 비밀번호는 강하게 둔다.
+
+## 가격 통계 보기
+
+주소는 리포트와 같은 토큰 경로 아래 `stats/`다. 리포트 헤더의 `가격 통계` 링크가 같은 곳으로 간다.
+
+기간은 두 방법 중 하나로 고른다. **월**을 고르면 그 달 전체를 보고, **시작일/종료일**을 채우면 그 구간을 본다. 월이 우선한다. 아무것도 고르지 않으면 **최근 1개월**이다. 범위는 지역(전체/과천/광교) 또는 개별 단지로 좁히며, 기본값은 과천 전체다. 단지를 고르면 지역 선택보다 우선한다.
+
+차트 한 칸이 하루다. 세로선이 그날의 최저~최고, 상자가 1분위~3분위, 붉은 가로선이 평균이다. 막대가 흐리면 그날 표본이 5건 미만이라는 뜻이다.
+
+읽을 때 알아야 할 두 가지가 있다.
+
+- **하루에 스캔이 여러 번 돈다.** 통계는 매물마다 그날 마지막 호가 하나만 세므로, 자주 조회된 매물이 분포를 끌고 가지 않는다.
+- **모집단이 리포트보다 넓다.** 면적과 타입이 조건에 맞으면 조사 상한가를 넘겨도 분포에 들어간다. 상한가에서 자르면 최고가와 3분위가 시세가 아니라 예산을 나타내게 되기 때문이다. 그래서 표본 수는 리포트의 조건충족 건수보다 많은 것이 정상이다.
+
+admin에서 조건의 면적이나 타입을 바꾸면 **과거 관측은 옛 기준으로 판정된 채 남아 있다.** 통계를 새 기준에 맞추려면 다시 판정한다.
+
+```powershell
+cd report-site
+..\real-estate-finder\.venv\Scripts\python.exe manage.py reclassify_observations --dry-run
+..\real-estate-finder\.venv\Scripts\python.exe manage.py reclassify_observations
+```
 
 ## 카카오톡이 오지 않을 때
 
@@ -148,7 +169,7 @@ admin은 Tailscale Funnel 공개 주소로도 열린다(같은 토큰 경로 + `
 
 ## 외부에서 접속 가능하게 만들기: Tailscale Funnel (최초 1회)
 
-카카오톡 카드의 `전체 매물 보기` 버튼과 텍스트 링크는 휴대전화에서도 열리는 고정 HTTPS 주소가 있어야 한다. 도메인을 사지 않고 이를 얻는 방법이 Tailscale Funnel이다.
+카카오톡 메시지의 `통계 보기`·`전체 매물 보기` 버튼은 휴대전화에서도 열리는 고정 HTTPS 주소가 있어야 한다. 도메인을 사지 않고 이를 얻는 방법이 Tailscale Funnel이다.
 
 1. [Tailscale for Windows](https://tailscale.com/download/windows)를 설치하고 로그인한다.
 2. Tailscale 관리 콘솔에서 이 기기에 HTTPS 인증서와 Funnel을 켠다. 콘솔이나 CLI가 필요한 링크를 안내해준다.
@@ -172,7 +193,7 @@ admin은 Tailscale Funnel 공개 주소로도 열린다(같은 토큰 경로 + `
 **주의할 제약**
 
 - Tailscale Funnel은 공개 443/8443/10000 포트만 지원한다. `--bg 8000`은 공개 443을 로컬 8000으로 프록시하는 것이다.
-- **`run-site.bat`이 실행 중이고 PC가 절전에 들어가지 않아야** 공개 주소가 응답한다. 자동 시작은 일부러 등록하지 않았으므로, 리포트를 외부에서 열어야 할 때 직접 켠다. 서버가 꺼져 있으면 카카오 카드는 `전체 매물 보기` 버튼을 조용히 빼므로 깨진 링크가 나가지는 않는다.
+- **`run-site.bat`이 실행 중이고 PC가 절전에 들어가지 않아야** 공개 주소가 응답한다. 자동 시작은 일부러 등록하지 않았으므로, 리포트를 외부에서 열어야 할 때 직접 켠다. 서버가 꺼져 있으면 카카오 메시지는 두 버튼을 조용히 빼고 텍스트만 보내므로 깨진 링크가 나가지는 않는다.
 - 나중에 상시 공개로 바꾸고 싶으면 Windows 작업 스케줄러에 "로그온할 때" 트리거로 `report-site/run-site.ps1`을 등록하면 된다. Tailscale 서비스(`tailscaled`)는 별도 등록 없이 자동으로 뜨고, `funnel --bg` 설정도 재부팅 후 알아서 복구된다.
 - 토큰 경로(`REPORT_PATH_TOKEN`)는 우발적 노출만 막는다. 주소 자체가 유출되면 인증 없이 누구나 리포트를 볼 수 있다.
 
