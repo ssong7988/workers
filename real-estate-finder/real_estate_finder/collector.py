@@ -238,6 +238,12 @@ class NaverBrowserCollector:
 
             page = context.pages[0] if context.pages else context.new_page()
             try:
+                # Chromium throttles a backgrounded/minimized tab's timers and
+                # suspends its rendering, which slows the very hydration
+                # _raise_if_blocked() is racing against. Bringing it forward
+                # up front, and again before each complex below, keeps that
+                # race fair even if the window loses focus between complexes.
+                page.bring_to_front()
                 self._verify_login(page)
                 self._open_land_from_naver_home(page)
                 expected = self._open_favorites(page)
@@ -249,10 +255,21 @@ class NaverBrowserCollector:
                     )
 
                 collected = []
+                total = len(complexes)
                 for index, complex_info in enumerate(complexes):
                     if index:
                         page.wait_for_timeout(self.BETWEEN_COMPLEX_DELAY_MS)
-                    collected.append(self._collect_favorite_complex(page, complex_info))
+                    name = complex_info["name"]
+                    print(f"관심단지 {index + 1}/{total} '{name}' 확인 중...")
+                    result = self._collect_favorite_complex(page, complex_info)
+                    collected.append(result)
+                    next_hint = (
+                        "다음 단지로 넘어갑니다." if index + 1 < total else "마지막 단지였습니다."
+                    )
+                    print(
+                        f"관심단지 {index + 1}/{total} '{name}' 확인 완료 "
+                        f"(매물 {result['listing_count']}건). {next_hint}"
+                    )
 
                 return {"observed_at": iso_now(), "complexes": collected}
             finally:
@@ -390,6 +407,7 @@ class NaverBrowserCollector:
         # lands on a different panel depending on the page we came from. This is
         # the same public page the panel's own link opens, not a private
         # endpoint, and the heading check below confirms where we landed.
+        page.bring_to_front()
         page.goto(
             urljoin(self.HOME_URL, complex_info["href"]),
             wait_until="domcontentloaded",
@@ -402,7 +420,12 @@ class NaverBrowserCollector:
         if heading.count() == 0:
             raise CollectionError(f"{complex_info['name']}: 단지 매물 화면 이동을 확인하지 못했습니다.")
 
-        expected = self._apply_screen_filters(page)
+        try:
+            expected = self._apply_screen_filters(page)
+        except CollectionError as exc:
+            # The filter helpers below have no complex context of their own,
+            # so a screen-layout failure otherwise reads as "which complex?".
+            raise CollectionError(f"{complex_info['name']}: {exc}") from exc
         groups = self._collect_complex_cards(page, expected)
         if len(groups) < expected:
             # A card can still be missed when the list grows underneath the
@@ -982,12 +1005,20 @@ class NaverBrowserCollector:
 
     @staticmethod
     def _raise_if_blocked(page) -> None:
-        text = page.locator("body").inner_text(timeout=10_000)
-        lowered = text.lower()
-        if "captcha" in lowered or "자동입력 방지" in text or "비정상적인 접근" in text:
-            raise CollectionError("CAPTCHA 또는 접근 제한이 감지되어 수집을 중단했습니다.")
-        if "로그인" in text and "로그아웃" not in text and "내정보 보기" not in text:
-            raise CollectionError("네이버 로그인 상태가 만료되어 수집을 중단했습니다.")
+        # A page.goto() reload (unlike an in-app click) can briefly show its
+        # header before the login state hydrates, which looks identical to a
+        # real logout for one instant. Give it a few beats before deciding.
+        attempts = 4
+        for attempt in range(attempts):
+            text = page.locator("body").inner_text(timeout=10_000)
+            lowered = text.lower()
+            if "captcha" in lowered or "자동입력 방지" in text or "비정상적인 접근" in text:
+                raise CollectionError("CAPTCHA 또는 접근 제한이 감지되어 수집을 중단했습니다.")
+            if "로그인" not in text or "로그아웃" in text or "내정보 보기" in text:
+                return
+            if attempt < attempts - 1:
+                page.wait_for_timeout(1_000)
+        raise CollectionError("네이버 로그인 상태가 만료되어 수집을 중단했습니다.")
 
     def _is_logged_in(self, page) -> bool:
         page.goto(self.NAVER_HOME_URL, wait_until="domcontentloaded", timeout=60_000)
