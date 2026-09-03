@@ -39,7 +39,7 @@
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 3단계까지 완료했다. PostgreSQL 생성·마이그레이션과 기존 데이터 이관이 끝났고, admin 슈퍼유저 생성만 사용자 입력을 기다린다. 다음 구현은 4단계 판정 로직 이관이다.**
+**상태: 3단계까지 완료했다. PostgreSQL 생성·마이그레이션, admin 슈퍼유저 생성, 기존 데이터 이관이 끝났다. 다음 구현은 4단계 판정 로직 이관이다.**
 
 ### 왜
 
@@ -68,7 +68,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 - [x] 0. 이 계획을 `PROJECT_STATE.md`에 기록 — 세션이 끊겨도 이어받을 수 있게 (커밋 `b856954`)
 - [x] 1. `settings.py` 재구성 + `psycopg[binary]`/`whitenoise` 추가 + admin 배선 (커밋 `a64a6dc`). PostgreSQL 기동 후 마이그레이션 적용 완료.
-- [ ] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser` — **코드·DB 적용 완료, 슈퍼유저 생성만 남음**
+- [x] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser`
 - [x] 3. `import_searches` / `import_state` 관리 명령 작성, 기존 데이터 이관 실행
 - [ ] 4. `parsing.py` → `properties/matching.py`, `service.scan()` 판정부 → `properties/scanning.py` + 테스트 이관
 - [ ] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`)
@@ -81,7 +81,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 3단계 기존 데이터 이관까지 완료했다. 다음 코드는 4단계 `matching.py`와 `scanning.py`이며, 별도로 admin 슈퍼유저 생성이 남아 있다.
+브랜치 `kakao-image-card`. 3단계 기존 데이터 이관과 admin 슈퍼유저 생성까지 완료했다. 다음 코드는 4단계 `matching.py`와 `scanning.py`다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -124,9 +124,8 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 #### 다음에 할 일 (순서대로)
 
-1. 사용자가 `manage.py createsuperuser`를 실행해 admin 계정을 만든다(비밀번호는 문서나 Git에 남기지 않는다).
-2. 4단계: `parsing.py`의 판정을 `properties/matching.py`로 옮기고 DB 모델 입력으로 동작하게 한다.
-3. `service.scan()`의 상태 판정을 `properties/scanning.py`의 트랜잭션 기반 `record_scan()`으로 옮기고 테스트한다.
+1. 4단계: `parsing.py`의 판정을 `properties/matching.py`로 옮기고 DB 모델 입력으로 동작하게 한다.
+2. `service.scan()`의 상태 판정을 `properties/scanning.py`의 트랜잭션 기반 `record_scan()`으로 옮기고 테스트한다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
@@ -179,7 +178,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 사용자 선행 작업
 
-- admin 슈퍼유저 생성(`createsuperuser`). 비밀번호는 Git·문서에 남기지 않는다.
+- 현재 없음. admin 슈퍼유저 1개가 생성돼 있음을 DB에서 확인했다. 사용자명과 비밀번호는 문서에 기록하지 않았다.
 
 ### 종단 검증 순서 (전환 완료 후)
 
