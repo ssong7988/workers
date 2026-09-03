@@ -191,6 +191,9 @@ class Scan(models.Model):
         ordering = ("-started_at",)
         verbose_name = "수집 실행"
         verbose_name_plural = "수집 실행"
+        constraints = [
+            models.UniqueConstraint(fields=("started_at",), name="unique_scan_started_at")
+        ]
 
     def __str__(self) -> str:
         status = "성공" if self.success else "실패"
@@ -247,6 +250,12 @@ class Observation(PropertyFields):
         verbose_name = "수집 원본"
         verbose_name_plural = "수집 원본"
         indexes = [models.Index(fields=("scan", "condition"))]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("scan", "condition", "listing_id"),
+                name="unique_observation_per_scan_condition",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.complex_name} {self.listing_id}"

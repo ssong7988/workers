@@ -33,10 +33,13 @@
 - 리포트 화면은 관심 단지 6개, 확인 매물 41건, 급매 1건을 정확히 렌더링한다.
 - 카카오 이미지는 카카오 이미지 업로드 API를 사용한다(변경 없음).
 - 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`) 전부 통과, Django 테스트 6개(`report-site/report/tests`) 전부 통과, `manage.py check` 통과.
+- PostgreSQL 서비스 `postgresql-x64-18`이 자동 시작으로 등록돼 실행 중이며, `property_report` 역할/DB 생성과 Django 마이그레이션 적용을 완료했다.
+- `import_searches`와 `import_state`를 실행해 공통 규칙 1개, 검색조건 6개, 수집 실행 27개, 원본 관측 1,304개, 전체 매물 62개를 이관했다. 활성 매물 41개, 활성 급매 1개이며 `last_urgent_alert_price_won`이 있는 기존 매물 2개의 기록도 보존됐다.
+- 이관 명령은 두 번 실행해 중복이 생기지 않음을 확인했다. DB 기반 Django 테스트 16개와 `manage.py check`, `makemigrations --check`가 통과했다.
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 2단계 모델·admin·초기 마이그레이션 코드는 완료했다. PostgreSQL 역할/DB가 아직 없어 실제 `migrate`와 슈퍼유저 생성은 대기 중이다. 아래 "이어받는 지점"부터 읽는다.**
+**상태: 3단계까지 완료했다. PostgreSQL 생성·마이그레이션과 기존 데이터 이관이 끝났고, admin 슈퍼유저 생성만 사용자 입력을 기다린다. 다음 구현은 4단계 판정 로직 이관이다.**
 
 ### 왜
 
@@ -64,9 +67,9 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 ### 단계별 진행 상황
 
 - [x] 0. 이 계획을 `PROJECT_STATE.md`에 기록 — 세션이 끊겨도 이어받을 수 있게 (커밋 `b856954`)
-- [x] 1. `settings.py` 재구성 + `psycopg[binary]`/`whitenoise` 추가 + admin 배선 (커밋 `a64a6dc`). **단, `migrate`는 아직 못 돌렸다 — PostgreSQL 서버가 꺼져 있다.**
-- [ ] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser` — **코드·초기 마이그레이션 완료, DB 적용과 슈퍼유저 생성만 남음**
-- [ ] 3. `import_searches` / `import_state` 관리 명령 작성, 기존 데이터 이관 실행
+- [x] 1. `settings.py` 재구성 + `psycopg[binary]`/`whitenoise` 추가 + admin 배선 (커밋 `a64a6dc`). PostgreSQL 기동 후 마이그레이션 적용 완료.
+- [ ] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser` — **코드·DB 적용 완료, 슈퍼유저 생성만 남음**
+- [x] 3. `import_searches` / `import_state` 관리 명령 작성, 기존 데이터 이관 실행
 - [ ] 4. `parsing.py` → `properties/matching.py`, `service.scan()` 판정부 → `properties/scanning.py` + 테스트 이관
 - [ ] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`)
 - [ ] 6. `report` 뷰를 DB 기반으로 전환 (템플릿 무변경)
@@ -78,7 +81,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 2단계 코드는 모델·admin·초기 마이그레이션까지 작성하고 검증했다. DB 적용은 아래 PostgreSQL 선행 작업 뒤에 계속한다.
+브랜치 `kakao-image-card`. 3단계 기존 데이터 이관까지 완료했다. 다음 코드는 4단계 `matching.py`와 `scanning.py`이며, 별도로 admin 슈퍼유저 생성이 남아 있다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -110,38 +113,32 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - `properties/migrations/0001_initial.py` 생성, `settings.INSTALLED_APPS`에 `properties` 추가.
 - DB 비의존 모델 테스트 8개 추가. 모델+기존 리포트 테스트 14개, finder 테스트 81개, `manage.py check`, `makemigrations --check` 통과.
 
+#### 3단계에서 완료한 코드와 데이터
+
+- `properties/seed/searches.yaml`에 기존 검색 설정을 초기 시드로 복사했다.
+- `manage.py import_searches`: 공통 규칙과 검색조건을 검증 후 upsert한다.
+- `manage.py import_state`: `scan-runs.jsonl`, `observations.jsonl`, `state.json`, `notification-queue.jsonl`을 트랜잭션으로 이관하며 반복 실행해도 중복되지 않는다.
+- 수집 실행 시작 시각과 `(수집 실행, 검색 조건, 매물 ID)`에 고유 제약을 추가하는 `0002` 마이그레이션을 적용했다.
+- 실제 이관 결과: 공통 규칙 1, 검색조건 6, 수집 실행 27, 원본 관측 1,304, 전체 매물 62, 활성 매물 41, 활성 급매 1, 알림 가격 이력 보유 2.
+- DB 기반 이관 테스트를 포함한 Django 테스트 16개가 통과했다. 테스트 동안만 `property_report`에 `CREATEDB`를 부여했고 종료 후 `NOCREATEDB`로 되돌렸다.
+
 #### 다음에 할 일 (순서대로)
 
-1. 관리자 권한 PowerShell에서 PostgreSQL을 서비스로 등록·기동한다(아래 "PostgreSQL 현재 상태" 참고).
-2. `property_report` 역할과 DB를 만들고 `report-site/.env`의 `POSTGRES_PASSWORD`를 같은 비밀번호로 채운다.
-3. `report-site`에서 `manage.py migrate`를 실행한다.
-4. `manage.py createsuperuser`로 admin 계정을 만든다(비밀번호는 문서나 Git에 남기지 않는다).
-5. 2단계를 완료 처리한 뒤 3단계(`import_searches` / `import_state`)로 넘어간다.
+1. 사용자가 `manage.py createsuperuser`를 실행해 admin 계정을 만든다(비밀번호는 문서나 Git에 남기지 않는다).
+2. 4단계: `parsing.py`의 판정을 `properties/matching.py`로 옮기고 DB 모델 입력으로 동작하게 한다.
+3. `service.scan()`의 상태 판정을 `properties/scanning.py`의 트랜잭션 기반 `record_scan()`으로 옮기고 테스트한다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
-**설치는 돼 있지만 Windows 서비스가 등록돼 있지 않고, 일반 권한의 일회성 기동은 데이터 디렉터리에 `postmaster.pid`를 쓰지 못해 유지되지 않았다. 관리자 권한으로 서비스 등록·기동해야 한다.**
+**정상 실행 중이다.** Windows 서비스 `postgresql-x64-18`이 자동 시작으로 등록돼 있고, `property_report` 역할과 같은 이름의 DB가 생성돼 있다. Django 마이그레이션 `properties.0002`까지 적용됐다.
 
 - 설치 경로: `C:\Program Files\PostgreSQL\18` (PostgreSQL 18, pgAdmin 4 포함)
 - 데이터 디렉터리: `C:\Program Files\PostgreSQL\18\data` — 이미 초기화돼 있고 기존 클러스터가 들어 있다
-- `Get-Service`에 `postgres*` 서비스 **없음**. 127.0.0.1:5432 **닫힘**. `postgres` 프로세스 **없음**
-- 서버 로그 마지막 기록: `2026-03-10 23:11` 정상 종료. 그 직전 `2026-03-10 20:18`에 `사용자 "postgres"의 password 인증 실패` 기록이 있다
+- 서비스 `postgresql-x64-18`: `Running`, 시작 유형 `Automatic`. 127.0.0.1:5432 연결 확인 완료.
+- `property_report` 역할은 애플리케이션 DB 소유자이며 `CREATEDB` 권한은 없다. 테스트 때만 잠시 부여했다가 회수했다.
 - `psql`이 PATH에 없다 (`C:\Program Files\PostgreSQL\18\bin`을 직접 쓰거나 `pg_env.bat`을 사용)
 - **`postgres` 슈퍼유저 비밀번호는 에이전트가 모른다. 사용자만 안다.**
-- 현재 `pg_hba.conf`의 IPv4 로컬 접속(`127.0.0.1/32`)은 `trust`다. 서버가 정상 기동되면 로컬 `psql -h 127.0.0.1 -U postgres` 접속은 비밀번호 없이 가능할 수 있다. 역할 생성 뒤에는 운영 의도에 맞게 인증 설정을 다시 확인한다.
-
-사용자가 해야 할 일:
-
-1. 서버 기동 — 서비스로 등록하는 편이 낫다(관리자 권한 PowerShell):
-   `& "C:\Program Files\PostgreSQL\18\bin\pg_ctl.exe" register -N postgresql-x64-18 -D "C:\Program Files\PostgreSQL\18\data" -S auto` 후 `Start-Service postgresql-x64-18`
-   (일회성으로만 띄우려면 같은 `pg_ctl.exe start -D "..."`)
-2. 역할과 DB 생성 — 기본값을 그대로 쓰려면 이름을 맞춘다:
-   `CREATE ROLE property_report LOGIN PASSWORD '<비밀번호>';`
-   `CREATE DATABASE property_report OWNER property_report ENCODING 'UTF8';`
-3. 그 비밀번호를 `report-site/.env`의 `POSTGRES_PASSWORD=`에 넣는다.
-4. `report-site`에서 `..\real-estate-finder\.venv\Scripts\python.exe manage.py migrate`가 통과하는지 확인한다.
-
-비밀번호를 잊었다면 `pg_hba.conf`를 임시로 `trust`로 바꿔 재설정하는 방법이 있으나, 되돌리는 것을 잊지 않아야 한다. 어떤 비밀번호도 Git이나 이 문서에 적지 않는다.
+- 현재 `pg_hba.conf`의 IPv4 로컬 접속(`127.0.0.1/32`)은 `trust`다. 로컬 프로세스의 DB 접근까지 비밀번호로 제한하려면 추후 `scram-sha-256`으로 바꾸고 PostgreSQL 서비스를 재시작해야 한다.
 
 ### 새로 만들 테이블 (`report-site/properties/models.py`)
 
@@ -182,7 +179,6 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 사용자 선행 작업
 
-- **PostgreSQL 설치 + 역할/DB 생성.** 1단계가 여기서 막히면 그 이후를 검증할 수 없다.
 - admin 슈퍼유저 생성(`createsuperuser`). 비밀번호는 Git·문서에 남기지 않는다.
 
 ### 종단 검증 순서 (전환 완료 후)
