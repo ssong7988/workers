@@ -36,7 +36,7 @@
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 1단계까지 코드 완료, 2단계 시작 직후 중단. PostgreSQL 서버가 꺼져 있어 DB 검증은 아직 못 했다. 아래 "이어받는 지점"부터 읽는다.**
+**상태: 2단계 모델·admin·초기 마이그레이션 코드는 완료했다. PostgreSQL 역할/DB가 아직 없어 실제 `migrate`와 슈퍼유저 생성은 대기 중이다. 아래 "이어받는 지점"부터 읽는다.**
 
 ### 왜
 
@@ -65,7 +65,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 - [x] 0. 이 계획을 `PROJECT_STATE.md`에 기록 — 세션이 끊겨도 이어받을 수 있게 (커밋 `b856954`)
 - [x] 1. `settings.py` 재구성 + `psycopg[binary]`/`whitenoise` 추가 + admin 배선 (커밋 `a64a6dc`). **단, `migrate`는 아직 못 돌렸다 — PostgreSQL 서버가 꺼져 있다.**
-- [ ] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser` — **앱 뼈대만 생성됨, 아직 커밋 안 됨**
+- [ ] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser` — **코드·초기 마이그레이션 완료, DB 적용과 슈퍼유저 생성만 남음**
 - [ ] 3. `import_searches` / `import_state` 관리 명령 작성, 기존 데이터 이관 실행
 - [ ] 4. `parsing.py` → `properties/matching.py`, `service.scan()` 판정부 → `properties/scanning.py` + 테스트 이관
 - [ ] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`)
@@ -76,9 +76,9 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 각 단계 끝에서 테스트가 통과하는 상태를 유지하고, 단계를 끝낼 때마다 위 체크박스와 이 문서를 갱신한다. 삭제 범위가 크므로 단계별로 커밋을 나눈다.
 
-### 이어받는 지점 (2026-09-03 중단)
+### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 마지막 커밋 `a64a6dc`. **작업 트리에 커밋되지 않은 변경이 있다** — 아래 "미완 작업" 참고.
+브랜치 `kakao-image-card`. 2단계 코드는 모델·admin·초기 마이그레이션까지 작성하고 검증했다. DB 적용은 아래 PostgreSQL 선행 작업 뒤에 계속한다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -100,37 +100,27 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 루트 `.gitignore`에 `report-site/staticfiles/`, `report-site/data/` 추가.
 - 검증 결과: `manage.py check` 통과, 기존 Django 테스트 6개 통과(전부 `SimpleTestCase` + `databases = set()`라 DB 없이도 돈다), `collectstatic` 127개 파일 복사 성공.
 
-#### 미완 작업 (커밋 안 됨, 작업 트리에 있음)
+#### 2단계에서 완료한 코드
 
-`manage.py startapp properties`로 뼈대만 만들어 둔 상태다. 다음 파일들이 **untracked**다.
-
-```
-report-site/properties/__init__.py
-report-site/properties/admin.py          (startapp 기본 내용, 비어 있음)
-report-site/properties/apps.py           (startapp 기본 내용)
-report-site/properties/models.py         (startapp 기본 내용, 비어 있음)
-report-site/properties/migrations/__init__.py
-report-site/properties/management/__init__.py
-report-site/properties/management/commands/__init__.py
-report-site/properties/tests/__init__.py
-report-site/properties/seed/             (빈 디렉터리)
-```
-
-`startapp`이 만든 `views.py`와 `tests.py`는 삭제했다(뷰는 `report`/`api`가 갖고, 테스트는 `tests/` 패키지로 간다). **`properties`는 아직 `INSTALLED_APPS`에 없다.**
+- `properties/models.py`: `GlobalRule`, `SearchCondition`, `Scan`, `Observation`, `Listing`, `NotificationFailure` 6개 모델 작성.
+- `Listing`은 `(condition, listing_id)` unique 제약을 사용하고 `first_seen_at`, `last_seen_at`, `last_urgent_alert_price_won`을 별도 보존한다.
+- `Observation`은 제외 매물까지 담으며 `exclusion_reason`과 원본 보존용 `raw_payload`가 있다.
+- 검색 URL, 가격·면적 범위, 시간대, JSON 배열 설정에 모델 검증을 추가했다.
+- `properties/admin.py`: 공통 규칙·검색 조건 편집 화면과 수집/원본/현재 매물/알림 실패 조회 화면을 등록했다. `GlobalRule`은 단일 행만 허용한다.
+- `properties/migrations/0001_initial.py` 생성, `settings.INSTALLED_APPS`에 `properties` 추가.
+- DB 비의존 모델 테스트 8개 추가. 모델+기존 리포트 테스트 14개, finder 테스트 81개, `manage.py check`, `makemigrations --check` 통과.
 
 #### 다음에 할 일 (순서대로)
 
-1. **PostgreSQL을 살린다** (아래 "PostgreSQL 현재 상태" 참고). 이게 되기 전에는 `migrate`도 `manage.py test`도 돌릴 수 없다.
-2. `properties/models.py`에 위 "새로 만들 테이블" 6개를 작성하고 `properties/admin.py`를 채운다.
-3. `settings.INSTALLED_APPS`에 `"properties"`를 추가한다.
-4. `manage.py makemigrations properties` → `manage.py migrate` → `manage.py createsuperuser`.
-5. 2단계 커밋 후 3단계(`import_searches` / `import_state`)로 넘어간다.
-
-`makemigrations`는 DB 연결이 필요 없으므로 1번이 막혀 있어도 2~3번과 모델 작성까지는 진행할 수 있다.
+1. 관리자 권한 PowerShell에서 PostgreSQL을 서비스로 등록·기동한다(아래 "PostgreSQL 현재 상태" 참고).
+2. `property_report` 역할과 DB를 만들고 `report-site/.env`의 `POSTGRES_PASSWORD`를 같은 비밀번호로 채운다.
+3. `report-site`에서 `manage.py migrate`를 실행한다.
+4. `manage.py createsuperuser`로 admin 계정을 만든다(비밀번호는 문서나 Git에 남기지 않는다).
+5. 2단계를 완료 처리한 뒤 3단계(`import_searches` / `import_state`)로 넘어간다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
-**설치는 돼 있지만 서버가 꺼져 있고 Windows 서비스도 등록돼 있지 않다.**
+**설치는 돼 있지만 Windows 서비스가 등록돼 있지 않고, 일반 권한의 일회성 기동은 데이터 디렉터리에 `postmaster.pid`를 쓰지 못해 유지되지 않았다. 관리자 권한으로 서비스 등록·기동해야 한다.**
 
 - 설치 경로: `C:\Program Files\PostgreSQL\18` (PostgreSQL 18, pgAdmin 4 포함)
 - 데이터 디렉터리: `C:\Program Files\PostgreSQL\18\data` — 이미 초기화돼 있고 기존 클러스터가 들어 있다
@@ -138,6 +128,7 @@ report-site/properties/seed/             (빈 디렉터리)
 - 서버 로그 마지막 기록: `2026-03-10 23:11` 정상 종료. 그 직전 `2026-03-10 20:18`에 `사용자 "postgres"의 password 인증 실패` 기록이 있다
 - `psql`이 PATH에 없다 (`C:\Program Files\PostgreSQL\18\bin`을 직접 쓰거나 `pg_env.bat`을 사용)
 - **`postgres` 슈퍼유저 비밀번호는 에이전트가 모른다. 사용자만 안다.**
+- 현재 `pg_hba.conf`의 IPv4 로컬 접속(`127.0.0.1/32`)은 `trust`다. 서버가 정상 기동되면 로컬 `psql -h 127.0.0.1 -U postgres` 접속은 비밀번호 없이 가능할 수 있다. 역할 생성 뒤에는 운영 의도에 맞게 인증 설정을 다시 확인한다.
 
 사용자가 해야 할 일:
 
