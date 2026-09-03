@@ -162,13 +162,20 @@ def summarize_period(series: list[DaySummary]) -> PeriodSummary:
 # Coordinates are computed here rather than in the template so the SVG stays a
 # dumb list of shapes and the arithmetic can be unit tested.
 
-WIDTH = 760
 HEIGHT = 320
 PAD_LEFT = 70
 PAD_RIGHT = 14
 PAD_TOP = 14
 PAD_BOTTOM = 42
 MAX_X_LABELS = 8
+# Candles sit this many pixels apart no matter how many days are in the
+# series. Spreading a handful of days across a fixed-width canvas (the old
+# behaviour) left them so far apart that two days looked like one point cut
+# off the edge of a phone screen. Width now grows with the data instead.
+DAY_SLOT_WIDTH = 64
+# A one- or two-day chart still gets this many slots of breathing room so the
+# axis doesn't look like a sliver; extra slots stay empty on the right.
+MIN_CHART_DAYS = 3
 EOK = 100_000_000
 TICK_STEPS = (EOK // 4, EOK // 2, EOK, 2 * EOK, 5 * EOK, 10 * EOK, 20 * EOK)
 
@@ -249,7 +256,10 @@ def build_chart(series: list[DaySummary]) -> Chart | None:
     if not series:
         return None
 
-    plot_left, plot_right = float(PAD_LEFT), float(WIDTH - PAD_RIGHT)
+    slot = float(DAY_SLOT_WIDTH)
+    plot_days = max(len(series), MIN_CHART_DAYS)
+    width = PAD_LEFT + PAD_RIGHT + round(plot_days * slot)
+    plot_left, plot_right = float(PAD_LEFT), float(width - PAD_RIGHT)
     plot_top, plot_bottom = float(PAD_TOP), float(HEIGHT - PAD_BOTTOM)
     axis_low, axis_high, step = _tick_bounds(
         min(day.minimum for day in series), max(day.maximum for day in series)
@@ -259,7 +269,6 @@ def build_chart(series: list[DaySummary]) -> Chart | None:
         ratio = (price_won - axis_low) / (axis_high - axis_low)
         return round(plot_bottom - ratio * (plot_bottom - plot_top), 1)
 
-    slot = (plot_right - plot_left) / len(series)
     box_width = round(min(max(slot * 0.55, 3.0), 20.0), 1)
     stride = -(-len(series) // MAX_X_LABELS)
 
@@ -296,7 +305,7 @@ def build_chart(series: list[DaySummary]) -> Chart | None:
         for value in range(axis_low, axis_high + 1, step)
     ]
     return Chart(
-        width=WIDTH,
+        width=width,
         height=HEIGHT,
         plot_left=plot_left,
         plot_right=plot_right,
