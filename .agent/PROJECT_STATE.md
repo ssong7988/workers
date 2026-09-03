@@ -36,7 +36,7 @@
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 계획 승인됨, 구현 시작 전. 0단계 완료.**
+**상태: 1단계까지 코드 완료, 2단계 시작 직후 중단. PostgreSQL 서버가 꺼져 있어 DB 검증은 아직 못 했다. 아래 "이어받는 지점"부터 읽는다.**
 
 ### 왜
 
@@ -63,9 +63,9 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 단계별 진행 상황
 
-- [x] 0. 이 계획을 `PROJECT_STATE.md`에 기록 — 세션이 끊겨도 이어받을 수 있게
-- [ ] 1. PostgreSQL 준비 + `settings.py` 재구성 + `psycopg[binary]`/`whitenoise` 추가 + `migrate` 통과
-- [ ] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser`
+- [x] 0. 이 계획을 `PROJECT_STATE.md`에 기록 — 세션이 끊겨도 이어받을 수 있게 (커밋 `b856954`)
+- [x] 1. `settings.py` 재구성 + `psycopg[binary]`/`whitenoise` 추가 + admin 배선 (커밋 `a64a6dc`). **단, `migrate`는 아직 못 돌렸다 — PostgreSQL 서버가 꺼져 있다.**
+- [ ] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser` — **앱 뼈대만 생성됨, 아직 커밋 안 됨**
 - [ ] 3. `import_searches` / `import_state` 관리 명령 작성, 기존 데이터 이관 실행
 - [ ] 4. `parsing.py` → `properties/matching.py`, `service.scan()` 판정부 → `properties/scanning.py` + 테스트 이관
 - [ ] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`)
@@ -75,6 +75,82 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - [ ] 9. `ARCHITECTURE.md`, `RUNBOOK.md`, `AGENTS.md`, 각 `README.md` 갱신
 
 각 단계 끝에서 테스트가 통과하는 상태를 유지하고, 단계를 끝낼 때마다 위 체크박스와 이 문서를 갱신한다. 삭제 범위가 크므로 단계별로 커밋을 나눈다.
+
+### 이어받는 지점 (2026-09-03 중단)
+
+브랜치 `kakao-image-card`. 마지막 커밋 `a64a6dc`. **작업 트리에 커밋되지 않은 변경이 있다** — 아래 "미완 작업" 참고.
+
+#### 1단계에서 실제로 끝난 것
+
+- 공유 venv(`real-estate-finder/.venv`, Python 3.14.3)에 `psycopg 3.3.5` + `psycopg-binary 3.3.5`(cp314 휠) + `whitenoise 6.12.0` 설치 완료. `requirements.txt`에도 반영.
+- `report-site/report_site/settings.py` 전면 재작성:
+  - `DATABASES`가 PostgreSQL을 가리킨다. 비밀번호 외 전부 기본값(`property_report` / `property_report` / `127.0.0.1` / `5432`).
+  - `INSTALLED_APPS`에 `django.contrib.{admin,auth,contenttypes,sessions,messages,staticfiles}` 추가. **`properties`와 `api`는 아직 없다.**
+  - admin용 미들웨어 7종 + `whitenoise.middleware.WhiteNoiseMiddleware`, 템플릿 `context_processors` 3종 추가.
+  - `STATIC_URL`/`STATIC_ROOT`(`report-site/staticfiles/`)/`STORAGES`(whitenoise `CompressedStaticFilesStorage` — 매니페스트 방식이 아니라 파일 하나가 없다고 리포트 전체가 죽지 않는다).
+  - `_load_env()`가 **루트 `.env`도** 읽는다 → `KAKAO_REPORT_URL`이 `settings.REPORT_PUBLIC_URL`로 들어온다.
+  - `FINDER_API_TOKEN`을 `REPORT_PATH_TOKEN`과 같이 필수로 요구한다(없으면 기동 실패).
+  - `CSRF_TRUSTED_ORIGINS = ["https://*.ts.net"]`, `SECURE_PROXY_SSL_HEADER`. Funnel 뒤에서 admin 로그인 POST가 깨지지 않게 하기 위함.
+  - `DATA_DIR = BASE_DIR / "data"` — 카드 이미지 출력 위치(7단계에서 사용).
+  - **`sys.path.insert(0, FINDER_DIR)`는 아직 남겨 뒀다.** `report/views.py`가 여전히 finder의 `FileStore`를 import하기 때문이다. 6단계에서 둘을 같이 제거한다.
+- `report-site/report_site/urls.py`: admin을 `r/<REPORT_PATH_TOKEN>/admin/`에 마운트. `admin.site.site_header` 등 한글 라벨 설정.
+- `report-site/run-site.ps1`: `manage.py migrate --check` 실패 시 기동 거부, `collectstatic --noinput` 자동 실행, 배너에 admin 주소 출력.
+- `report-site/.env.example` 갱신(`FINDER_API_TOKEN`, `POSTGRES_*` 문서화).
+- `report-site/.env`(Git 제외)에 **`FINDER_API_TOKEN`을 생성해 넣었다.** `POSTGRES_PASSWORD=`는 **빈 값으로 추가돼 있다 — 사용자가 채워야 한다.**
+- 루트 `.gitignore`에 `report-site/staticfiles/`, `report-site/data/` 추가.
+- 검증 결과: `manage.py check` 통과, 기존 Django 테스트 6개 통과(전부 `SimpleTestCase` + `databases = set()`라 DB 없이도 돈다), `collectstatic` 127개 파일 복사 성공.
+
+#### 미완 작업 (커밋 안 됨, 작업 트리에 있음)
+
+`manage.py startapp properties`로 뼈대만 만들어 둔 상태다. 다음 파일들이 **untracked**다.
+
+```
+report-site/properties/__init__.py
+report-site/properties/admin.py          (startapp 기본 내용, 비어 있음)
+report-site/properties/apps.py           (startapp 기본 내용)
+report-site/properties/models.py         (startapp 기본 내용, 비어 있음)
+report-site/properties/migrations/__init__.py
+report-site/properties/management/__init__.py
+report-site/properties/management/commands/__init__.py
+report-site/properties/tests/__init__.py
+report-site/properties/seed/             (빈 디렉터리)
+```
+
+`startapp`이 만든 `views.py`와 `tests.py`는 삭제했다(뷰는 `report`/`api`가 갖고, 테스트는 `tests/` 패키지로 간다). **`properties`는 아직 `INSTALLED_APPS`에 없다.**
+
+#### 다음에 할 일 (순서대로)
+
+1. **PostgreSQL을 살린다** (아래 "PostgreSQL 현재 상태" 참고). 이게 되기 전에는 `migrate`도 `manage.py test`도 돌릴 수 없다.
+2. `properties/models.py`에 위 "새로 만들 테이블" 6개를 작성하고 `properties/admin.py`를 채운다.
+3. `settings.INSTALLED_APPS`에 `"properties"`를 추가한다.
+4. `manage.py makemigrations properties` → `manage.py migrate` → `manage.py createsuperuser`.
+5. 2단계 커밋 후 3단계(`import_searches` / `import_state`)로 넘어간다.
+
+`makemigrations`는 DB 연결이 필요 없으므로 1번이 막혀 있어도 2~3번과 모델 작성까지는 진행할 수 있다.
+
+### PostgreSQL 현재 상태 (2026-09-03 확인)
+
+**설치는 돼 있지만 서버가 꺼져 있고 Windows 서비스도 등록돼 있지 않다.**
+
+- 설치 경로: `C:\Program Files\PostgreSQL\18` (PostgreSQL 18, pgAdmin 4 포함)
+- 데이터 디렉터리: `C:\Program Files\PostgreSQL\18\data` — 이미 초기화돼 있고 기존 클러스터가 들어 있다
+- `Get-Service`에 `postgres*` 서비스 **없음**. 127.0.0.1:5432 **닫힘**. `postgres` 프로세스 **없음**
+- 서버 로그 마지막 기록: `2026-03-10 23:11` 정상 종료. 그 직전 `2026-03-10 20:18`에 `사용자 "postgres"의 password 인증 실패` 기록이 있다
+- `psql`이 PATH에 없다 (`C:\Program Files\PostgreSQL\18\bin`을 직접 쓰거나 `pg_env.bat`을 사용)
+- **`postgres` 슈퍼유저 비밀번호는 에이전트가 모른다. 사용자만 안다.**
+
+사용자가 해야 할 일:
+
+1. 서버 기동 — 서비스로 등록하는 편이 낫다(관리자 권한 PowerShell):
+   `& "C:\Program Files\PostgreSQL\18\bin\pg_ctl.exe" register -N postgresql-x64-18 -D "C:\Program Files\PostgreSQL\18\data" -S auto` 후 `Start-Service postgresql-x64-18`
+   (일회성으로만 띄우려면 같은 `pg_ctl.exe start -D "..."`)
+2. 역할과 DB 생성 — 기본값을 그대로 쓰려면 이름을 맞춘다:
+   `CREATE ROLE property_report LOGIN PASSWORD '<비밀번호>';`
+   `CREATE DATABASE property_report OWNER property_report ENCODING 'UTF8';`
+3. 그 비밀번호를 `report-site/.env`의 `POSTGRES_PASSWORD=`에 넣는다.
+4. `report-site`에서 `..\real-estate-finder\.venv\Scripts\python.exe manage.py migrate`가 통과하는지 확인한다.
+
+비밀번호를 잊었다면 `pg_hba.conf`를 임시로 `trust`로 바꿔 재설정하는 방법이 있으나, 되돌리는 것을 잊지 않아야 한다. 어떤 비밀번호도 Git이나 이 문서에 적지 않는다.
 
 ### 새로 만들 테이블 (`report-site/properties/models.py`)
 
