@@ -32,14 +32,14 @@
 - `send-report.ps1`로 실제 카카오톡 카드 1통(매물 41건)을 전송해 `전체 매물 보기` 버튼 동작까지 사용자가 휴대폰에서 확인했다.
 - 리포트 화면은 관심 단지 6개, 확인 매물 41건, 급매 1건을 정확히 렌더링한다.
 - 카카오 이미지는 카카오 이미지 업로드 API를 사용한다(변경 없음).
-- 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`) 전부 통과, Django 테스트 6개(`report-site/report/tests`) 전부 통과, `manage.py check` 통과.
+- 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`)와 Django 테스트 28개 전부 통과, `manage.py check`, `makemigrations --check` 통과.
 - PostgreSQL 서비스 `postgresql-x64-18`이 자동 시작으로 등록돼 실행 중이며, `property_report` 역할/DB 생성과 Django 마이그레이션 적용을 완료했다.
 - `import_searches`와 `import_state`를 실행해 공통 규칙 1개, 검색조건 6개, 수집 실행 27개, 원본 관측 1,304개, 전체 매물 62개를 이관했다. 활성 매물 41개, 활성 급매 1개이며 `last_urgent_alert_price_won`이 있는 기존 매물 2개의 기록도 보존됐다.
 - 이관 명령은 두 번 실행해 중복이 생기지 않음을 확인했다. DB 기반 Django 테스트 16개와 `manage.py check`, `makemigrations --check`가 통과했다.
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 3단계까지 완료했다. PostgreSQL 생성·마이그레이션, admin 슈퍼유저 생성, 기존 데이터 이관이 끝났다. 다음 구현은 4단계 판정 로직 이관이다.**
+**상태: 4단계까지 완료했다. PostgreSQL의 원본 관측·현재 매물에 조건 판정과 스캔 상태 갱신을 적용할 수 있다. 다음 구현은 5단계 finder용 API다.**
 
 ### 왜
 
@@ -70,7 +70,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - [x] 1. `settings.py` 재구성 + `psycopg[binary]`/`whitenoise` 추가 + admin 배선 (커밋 `a64a6dc`). PostgreSQL 기동 후 마이그레이션 적용 완료.
 - [x] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser`
 - [x] 3. `import_searches` / `import_state` 관리 명령 작성, 기존 데이터 이관 실행
-- [ ] 4. `parsing.py` → `properties/matching.py`, `service.scan()` 판정부 → `properties/scanning.py` + 테스트 이관
+- [x] 4. `parsing.py` → `properties/matching.py`, `service.scan()` 판정부 → `properties/scanning.py` + 테스트 이관
 - [ ] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`)
 - [ ] 6. `report` 뷰를 DB 기반으로 전환 (템플릿 무변경)
 - [ ] 7. `card.py` / `notifier.py` / `publish.py` 이관 + `send_digest`·`preview_card`·`check_report` 관리 명령
@@ -81,7 +81,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 3단계 기존 데이터 이관과 admin 슈퍼유저 생성까지 완료했다. 다음 코드는 4단계 `matching.py`와 `scanning.py`다.
+브랜치 `kakao-image-card`. 4단계 조건 판정과 트랜잭션 기반 스캔 상태 갱신까지 완료했다. 다음 코드는 5단계 `api` 앱과 finder용 엔드포인트다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -122,10 +122,18 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 실제 이관 결과: 공통 규칙 1, 검색조건 6, 수집 실행 27, 원본 관측 1,304, 전체 매물 62, 활성 매물 41, 활성 급매 1, 알림 가격 이력 보유 2.
 - DB 기반 이관 테스트를 포함한 Django 테스트 16개가 통과했다. 테스트 동안만 `property_report`에 `CREATEDB`를 부여했고 종료 후 `NOCREATEDB`로 되돌렸다.
 
+#### 4단계에서 완료한 코드
+
+- `properties/matching.py`: 가격·층·타입 정규화와 단지명, 면적, 타입, 저층 차감 가격 조건 판정을 Django 모델 입력으로 이관했다. 판정 과정에서 `floor`, `is_low_floor`, 유효 상한가·급매가를 채우고 제외 사유를 반환한다.
+- `properties/scanning.py`: `record_scan()`이 한 트랜잭션에서 `Scan`과 수집 원본 전량 `Observation`을 저장하고, 조건 통과분을 `Listing`에 upsert하며, 성공 조건에 한해서만 미관측·탈락 매물을 비활성화한다.
+- 최초 급매와 추가 가격 하락만 알림 후보로 만들고, 실제 전송 예정인 경우에만 `last_urgent_alert_price_won`을 갱신한다. smoke 모드는 알림 이력을 소모하지 않는다.
+- 트랜잭션이 끝난 뒤 API 계층이 전송할 수 있도록 `ScanDecision`에 알림 후보와 전체 통과 매물을 반환한다. 전송 대상이 없으면 기존 정책과 같은 미전송 사유를 `Scan.notification`에 기록한다.
+- 원본 전량·제외 사유, 최초 확인 시각 보존, 급매 재알림, 신규 알림, 실패 조건 비활성화 방지, 잘못된 입력 전체 롤백을 포함한 테스트를 추가했다. Django 테스트 28개와 finder 테스트 81개가 통과했고, 테스트 후 DB 역할을 `NOCREATEDB`로 복구했다.
+
 #### 다음에 할 일 (순서대로)
 
-1. 4단계: `parsing.py`의 판정을 `properties/matching.py`로 옮기고 DB 모델 입력으로 동작하게 한다.
-2. `service.scan()`의 상태 판정을 `properties/scanning.py`의 트랜잭션 기반 `record_scan()`으로 옮기고 테스트한다.
+1. 5단계: `api` 앱을 만들고 Bearer 인증을 적용한다.
+2. `health`, `conditions`, `scans`, `digest` 엔드포인트를 구현하고 `POST /api/scans/`에서 `record_scan()`을 호출한다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
