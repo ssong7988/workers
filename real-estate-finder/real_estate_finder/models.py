@@ -1,48 +1,52 @@
-"""Domain models shared by collection, filtering, storage, and notification."""
+"""What the collector reads and what it reports.
+
+Both shapes are deliberately thin. Search conditions arrive from report-site's
+API and are used only to decide which scraped complex belongs to which
+condition; a listing is the raw row as it appeared on screen. Nothing here
+decides whether a listing matches, is a bargain, or is worth a message - that
+judgement lives in `report-site/properties/`.
+"""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
 
 @dataclass(frozen=True)
-class LowFloorRule:
-    numeric_floors: tuple[int, ...] = (1, 2, 3)
-    labels: tuple[str, ...] = ("저", "저층")
-    price_discount_won: int = 100_000_000
-
-
-@dataclass(frozen=True)
 class SearchCondition:
+    """One search condition, as served by `GET /api/conditions/`."""
+
     id: str
     name: str
     complex_names: tuple[str, ...]
-    search_url: str
-    exclusive_area_m2: float | None
-    allowed_types: tuple[str, ...] | None
-    max_price_won: int | None
-    urgent_price_won: int | None
+    search_url: str = ""
+    exclusive_area_m2: float | None = None
     exclusive_area_min_m2: float | None = None
     exclusive_area_max_m2: float | None = None
-    notify_new: bool = False
-    apply_low_floor_discount: bool = True
-    enabled: bool = True
+    allowed_types: tuple[str, ...] | None = None
 
-
-@dataclass(frozen=True)
-class AppConfig:
-    trade_type: str
-    low_floor: LowFloorRule
-    searches: tuple[SearchCondition, ...]
-    timezone: str = "Asia/Seoul"
-    digest_weekdays: tuple[int, ...] = (0, 1, 2, 3, 4)
-    digest_hour: int = 8
+    @classmethod
+    def from_api(cls, payload: dict[str, Any]) -> "SearchCondition":
+        names = payload.get("complex_names") or []
+        types = payload.get("allowed_types")
+        return cls(
+            id=str(payload["id"]),
+            name=str(payload.get("name", "")),
+            complex_names=tuple(str(name) for name in names),
+            search_url=str(payload.get("search_url") or ""),
+            exclusive_area_m2=payload.get("exclusive_area_m2"),
+            exclusive_area_min_m2=payload.get("exclusive_area_min_m2"),
+            exclusive_area_max_m2=payload.get("exclusive_area_max_m2"),
+            allowed_types=tuple(str(item) for item in types) if types else None,
+        )
 
 
 @dataclass
 class Listing:
+    """One listing exactly as scraped, before anyone judges it."""
+
     condition_id: str
     listing_id: str
     complex_name: str
@@ -50,14 +54,10 @@ class Listing:
     exclusive_area_m2: float
     price_won: int
     floor_text: str
-    floor: int | None
     direction: str
     description: str
     url: str
     observed_at: str
-    is_low_floor: bool = False
-    effective_max_price_won: int | None = None
-    effective_urgent_price_won: int | None = None
 
     @property
     def key(self) -> str:
@@ -65,30 +65,6 @@ class Listing:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Listing":
-        fields = cls.__dataclass_fields__
-        return cls(**{key: value for key, value in data.items() if key in fields})
-
-
-@dataclass
-class ScanResult:
-    started_at: str
-    finished_at: str
-    successful_conditions: list[str] = field(default_factory=list)
-    failed_conditions: dict[str, str] = field(default_factory=dict)
-    collected_count: int = 0
-    matched: list[Listing] = field(default_factory=list)
-    urgent: list[Listing] = field(default_factory=list)
-    excluded_count: int = 0
-    # Why a Kakao message did or did not go out. A quiet scan and a broken scan
-    # look identical from the console without this.
-    notification: str = ""
-
-    @property
-    def success(self) -> bool:
-        return not self.failed_conditions and bool(self.successful_conditions)
 
 
 def iso_now() -> str:

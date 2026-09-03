@@ -1,9 +1,12 @@
 # Run one property scan.
 #
-# 1) Start Edge with a dedicated profile if the debugging port is unavailable.
-# 2) Check the Naver login and wait for the user to sign in when necessary.
-# 3) Scan listings. KakaoTalk is sent only when an urgent or new listing
-#    turns up; the reason is printed either way.
+# 1) Check the report server, which owns the database. A scan has nowhere to
+#    go without it, so this runs before the browser is touched.
+# 2) Start Edge with a dedicated profile if the debugging port is unavailable.
+# 3) Check the Naver login and wait for the user to sign in when necessary.
+# 4) Collect the listings and hand them to the report server, which decides
+#    what matches, what is urgent, and whether KakaoTalk goes out. The reason
+#    is printed either way.
 #    Use send-report.bat to send the full result on demand.
 #
 # Double-click run-scan.bat to launch this script.
@@ -13,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
-# Share KAKAO_REPORT_URL (the report-site's public URL) with the scan.
+# Share the repo-root .env (KAKAO_REPORT_URL, and FINDER_API_BASE if set).
 . (Join-Path $Root '..\load-env.ps1')
 
 $Port = 9222
@@ -51,10 +54,20 @@ if (-not (Test-Path $Python)) {
     throw "Python virtual environment not found: $Python`nComplete the installation steps in README.md first."
 }
 
+Write-Host "[1/4] Checking the report server..." -ForegroundColor Cyan
+& $Python -m real_estate_finder check-api
+if ($LASTEXITCODE -ne 0) {
+    throw @"
+The report server is not answering.
+It owns the database, so a scan cannot be stored without it.
+Start report-site\run-site.bat, then run this file again.
+"@
+}
+
 if (Test-DebugPort) {
-    Write-Host "[1/3] Found Edge on the debugging endpoint ($Endpoint)." -ForegroundColor Green
+    Write-Host "[2/4] Found Edge on the debugging endpoint ($Endpoint)." -ForegroundColor Green
 } else {
-    Write-Host "[1/3] Starting Edge with the dedicated profile..." -ForegroundColor Cyan
+    Write-Host "[2/4] Starting Edge with the dedicated profile..." -ForegroundColor Cyan
     Write-Host "      Profile: $EdgeProfile"
     $edgeExe = Find-Edge
     Start-Process $edgeExe -ArgumentList @(
@@ -77,11 +90,11 @@ Close every Edge window and run this file again.
     Write-Host "      The debugging port is ready." -ForegroundColor Green
 }
 
-Write-Host "[2/3] Checking the Naver login..." -ForegroundColor Cyan
+Write-Host "[3/4] Checking the Naver login..." -ForegroundColor Cyan
 & $Python -m real_estate_finder browser-login
 if ($LASTEXITCODE -ne 0) { throw "Naver login failed." }
 
-Write-Host "[3/3] Scanning listings (KakaoTalk goes out only when there is something to report)..." -ForegroundColor Cyan
+Write-Host "[4/4] Collecting listings (KakaoTalk goes out only when there is something to report)..." -ForegroundColor Cyan
 & $Python -m real_estate_finder scan-once
 if ($LASTEXITCODE -ne 0) { throw "The property scan failed." }
 
