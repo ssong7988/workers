@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>관심부동산 가격 통계</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f5f7f6; color: #0f172a; font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  .header { background: #102f25; color: #fff; }
+  .header-inner { max-width: 56rem; margin: 0 auto; padding: 2rem 1.25rem; }
+  @media (min-width: 640px) { .header-inner { padding: 2.75rem 2rem; } }
+  .eyebrow { display: flex; align-items: center; gap: .5rem; font-size: .875rem; font-weight: 600; color: #a7f3d0; }
+  .title { margin: .75rem 0 0; font-size: 1.875rem; font-weight: 700; letter-spacing: -0.01em; }
+  @media (min-width: 640px) { .title { font-size: 2.25rem; } }
+  .observed { margin-top: .75rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .875rem; color: rgba(209, 250, 229, .75); }
+  .back { margin-left: auto; border: 1px solid rgba(167, 243, 208, .4); border-radius: 999px; padding: .3rem .75rem; font-weight: 600; color: #a7f3d0; }
+  .back:hover { background: rgba(167, 243, 208, .12); }
+  .body { max-width: 56rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+  @media (min-width: 640px) { .body { padding: 2rem 2rem; } }
+  .panel { border-radius: 1rem; border: 1px solid #e2e8f0; background: #fff; padding: 1.25rem; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .controls { display: grid; gap: .875rem; }
+  .field-row { display: grid; gap: .75rem; grid-template-columns: 1fr; }
+  @media (min-width: 640px) { .field-row { grid-template-columns: repeat(3, 1fr); } }
+  .field { display: flex; flex-direction: column; gap: .3rem; }
+  .field label { font-size: 12px; font-weight: 700; color: #475569; }
+  .field input, .field select { border: 1px solid #cbd5e1; border-radius: .5rem; padding: .5rem .6rem; font: inherit; font-size: .875rem; background: #fff; color: #0f172a; }
+  .field input:focus, .field select:focus { outline: 2px solid #34d399; outline-offset: 1px; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+  .submit { border: none; border-radius: .5rem; background: #047857; padding: .55rem 1.1rem; font: inherit; font-size: .875rem; font-weight: 700; color: #fff; cursor: pointer; }
+  .submit:hover { background: #065f46; }
+  .reset { font-size: 12px; font-weight: 600; color: #64748b; text-decoration: underline; }
+  .hint { font-size: 12px; color: #64748b; }
+  .notice { margin-top: .75rem; border-radius: .5rem; border: 1px solid #fde68a; background: #fffbeb; padding: .6rem .75rem; font-size: 12px; color: #92400e; }
+  .summary { margin-top: 1.25rem; display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; }
+  @media (min-width: 640px) { .summary { grid-template-columns: repeat(4, 1fr); } }
+  .tile { border-radius: 1rem; border: 1px solid; padding: 1rem; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .tile-value { font-size: 1.375rem; font-weight: 800; }
+  @media (min-width: 640px) { .tile-value { font-size: 1.625rem; } }
+  .tile-label { margin-top: .25rem; font-size: 11px; font-weight: 600; }
+  .tile-green { color: #065f46; background: #ecfdf5; border-color: #d1fae5; }
+  .tile-navy { color: #1e293b; background: #fff; border-color: #e2e8f0; }
+  .section-title { margin-top: 1.75rem; display: flex; align-items: center; gap: .5rem; padding: 0 .25rem; font-size: 1.125rem; font-weight: 700; }
+  .chart-wrap { margin-top: 1rem; overflow-x: auto; }
+  .chart { display: block; min-width: 34rem; width: 100%; height: auto; }
+  .grid-line { stroke: #e2e8f0; stroke-width: 1; }
+  .axis-label { fill: #94a3b8; font-size: 11px; }
+  .wick { stroke: #94a3b8; stroke-width: 1.5; }
+  .box { fill: #a7f3d0; stroke: #047857; stroke-width: 1; }
+  .mean { stroke: #b91c1c; stroke-width: 1.5; }
+  .thin .box { fill: #e2e8f0; stroke: #94a3b8; }
+  .thin .wick, .thin .mean { opacity: .45; }
+  .legend { margin-top: .75rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 12px; color: #64748b; }
+  .swatch { display: inline-block; width: .8rem; height: .55rem; vertical-align: -1px; margin-right: .3rem; border-radius: 2px; }
+  .swatch-box { background: #a7f3d0; border: 1px solid #047857; }
+  .swatch-mean { background: #b91c1c; height: .15rem; }
+  .swatch-wick { background: #94a3b8; width: .15rem; height: .8rem; vertical-align: -3px; }
+  .table-wrap { margin-top: 1rem; overflow-x: auto; border-radius: 1rem; border: 1px solid #e2e8f0; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  table { border-collapse: collapse; width: 100%; min-width: 32rem; font-size: .875rem; }
+  th, td { padding: .6rem .75rem; text-align: right; border-top: 1px solid #f1f5f9; white-space: nowrap; }
+  th { background: #f8fafc; font-size: 12px; color: #475569; border-top: none; }
+  th:first-child, td:first-child { text-align: left; }
+  tr.thin td { color: #94a3b8; }
+  .empty { padding: 3rem 1rem; text-align: center; color: #64748b; }
+  .footer { padding: 1.75rem .5rem; text-align: center; font-size: 12px; line-height: 1.5; color: #94a3b8; }
+  .icon { display: inline-block; vertical-align: -3px; }
+</style>
+</head>
+<body>
+<header class="header"><div class="header-inner">
+  <div class="eyebrow">
+    <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-5"/></svg>
+    관심부동산 가격 통계
+  </div>
+  <h1 class="title">{{ scope.label }} 호가 분포</h1>
+  <div class="observed">
+    <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>
+    {{ range.start|date:"Y.m.d" }} ~ {{ range.end|date:"Y.m.d" }}
+    <a class="back" href="{{ report_url }}">매물 리포트 &rarr;</a>
+  </div>
+</div></header>
+
+<div class="body">
+  <form class="panel controls" method="get" action="">
+    <div class="field-row">
+      <div class="field">
+        <label for="month">월로 보기</label>
+        <input type="month" id="month" name="month" value="{{ range.month }}">
+      </div>
+      <div class="field">
+        <label for="from">시작일</label>
+        <input type="date" id="from" name="from" value="{% if not range.month %}{{ range.start|date:'Y-m-d' }}{% endif %}">
+      </div>
+      <div class="field">
+        <label for="to">종료일</label>
+        <input type="date" id="to" name="to" value="{% if not range.month %}{{ range.end|date:'Y-m-d' }}{% endif %}">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="region">지역</label>
+        <select id="region" name="region">
+          <option value="all"{% if selected_region == "all" %} selected{% endif %}>전체 지역</option>
+          {% for region in regions %}
+          <option value="{{ region }}"{% if selected_region == region %} selected{% endif %}>{{ region }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="condition">단지 (선택하면 지역보다 우선)</label>
+        <select id="condition" name="condition">
+          <option value="">지역 전체</option>
+          {% for region, items in grouped_conditions %}
+          <optgroup label="{{ region }}">
+            {% for item in items %}
+            <option value="{{ item.pk }}"{% if scope.condition_id == item.pk %} selected{% endif %}>{{ item.name }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <div class="actions">
+          <button class="submit" type="submit">조회</button>
+          <a class="reset" href="?">기본값으로</a>
+        </div>
+      </div>
+    </div>
+    <p class="hint">월을 고르면 날짜 구간보다 우선합니다. 아무것도 고르지 않으면 최근 1개월 · 과천을 봅니다.</p>
+    {% if range.notice %}<p class="notice">{{ range.notice }}</p>{% endif %}
+  </form>
+
+  <section class="summary">
+    <div class="tile tile-green"><div class="tile-value">{{ period.days }}</div><div class="tile-label">조회된 날</div></div>
+    <div class="tile tile-navy"><div class="tile-value">{{ period.samples }}</div><div class="tile-label">표본 매물</div></div>
+    <div class="tile tile-navy"><div class="tile-value">{{ period_min }}</div><div class="tile-label">기간 최저</div></div>
+    <div class="tile tile-navy"><div class="tile-value">{{ period_max }}</div><div class="tile-label">기간 최고</div></div>
+  </section>
+
+  {% if chart %}
+  <div class="section-title">
+    <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#047857" stroke-width="2"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+    날짜별 호가 분포
+  </div>
+
+  <div class="panel chart-wrap">
+    <svg class="chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img"
+         aria-label="날짜별 호가 분포. 세로선은 최저에서 최고, 상자는 1분위에서 3분위, 붉은 선은 평균입니다.">
+      {% for tick in chart.ticks %}
+      <line class="grid-line" x1="{{ chart.plot_left }}" y1="{{ tick.y }}" x2="{{ chart.plot_right }}" y2="{{ tick.y }}"/>
+      <text class="axis-label" x="{{ chart.tick_label_x }}" y="{{ tick.y }}" text-anchor="end" dominant-baseline="middle">{{ tick.label }}</text>
+      {% endfor %}
+      {% for bar in chart.bars %}
+      <g{% if bar.thin %} class="thin"{% endif %}>
+        <title>{{ bar.title }}</title>
+        <line class="wick" x1="{{ bar.x }}" y1="{{ bar.wick_top }}" x2="{{ bar.x }}" y2="{{ bar.wick_bottom }}"/>
+        <rect class="box" x="{{ bar.box_x }}" y="{{ bar.box_y }}" width="{{ bar.box_width }}" height="{{ bar.box_height }}" rx="1"/>
+        <line class="mean" x1="{{ bar.box_x }}" y1="{{ bar.mean_y }}" x2="{{ bar.box_right }}" y2="{{ bar.mean_y }}"/>
+      </g>
+      {% if bar.show_label %}
+      <text class="axis-label" x="{{ bar.x }}" y="{{ chart.x_label_y }}" text-anchor="middle">{{ bar.label }}</text>
+      {% endif %}
+      {% endfor %}
+    </svg>
+    <div class="legend">
+      <span><span class="swatch swatch-wick"></span>최저 ~ 최고</span>
+      <span><span class="swatch swatch-box"></span>1분위 ~ 3분위</span>
+      <span><span class="swatch swatch-mean"></span>평균</span>
+      <span>흐린 막대는 표본 5건 미만</span>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>날짜</th><th>매물</th><th>최저</th><th>1분위</th><th>평균</th><th>3분위</th><th>최고</th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr{% if row.thin %} class="thin"{% endif %}>
+          <td>{{ row.day|date:"Y.m.d (D)" }}</td>
+          <td>{{ row.count }}</td>
+          <td>{{ row.minimum }}</td>
+          <td>{{ row.q1 }}</td>
+          <td>{{ row.mean }}</td>
+          <td>{{ row.q3 }}</td>
+          <td>{{ row.maximum }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="panel empty">선택한 기간에 관측된 매물이 없습니다. 기간을 넓히거나 지역을 바꿔 보세요.</div>
+  {% endif %}
+
+  <p class="footer">
+    하루에 여러 번 조회하므로 매물마다 그날 마지막 호가 하나만 셉니다.<br>
+    면적과 타입이 조건에 맞는 매물이면 조사 상한가를 넘겨도 분포에 포함합니다. 실제 거래가가 아니라 네이버 부동산 호가입니다.
+  </p>
+</div>
+</body>
+</html>

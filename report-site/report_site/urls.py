@@ -19,6 +19,7 @@ _PRIVATE = f"r/{settings.REPORT_PATH_TOKEN}/"
 urlpatterns = [
     path("api/", include("api.urls")),
     path(_PRIVATE, views.index, name="report-index"),
+    path(f"{_PRIVATE}stats/", views.stats, name="report-stats"),
     path(f"{_PRIVATE}admin/", admin.site.urls),
 ]
 

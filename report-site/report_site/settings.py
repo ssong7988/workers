@@ -61,6 +61,11 @@ FINDER_API_TOKEN = _required("FINDER_API_TOKEN", "<추측 불가 문자열>")
 # misconfigured setup fails visibly rather than sending a broken link; the
 # card's live check refuses to attach a loopback URL anyway.
 REPORT_PUBLIC_URL = os.environ.get("KAKAO_REPORT_URL", "").strip()
+# The statistics screen sits beside the report under the same token prefix, so
+# the second Kakao button is the report URL plus one segment.
+REPORT_STATS_URL = (
+    f"{REPORT_PUBLIC_URL.rstrip('/')}/stats/" if REPORT_PUBLIC_URL else ""
+)
 
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY", "django-insecure-report-site-local-only-not-public"

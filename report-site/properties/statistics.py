@@ -163,6 +163,7 @@ TICK_STEPS = (EOK // 4, EOK // 2, EOK, 2 * EOK, 5 * EOK, 10 * EOK, 20 * EOK)
 class Bar:
     x: float
     box_x: float
+    box_right: float
     box_width: float
     box_y: float
     box_height: float
@@ -191,6 +192,9 @@ class Chart:
     plot_bottom: float
     bars: list[Bar]
     ticks: list[Tick]
+    # Text anchors, precomputed because Django templates cannot do arithmetic.
+    tick_label_x: float
+    x_label_y: float
 
 
 def eok_text(price_won: int) -> str:
@@ -244,6 +248,7 @@ def build_chart(series: list[DaySummary]) -> Chart | None:
             Bar(
                 x=center,
                 box_x=round(center - box_width / 2, 1),
+                box_right=round(center + box_width / 2, 1),
                 box_width=box_width,
                 box_y=box_top,
                 # A day where Q1 == Q3 would otherwise render as nothing.
@@ -271,6 +276,8 @@ def build_chart(series: list[DaySummary]) -> Chart | None:
         plot_bottom=plot_bottom,
         bars=bars,
         ticks=ticks,
+        tick_label_x=plot_left - 10,
+        x_label_y=plot_bottom + 20,
     )
 
 

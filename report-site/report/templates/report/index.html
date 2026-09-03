@@ -16,6 +16,8 @@
   .title { margin: .75rem 0 0; font-size: 1.875rem; font-weight: 700; letter-spacing: -0.01em; }
   @media (min-width: 640px) { .title { font-size: 2.25rem; } }
   .observed { margin-top: .75rem; display: flex; align-items: center; gap: .5rem; font-size: .875rem; color: rgba(209, 250, 229, .75); }
+  .stats-link { margin-left: auto; border: 1px solid rgba(167, 243, 208, .4); border-radius: 999px; padding: .3rem .75rem; font-weight: 600; color: #a7f3d0; }
+  .stats-link:hover { background: rgba(167, 243, 208, .12); }
   .body { max-width: 56rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
   @media (min-width: 640px) { .body { padding: 2rem 2rem; } }
   .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
@@ -66,9 +68,10 @@
     관심부동산 매물 리포트
   </div>
   <h1 class="title">오늘의 조회 결과</h1>
-  <div class="observed" data-observed-at="{{ observed_at }}">
+  <div class="observed" data-observed-at="{{ observed_at }}" style="flex-wrap: wrap;">
     <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
     {{ observed_at_display }} 조회 · 네이버 부동산 기준
+    <a class="stats-link" href="{% url 'report-stats' %}">가격 통계 &rarr;</a>
   </div>
 </div></header>
 
