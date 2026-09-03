@@ -2,7 +2,12 @@ playwright>=1.55,<2
 PyYAML>=6.0,<7
 # Windows ships no IANA time zone database, so ZoneInfo("Asia/Seoul") needs this.
 tzdata>=2024.1
-# report-site/: serves the property report from data/state.json on every
-# request, replacing the old Codex Sites build/deploy step.
+# report-site/: the application itself - PostgreSQL storage, the search
+# conditions, the urgent/new judgement, the web report, and the Kakao card.
+# It shares this virtual environment; there is no separate one.
 Django>=5.2,<6
 waitress>=3,<4
+psycopg[binary]>=3.2,<4
+# Serves Django admin's own CSS/JS under waitress, which does not serve
+# static files itself and never runs with DEBUG on.
+whitenoise>=6,<7

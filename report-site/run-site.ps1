@@ -1,10 +1,13 @@
-# Run the property report server.
+# Run the property report application.
 #
-# Reads real-estate-finder/data/state.json on every request, so there is no
-# build or deploy step: a scan's result shows up on refresh. This only starts
-# the local server on 127.0.0.1:8000; making it reachable from outside this
-# PC is a separate one-time step (`tailscale funnel --bg 8000`), documented
-# in .agent/docs/RUNBOOK.md.
+# Serves the report from PostgreSQL on every request, so there is no build or
+# deploy step: a scan's result shows up on refresh. This only starts the local
+# server on 127.0.0.1:8000; making it reachable from outside this PC is a
+# separate one-time step (`tailscale funnel --bg 8000`), documented in
+# .agent/docs/RUNBOOK.md.
+#
+# The scanner (real-estate-finder) posts to this server's API, so it has to be
+# running before a scan, not only when someone opens the report.
 #
 # Double-click run-site.bat to launch this script.
 
@@ -24,12 +27,30 @@ if (-not (Test-Path $Python)) {
 
 $EnvFile = Join-Path $Root '.env'
 if (-not (Test-Path $EnvFile)) {
-    throw "report-site\.env not found. Copy .env.example to .env and set REPORT_PATH_TOKEN first."
+    throw "report-site\.env not found. Copy .env.example to .env and fill it in first."
 }
 
 Write-Host "Checking Django configuration..." -ForegroundColor Cyan
 & $Python manage.py check
 if ($LASTEXITCODE -ne 0) { throw "Django configuration check failed." }
+
+# The database is the application's storage now, so an unapplied migration is
+# a broken server rather than a stale page.
+Write-Host "Checking database migrations..." -ForegroundColor Cyan
+& $Python manage.py migrate --check
+if ($LASTEXITCODE -ne 0) {
+    throw @"
+The database is not up to date (or is unreachable).
+Start PostgreSQL, check report-site\.env, then run:
+    ..\real-estate-finder\.venv\Scripts\python.exe manage.py migrate
+"@
+}
+
+# Only the admin needs these; waitress serves no static files on its own and
+# this never runs with DEBUG on. Cheap enough to keep automatic so it cannot
+# be forgotten after a Django upgrade.
+& $Python manage.py collectstatic --noinput --verbosity 0
+if ($LASTEXITCODE -ne 0) { throw "collectstatic failed." }
 
 $Token = ($env:REPORT_PATH_TOKEN)
 if (-not $Token) {
@@ -43,6 +64,7 @@ if (-not $Token) {
 
 Write-Host ""
 Write-Host "Local report:  http://127.0.0.1:8000/r/$Token/" -ForegroundColor Green
+Write-Host "Local admin:   http://127.0.0.1:8000/r/$Token/admin/" -ForegroundColor Green
 if ($env:KAKAO_REPORT_URL) {
     Write-Host "Public report: $env:KAKAO_REPORT_URL" -ForegroundColor Green
 } else {

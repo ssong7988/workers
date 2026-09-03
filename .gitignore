@@ -29,8 +29,11 @@ property-report-site/node-v*.zip
 property-report-site/node-shasums.txt
 property-report-site/*.tar.gz
 
-# report-site/ (Django) has no database, but ignore it defensively
+# report-site/ (Django). The database is PostgreSQL, outside the repo;
+# these are generated: collectstatic output and card images.
 report-site/db.sqlite3
+report-site/staticfiles/
+report-site/data/
 
 # Browser profiles left behind by screenshot tooling
 **/edge-shot-profile*/
