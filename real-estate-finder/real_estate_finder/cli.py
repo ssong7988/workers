@@ -64,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("browser-login", help="Edge 로그인 프로필 준비")
     commands.add_parser("scan-once", help="즉시 1회 수집하고 리포트 서버에 전달")
     commands.add_parser(
-        "smoke-test", help="즉시 1회 수집하고 급매 이력을 소모하지 않은 채 전체 카드 전송"
+        "smoke-test", help="즉시 1회 수집하고 급매 이력을 소모하지 않은 채 전체 매물 전송"
     )
     commands.add_parser(
         "collect-favorites",

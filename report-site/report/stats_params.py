@@ -9,12 +9,10 @@ from __future__ import annotations
 
 from calendar import monthrange
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 from properties.models import SearchCondition
-
-
-DEFAULT_REGION = "과천"
+from properties.statistics import DEFAULT_REGION, month_before
 
 
 @dataclass(frozen=True)
@@ -30,12 +28,6 @@ class Scope:
     region: str  # "" means every region
     condition_id: str
     label: str
-
-
-def month_before(day: date) -> date:
-    """The same day one month earlier, clamped to a real date (3/31 -> 2/28)."""
-    year, month = (day.year - 1, 12) if day.month == 1 else (day.year, day.month - 1)
-    return date(year, month, min(day.day, monthrange(year, month)[1]))
 
 
 def _parse_date(raw: str) -> date | None:

@@ -38,7 +38,7 @@ python -m playwright install msedge
 | `check-api` | 리포트 서버 연결과 활성 검색 조건을 출력합니다. 읽기 전용 |
 | `browser-login` | Edge 로그인 프로필을 준비하고 로그인 상태를 확인합니다 |
 | `scan-once` | 수집해서 서버에 넘깁니다. 서버가 급매·신규가 있을 때만 카카오톡을 보냅니다 |
-| `smoke-test` | 수집해서 넘기되, 급매 알림 이력을 소모하지 않고 전체 카드를 보냅니다 |
+| `smoke-test` | 수집해서 넘기되, 급매 알림 이력을 소모하지 않고 전체 매물을 보냅니다 |
 | `collect-favorites` | 브라우저 수집 결과를 `data/favorites-latest.json`에만 저장합니다. 서버 전송 없음 |
 
 ```powershell
@@ -100,4 +100,4 @@ cli.scan-once
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-브라우저도 네트워크도 쓰지 않습니다. 판정·리포트·카드 테스트는 코드와 함께 `report-site`로 옮겨갔습니다.
+브라우저도 네트워크도 쓰지 않습니다. 판정·리포트·전송 테스트는 코드와 함께 `report-site`로 옮겨갔습니다.

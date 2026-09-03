@@ -10,10 +10,14 @@ from typing import Callable
 from django.conf import settings
 
 from .models import Listing
+from .statistics import eok_text
 
 
 KAKAO_DIR = settings.ROOT_DIR / "kakao-notifier"
-CAPTION_LIMIT = 180
+# Kakao's default text template caps the body at 200 characters, and the
+# statistics headline now shares that budget with the listing lines.
+TEXT_LIMIT = 200
+OVERFLOW_RESERVE = 6
 CardItem = tuple[Listing, bool, bool]
 
 
@@ -23,7 +27,7 @@ def format_eok(price_won: int) -> str:
     return f"{eok}억" if not man else f"{eok}억 {man:,}만"
 
 
-def batch_listing_message(items: list[CardItem]) -> str:
+def batch_listing_message(items: list[CardItem], *, budget: int = TEXT_LIMIT) -> str:
     urgent_count = sum(urgent for _, urgent, _ in items)
     new_count = sum(new for _, _, new in items)
     lines = [f"🏠 매물 알림 {len(items)}건 · 급매{urgent_count} · 신규{new_count}"]
@@ -34,16 +38,27 @@ def batch_listing_message(items: list[CardItem]) -> str:
             f"{marker}{name} {format_eok(listing.price_won)} "
             f"{listing.floor_text} {listing.direction}"
         )
-        if len("\n".join([*lines, line])) > 194:
+        # Leave room for the trailing overflow line that replaces the rest.
+        if len("\n".join([*lines, line])) > budget - OVERFLOW_RESERVE:
             remaining = len(items) - (len(lines) - 1)
             suffix = f"\n외 {remaining}건"
-            while len("\n".join(lines) + suffix) > 200 and len(lines) > 1:
+            while len("\n".join(lines) + suffix) > budget and len(lines) > 1:
                 lines.pop()
                 remaining += 1
                 suffix = f"\n외 {remaining}건"
             return "\n".join(lines) + suffix
         lines.append(line)
     return "\n".join(lines)
+
+
+def stats_headline(label: str, period) -> str:
+    """One line describing the distribution the statistics button opens on."""
+    if not period.samples or period.latest is None:
+        return ""
+    return (
+        f"📊 {label} · 최저 {eok_text(period.minimum)} · "
+        f"평균 {eok_text(period.latest.mean)} · 최고 {eok_text(period.maximum)}"
+    )
 
 
 def scan_summary_message(
@@ -65,36 +80,16 @@ def scan_summary_message(
     )[:200]
 
 
-def card_heading(items: list[CardItem]) -> str:
-    urgent_count = sum(urgent for _, urgent, _ in items)
-    new_count = sum(new for _, _, new in items)
-    parts = [f"🏠 관심 매물 {len(items)}건"]
-    if urgent_count:
-        parts.append(f"급매 {urgent_count}")
-    if new_count:
-        parts.append(f"신규 {new_count}")
-    return " · ".join(parts)[:CAPTION_LIMIT]
-
-
-def card_caption(items: list[CardItem]) -> str:
-    if not items:
-        return ""
-    cheapest = min(listing.price_won for listing, _, _ in items)
-    names = list(dict.fromkeys(listing.complex_name for listing, _, _ in items))
-    where = names[0] if len(names) == 1 else f"{names[0]} 외 {len(names) - 1}단지"
-    return f"최저 {format_eok(cheapest)} · {where}"[:CAPTION_LIMIT]
-
-
 class KakaoNotifier:
     def __init__(
         self,
         kakao_dir: Path = KAKAO_DIR,
         sender: Callable[[str, str], None] | None = None,
-        image_sender: Callable[..., None] | None = None,
+        links_sender: Callable[..., None] | None = None,
     ) -> None:
         self.kakao_dir = kakao_dir
         self._sender = sender
-        self._image_sender = image_sender
+        self._links_sender = links_sender
 
     def _load_module(self):
         module_path = self.kakao_dir / "kakao_notifier.py"
@@ -115,23 +110,9 @@ class KakaoNotifier:
             return
         self._load_module().send_to_me(message, link_url)
 
-    def send_image(
-        self,
-        image_path: Path,
-        title: str,
-        description: str,
-        link_url: str | None,
-        image_width: int | None,
-        image_height: int | None,
-    ) -> None:
-        if self._image_sender:
-            self._image_sender(image_path, title, description, link_url)
+    def send_links(self, message: str, buttons: list[tuple[str, str]]) -> None:
+        """Send one text message carrying labelled buttons (at most two)."""
+        if self._links_sender:
+            self._links_sender(message, buttons)
             return
-        self._load_module().send_card_to_me(
-            image_path,
-            title,
-            description,
-            link_url,
-            image_width,
-            image_height,
-        )
+        self._load_module().send_links_to_me(message, buttons)

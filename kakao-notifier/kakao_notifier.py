@@ -135,6 +135,39 @@ def send_to_me(
     )
 
 
+def send_links_to_me(message: str, buttons: list[tuple[str, str]]) -> None:
+    """Send a text message carrying up to two labelled buttons.
+
+    Kakao's text template takes a `buttons` array in place of the single
+    `button_title`. The first button's URL is also used as the message link, so
+    tapping the bubble itself goes somewhere sensible.
+
+    Whatever domain appears in a link must be registered under
+    apps > product link management > web domain, or Kakao silently swaps it for
+    the app's default domain.
+    """
+    if len(message) > 200:
+        raise ValueError("카카오 기본 텍스트 메시지는 200자 이하여야 합니다.")
+    if not buttons:
+        raise ValueError("버튼이 하나 이상 필요합니다.")
+    if len(buttons) > 2:
+        raise ValueError("카카오 메시지 버튼은 최대 2개입니다.")
+
+    def as_link(url: str) -> dict:
+        return {"web_url": url, "mobile_web_url": url}
+
+    _send_template(
+        {
+            "object_type": "text",
+            "text": message,
+            "link": as_link(buttons[0][1]),
+            "buttons": [
+                {"title": title, "link": as_link(url)} for title, url in buttons
+            ],
+        }
+    )
+
+
 def probe_image_upload(image_path: Path) -> tuple[int, dict]:
     """Call the image upload API and return its raw response, errors included.
 

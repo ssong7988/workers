@@ -137,7 +137,7 @@ class ApiTests(TestCase):
     @mock.patch("api.views.DeliveryService")
     def test_digest_sends_database_report(self, delivery_class) -> None:
         delivery_class.return_value.send_digest.return_value = (
-            "카카오 전송 완료(카드 이미지): 매물 1건"
+            "카카오 전송 완료(링크 2개): 매물 1건"
         )
         response = self.client.post(
             "/api/digest/", {}, content_type="application/json", **self.auth

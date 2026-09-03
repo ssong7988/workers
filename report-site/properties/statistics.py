@@ -18,12 +18,19 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass
+from calendar import monthrange
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from .models import Observation
+from .models import Observation, SearchCondition
 from .report import price_text
 
+
+# What the statistics link opens with when nobody has chosen anything. The
+# screen and the Kakao headline share these so the message describes the page
+# the button leads to.
+DEFAULT_REGION = "과천"
+DEFAULT_RANGE_LABEL = "최근 1개월"
 
 # Observations that belong in the price distribution: matched, or excluded for
 # price alone. See the module docstring.
@@ -296,3 +303,36 @@ def table_rows(series: list[DaySummary]) -> list[dict]:
         }
         for day in reversed(series)
     ]
+
+
+def month_before(day: date) -> date:
+    """The same day one month earlier, clamped to a real date (3/31 -> 2/28)."""
+    year, month = (day.year - 1, 12) if day.month == 1 else (day.year, day.month - 1)
+    return date(year, month, min(day.day, monthrange(year, month)[1]))
+
+
+def default_region(conditions: list[SearchCondition] | None = None) -> str:
+    """The region the statistics link lands on, or "" when it no longer exists."""
+    if conditions is None:
+        regions = set(
+            SearchCondition.objects.filter(enabled=True)
+            .values_list("region", flat=True)
+            .distinct()
+        )
+    else:
+        regions = {condition.region for condition in conditions}
+    return DEFAULT_REGION if DEFAULT_REGION in regions else ""
+
+
+def default_summary(timezone_name: str = "Asia/Seoul") -> tuple[str, PeriodSummary]:
+    """Summarize exactly what the bare statistics URL shows, for the Kakao line."""
+    today = datetime.now(ZoneInfo(timezone_name)).date()
+    region = default_region()
+    series = collect_series(
+        start_day=month_before(today),
+        end_day=today,
+        region=region,
+        timezone_name=timezone_name,
+    )
+    label = f"{region} {DEFAULT_RANGE_LABEL}" if region else DEFAULT_RANGE_LABEL
+    return label, summarize_period(series)

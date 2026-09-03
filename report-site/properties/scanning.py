@@ -261,7 +261,7 @@ def record_scan(
             f"신규 {len(alerts) - urgent_alerts}건 · 조건충족 {len(matched)}건"
         )
     elif smoke:
-        scan.notification = "smoke 모드: 정규 급매 판정을 건너뛰고 전체 카드 전송 대기"
+        scan.notification = "smoke 모드: 정규 급매 판정을 건너뛰고 전체 매물 전송 대기"
     else:
         scan.notification = _no_alert_reason(
             failed_conditions=failures,
