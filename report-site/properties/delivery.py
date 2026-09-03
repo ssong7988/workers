@@ -167,7 +167,7 @@ class DeliveryService:
             )
         )
         if not listings:
-            self._send_text("☀️ 과천 관심 매물이 없습니다.")
+            self._send_text("☀️ 관심 매물이 없습니다.")
             return "카카오 전송 완료(텍스트): 활성 매물이 0건이라 빈 보고를 보냈습니다"
         items: list[CardItem] = [
             (listing, listing.is_urgent, False) for listing in listings

@@ -209,7 +209,7 @@ class NaverBrowserCollector:
         return results
 
     def collect_favorites_snapshot(self) -> dict:
-        """Collect the six visible favorite complexes through the signed-in UI.
+        """Collect the saved favorite complexes through the signed-in UI.
 
         The flow deliberately starts at Naver, clicks the public Real Estate and
         Favorites controls, and never calls an undocumented endpoint.  It uses a
@@ -298,28 +298,90 @@ class NaverBrowserCollector:
         )
 
     def _favorite_complexes(self, page, limit: int | None = None) -> list[dict[str, str]]:
-        rows = page.locator("a").evaluate_all(
-            """els => els.map(a => ({
-                href: a.getAttribute('href') || '',
-                text: (a.textContent || '').trim(),
-                card: (a.closest('li')?.innerText || '').trim()
-            }))"""
-        )
-        complexes: list[dict[str, str]] = []
-        seen: set[str] = set()
-        for row in rows:
-            match = self.FAVORITE_ARTICLE_HREF_RE.match(row["href"])
-            if not match or match.group(1) in seen:
-                continue
-            seen.add(match.group(1))
-            card_lines = [line.strip() for line in row["card"].splitlines() if line.strip()]
-            name = card_lines[1] if len(card_lines) > 1 and card_lines[0] == "아파트" else ""
-            complexes.append(
-                {"complex_id": match.group(1), "name": name, "href": row["href"]}
-            )
         # Follow whatever the screen reports; MAX_FAVORITE_COMPLEXES is only a
         # runaway guard, so adding or removing a favorite needs no code change.
         cap = min(limit or self.MAX_FAVORITE_COMPLEXES, self.MAX_FAVORITE_COMPLEXES)
+        selector = 'a[href^="/complexes/"][href$="?tab=article"]'
+        page.evaluate(
+            """selector => {
+                const anchor = document.querySelector(selector);
+                let pane = anchor?.parentElement || null;
+                while (pane && pane !== document.body) {
+                    if (pane.scrollHeight > pane.clientHeight + 20) {
+                        pane.scrollTop = 0;
+                        pane.dispatchEvent(new Event('scroll', {bubbles: true}));
+                        return;
+                    }
+                    pane = pane.parentElement;
+                }
+                window.scrollTo(0, 0);
+            }""",
+            selector,
+        )
+        page.wait_for_timeout(700)
+
+        complexes: list[dict[str, str]] = []
+        seen: set[str] = set()
+        at_bottom = False
+        for _ in range(self.MAX_FAVORITE_COMPLEXES):
+            rows = page.locator(selector).evaluate_all(
+                """els => els.map(a => ({
+                    href: a.getAttribute('href') || '',
+                    card: (a.closest('li')?.innerText || '').trim()
+                }))"""
+            )
+            for row in rows:
+                match = self.FAVORITE_ARTICLE_HREF_RE.match(row["href"])
+                if not match or match.group(1) in seen:
+                    continue
+                seen.add(match.group(1))
+                card_lines = [
+                    line.strip() for line in row["card"].splitlines() if line.strip()
+                ]
+                name = (
+                    card_lines[1]
+                    if len(card_lines) > 1 and card_lines[0] == "아파트"
+                    else ""
+                )
+                complexes.append(
+                    {"complex_id": match.group(1), "name": name, "href": row["href"]}
+                )
+            if len(complexes) >= cap or at_bottom:
+                break
+
+            state = page.evaluate(
+                """selector => {
+                    const anchor = document.querySelector(selector);
+                    let pane = anchor?.parentElement || null;
+                    while (pane && pane !== document.body) {
+                        if (pane.scrollHeight > pane.clientHeight + 20) {
+                            const before = pane.scrollTop;
+                            pane.scrollTop = Math.min(
+                                pane.scrollHeight - pane.clientHeight,
+                                before + Math.max(400, Math.floor(pane.clientHeight * 0.6))
+                            );
+                            pane.dispatchEvent(new Event('scroll', {bubbles: true}));
+                            return {
+                                moved: pane.scrollTop > before,
+                                at_bottom: pane.scrollTop + pane.clientHeight
+                                    >= pane.scrollHeight - 4
+                            };
+                        }
+                        pane = pane.parentElement;
+                    }
+                    const before = window.scrollY;
+                    window.scrollBy(0, Math.max(400, Math.floor(window.innerHeight * 0.6)));
+                    return {
+                        moved: window.scrollY > before,
+                        at_bottom: window.scrollY + window.innerHeight
+                            >= document.body.scrollHeight - 4
+                    };
+                }""",
+                selector,
+            )
+            at_bottom = bool(state["at_bottom"] or not state["moved"])
+            page.wait_for_timeout(700)
+
         return complexes[:cap]
 
     def _collect_favorite_complex(self, page, complex_info: dict[str, str]) -> dict:
@@ -645,6 +707,11 @@ class NaverBrowserCollector:
         # This is a multi-select popover; close it so later scrolling reaches
         # the listing list and the results refresh.
         self._close_filter_popover(page, button)
+        # Several area options may have changed in quick succession. The list
+        # header can briefly settle on an intermediate count before React
+        # applies the final selection, so do not let _settled_list_card_count()
+        # accept that transient value.
+        page.wait_for_timeout(2_500)
 
     @staticmethod
     def _list_card_count(page) -> int:
@@ -807,6 +874,7 @@ class NaverBrowserCollector:
                 + _CARD_HELPERS_JS
                 + """
                 const card = collectCards().find(item =>
+                    item.dataset.collectorExpansionAttempted !== 'true' &&
                     [...item.querySelectorAll('button')].some(button =>
                         (button.textContent || '').trim() === '매물목록 펼치기' &&
                         button.getClientRects().length > 0));
@@ -816,6 +884,7 @@ class NaverBrowserCollector:
                 // Naver's sticky filter header can cover the button after
                 // scrolling. Calling the same visible control's handler avoids
                 // pointer interception by that fixed overlay.
+                card.dataset.collectorExpansionAttempted = 'true';
                 button.click();
                 return card;
                 }"""
@@ -831,6 +900,7 @@ class NaverBrowserCollector:
         remaining = page.evaluate(
             """() => [...document.querySelectorAll('button')].some(element =>
                 (element.textContent || '').trim() === '매물목록 펼치기' &&
+                element.closest('li')?.dataset.collectorExpansionAttempted !== 'true' &&
                 element.getClientRects().length > 0)"""
         )
         if remaining:
@@ -873,6 +943,13 @@ class NaverBrowserCollector:
             count = len(numbers)
             page.wait_for_timeout(250)
         summary = " ".join((card_handle.inner_text() or "").split())[:160]
+        if count == 0:
+            # Some complexes show a valid grouped card but the public UI does
+            # not open its agent rows even for a real click. Keep that visible
+            # card as one listing; _collect_favorite_complex() assigns the
+            # existing synthetic card ID. A partial expansion is still unsafe
+            # because its cheapest agent row may be the one that is missing.
+            return []
         raise CollectionError(
             f"매물목록을 펼쳤지만 매물 {expected}건 중 {count}건만 나타났습니다: {summary}"
         )

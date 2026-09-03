@@ -23,6 +23,6 @@ urlpatterns = [
     path(f"{_PRIVATE}admin/", admin.site.urls),
 ]
 
-admin.site.site_header = "과천 관심 매물"
-admin.site.site_title = "과천 관심 매물"
+admin.site.site_header = "관심 매물"
+admin.site.site_title = "관심 매물"
 admin.site.index_title = "검색 조건과 수집 결과"

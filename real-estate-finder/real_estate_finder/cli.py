@@ -47,7 +47,7 @@ def run_lock() -> Iterator[None]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="과천 관심 매물 수집기")
+    parser = argparse.ArgumentParser(description="관심 매물 수집기")
     parser.add_argument("--headless", action="store_true", help="브라우저 창을 숨김")
     parser.add_argument(
         "--edge-cdp",

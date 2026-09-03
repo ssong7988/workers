@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-03 (가격 통계 기능 추가)
+마지막 갱신: 2026-09-03 (관심단지 14개·판교 지역 반영)
 
 ## Current Architecture
 
@@ -23,6 +23,7 @@
 
 ## Current State
 
+- 검색 조건은 과천 6개·광교 4개·판교 4개, 총 14개가 활성 상태다. 새 8개 조건은 DB까지 반영됐지만 아직 첫 실제 스캔 전이라 새 단지의 `Observation`·`Listing`은 없다.
 - **Tailscale Funnel 전환은 완료됐고 종단 확인까지 끝났다.** 공개 리포트는 Funnel 주소로 서빙되며, 실제 카카오톡 카드에 `전체 매물 보기` 버튼이 새 주소로 포함되는 것까지 확인했다.
 - 공개 리포트 호스트: `https://desktop-477.tailf8d9d1.ts.net` (Tailscale Funnel → 로컬 `127.0.0.1:8000` 프록시). 전체 경로는 `REPORT_PATH_TOKEN`을 포함하므로 문서에 적지 않는다 — 루트 `.env`의 `KAKAO_REPORT_URL`에 있다.
 - Tailscale 설치·로그인·Funnel 활성화 완료(`tailscale funnel --bg 8000`). `tailscaled`는 Windows 서비스라 재부팅 후 Funnel 설정이 자동 복구된다.
@@ -57,6 +58,167 @@
 - 확인된 수치(2026-09-03): 과천 9/2 160건 21.5~29.5억(1분위 23.5 / 3분위 26), 9/3 145건 21.5~29.5억(1분위 23 / 3분위 26). 광교는 9/2 4건, 9/3 2건이라 분위수 없음. 통계 표본(145)이 조건충족(42)보다 많은 것이 정상이다.
 - 카카오는 카드 PNG 대신 텍스트 1통 + 버튼 2개를 보낸다. **카카오 기본 텍스트 템플릿이 `buttons` 배열을 받는다는 것을 실제 전송 1회로 확인했다.** 200자 예산은 통계 한 줄과 매물 목록이 나눠 쓴다.
 - `properties/card.py`, `preview_card`, `test_card.py`를 삭제했다. headless Edge 렌더링 의존이 사라졌다.
+
+## Completed Work: 관심 단지 추가 + 슈르·에코팰리스 표기 수정 (2026-09-03 완료)
+
+**상태: 코드·조건·DB·문서 반영, 자동 검증, 실제 14개 조건 스캔과 카카오 전송까지 완료.**
+
+- 2026-09-03 16:33 KST에 관심단지 14개를 다시 수집했다. 화면 카드 200/200개, 매매 매물 200건이 일치했고 단지명 공란·ID/이름 중복·단지별 카드 수 불일치는 모두 0개다.
+- 기존 6개 대비 새 단지는 8개다: `광교더리브`, `봇들7단지엔파트`, `백현마을6단지`, `백현마을7단지`, `백현마을5단지`, `광교경남아너스빌`, `광교센트럴뷰`, `과천푸르지오써밋`.
+- 관심단지가 10개를 넘으면 네이버 패널이 일부 카드만 렌더링하는 문제가 처음 드러나 `collector.py`가 패널을 스크롤하며 화면의 총 개수만큼 누적하도록 고쳤다.
+- 여러 면적 옵션 변경 직후 목록 헤더의 중간 건수를 최종값으로 오인하지 않도록 결과 갱신 대기를 추가했다.
+- `광교더리브`의 일부 묶음 카드는 실제 클릭에도 중개사별 행이 열리지 않았다. 개별 링크가 0개인 경우에만 화면 카드 자체를 한 매물로 보존하고, 일부만 열린 경우는 계속 실패하도록 했다. 이 경로를 포함한 실제 14개 수집이 완주했다.
+- 사용자에게 지역 배정을 확인받아 과천 1개, 판교 4개, 광교 3개 조건을 시드와 DB에 추가했다. 기존 6개를 포함해 활성 조건은 14개, 지역은 과천·광교·판교 3개다.
+- `래미안슈르 전체`와 `래미안에코팰리스 전체`는 ID와 판정 동작을 유지한 채 각각 `래미안슈르 84`, `래미안에코팰리스 84`로 표기만 고쳤다.
+- `import_searches` 결과 신규 8개·갱신 6개. `manage.py check`, `makemigrations --check --dry-run`, Django 테스트 87개, finder 테스트 32개가 통과했고 실행 중 API가 활성 조건 14개를 반환했다. 테스트용 `CREATEDB` 권한은 원래대로 회수했다.
+- admin 제목, 빈 digest 문구, finder CLI 설명에서 서비스 전체를 `과천`으로 한정하던 표현을 제거했다. RUNBOOK에 관심단지 추가 절차와 판교 통계 범위를 반영했다.
+- 리포트 서버를 새 코드로 재시작했고 health 200, 통계 화면 200 및 판교 선택지, admin의 새 공통 제목을 확인했다.
+- 실제 첫 스캔(29번)을 완주했다. 성공 조건 14/14, 수집·관측 201건, 조건충족·활성 매물 93건, 제외 108건, 급매 0건, 실패 0건이다.
+- 카카오 메시지 1통(링크 2개)이 실제 전송됐다. 신규 알림 48건, 조건충족 93건으로 기록됐고 `NotificationFailure`는 0건이다.
+- `check_report`에서 DB 기준 시각 `2026-09-03T08:19:33+00:00`과 공개 리포트 시각 `2026-09-03T17:19:33+09:00`이 같은 순간임을 확인했다.
+
+### 사용자 요청 (원문 요지)
+
+1. `래미안슈르`, `래미안에코팰리스`가 이름에 "전체"로 나오는데 실제로는 84만 조사하고 있으니 고쳐라.
+2. **광교 1개, 과천 1개, 판교 여러 개** 단지를 네이버 관심단지에 이미 추가해 뒀다("추가했어" — 과거형). 앱이 이를 반영해 추가로 조사하고 UI에도 나오게 하라.
+3. 조사 조건은 기존과 동일하게.
+4. 알림 방식은 — **광교 추가분은 광교푸르지오월드마크와 동일**, **과천·판교 추가분은 과천센트럴파크푸르지오써밋과 동일**.
+
+### 사용자가 확정한 선택 (질문해서 받은 답)
+
+| 질문 | 답 |
+|---|---|
+| 슈르·에코팰리스를 어떻게 고칠까 | **표기만 84로 바로잡기.** 조건 ID(`raemian-sur-all`, `raemian-eco-palace-all`)와 동작은 그대로 둔다. 전체 면적을 실제로 조사하게 바꾸는 것이 **아니다** |
+| 새 단지 이름 확보 방법 | **`collect-favorites`로 먼저 읽어온다.** 사용자가 직접 적어주는 방식은 선택하지 않았다 |
+| 과천·판교 추가분 가격 기준 | **과천센트럴파크와 같은 숫자** — 조사 상한 2,550,000,000 / 급매 2,450,000,000 |
+
+### 조사해서 확인한 사실 (다시 확인할 필요 없음)
+
+- **수집기 코드 변경이 필요 없다.** `real-estate-finder/real_estate_finder/collector.py:183` `collect_all()`은 `collect_favorites_snapshot()`으로 관심단지 목록을 **통째로** 읽은 뒤, 조건을 순회하며 이름이 맞는 것만 남긴다. 조건에 없는 단지는 조용히 버려진다. 따라서 **`SearchCondition` 행만 추가하면 새 단지가 수집된다.**
+- **화면 필터가 이미 전 단지 공통이다.** `collector.py:123-124` `SCREEN_AREA_MIN_M2 = 80`, `SCREEN_AREA_MAX_M2 = 86`은 클래스 상수이며 조건과 무관하게 모든 단지에 같은 80~86㎡ 필터를 건다. "조건은 동일하게 조사"가 저절로 성립한다. 이것이 슈르·에코팰리스가 "전체"라는 이름으로도 84만 조사하던 이유다.
+- `collector.py:320-322` 주석: `MAX_FAVORITE_COMPLEXES = 30`은 폭주 방지용일 뿐이고 관심단지 추가·삭제에 코드 변경이 필요 없다. 현재 6개 → 12개 안팎이 되어도 여유가 있다.
+- **UI 코드 추가가 필요 없다.** 리포트(`report/views.py`의 `index`)와 통계(`stats`)는 `SearchCondition`을 읽어 그린다. 통계 화면의 지역 `<select>`는 `dict.fromkeys(c.region for c in conditions)`로 만들어지므로 **`region: 판교`인 조건이 생기면 판교가 자동으로 나타난다.**
+- **추가 반영 직전 DB의 기존 조건 6개가 `report-site/properties/seed/searches.yaml`과 완전히 일치했다(드리프트 0).** 2026-09-03에 필드별로 대조해 확인했다. 그래서 이번에는 YAML을 고치고 `import_searches`를 돌리는 것이 안전한 적용 경로였다. `update_or_create`라 기존 행을 지우지 않는다.
+- `properties/tests/test_import_commands.py`는 임시 YAML 픽스처를 쓰므로 시드를 바꿔도 깨지지 않는다.
+- 판정 규칙이 바뀌지 않으므로 **`reclassify_observations`는 돌릴 필요가 없다.** 새 단지의 과거 관측은 애초에 존재하지 않는다(수집 단계에서 버려졌으므로 서버에 도달한 적이 없다).
+
+### 1단계 — 단지 목록 확보 (완료)
+
+Edge를 CDP 9222로 띄운 뒤(`run-scan.ps1`의 2단계와 같다) 실행한다.
+
+```powershell
+cd real-estate-finder
+.\.venv\Scripts\python.exe -m real_estate_finder collect-favorites
+```
+
+읽기 전용이다. `data/favorites-latest.json`에만 저장하고 서버 전송도 카카오 전송도 하지 않는다.
+
+기존 6개와 대조해 새로 늘어난 이름을 뽑는다. 기존 목록은 다음과 같다(2026-09-02 16:30 스냅샷 기준, 네이버 표기 그대로).
+
+```text
+래미안과천센트럴스위트 / 과천센트럴파크푸르지오써밋 / 과천위버필드
+래미안슈르 / 래미안에코팰리스 / 광교푸르지오월드마크(주상복합)
+```
+
+**뽑은 뒤 반드시 사용자에게 지역 배정을 확인받고 진행한다.** 판교 단지는 이름에 "판교"가 없는 경우가 흔하다(백현마을·봇들마을·알파리움 등). 추측하지 말고 표로 정리해 물어본다.
+
+> **여기서 드러날 수 있는 문제:** `collector.py:315`는 카드 첫 줄이 `아파트`일 때만 단지명을 읽는다(`name = card_lines[1] if len(card_lines) > 1 and card_lines[0] == "아파트" else ""`). 오피스텔·도시형생활주택으로 분류된 단지는 이름이 빈 문자열로 나와 매칭이 불가능하다. 스냅샷에 이름 없는 항목이 있으면 임의로 처리하지 말고 사용자에게 보고한다.
+
+### 2단계 — 조건 추가 (`report-site/properties/seed/searches.yaml`)
+
+기존 두 항목은 `name`만 고친다. **`id`는 건드리지 않는다** — 기본키이고 `Observation`·`Listing`의 외래키가 걸려 있다.
+
+```yaml
+- id: raemian-sur-all
+  name: 래미안슈르 84          # 기존: 래미안슈르 전체
+- id: raemian-eco-palace-all
+  name: 래미안에코팰리스 84     # 기존: 래미안에코팰리스 전체
+```
+
+새 단지는 아래 두 모양 중 하나를 따른다. 조사 조건(면적·타입)은 전부 동일하고 **알림 관련 필드만 지역에 따라 다르다.**
+
+```yaml
+# 과천·판교 추가분 — 과천센트럴파크푸르지오써밋과 같은 숫자, 급매만 알림
+- id: <slug>
+  region: 과천                 # 판교 단지는 판교
+  name: <단지명> 84
+  complex_names: [<네이버 표기 그대로>, <띄어쓰기 변형>]
+  search_url: ""
+  exclusive_area_m2: 84        # 83~86㎡로 해석된다
+  allowed_types: all
+  max_price_won: 2550000000
+  urgent_price_won: 2450000000
+  notify_new: false
+  apply_low_floor_discount: true
+  enabled: true
+
+# 광교 추가분 — 광교푸르지오월드마크와 같은 알림 방식, 신규만 알림
+- id: <slug>
+  region: 광교
+  name: <단지명> 84
+  complex_names: [<네이버 표기 그대로>]
+  search_url: ""
+  exclusive_area_m2: 84
+  allowed_types: all
+  max_price_won: null          # 가격 제한 없음 → 급매 판정이 없다
+  urgent_price_won: null
+  notify_new: true
+  apply_low_floor_discount: false
+  enabled: true
+```
+
+**`complex_names`는 부분 일치다.** `collector.py:190`과 `properties/matching.py:78`이 모두 `alias.replace(" ","") in compact_name`으로 비교한다. 별칭이 짧으면 다른 단지를 삼킨다 — 예를 들어 `판교`만 넣으면 판교 단지 전부가 한 조건에 붙는다. 별칭은 충분히 길게 잡는다.
+
+적용:
+
+```powershell
+cd report-site
+..\real-estate-finder\.venv\Scripts\python.exe manage.py import_searches
+```
+
+### 3단계 — 지역이 셋이 된 결과 문구 정리
+
+`과천`을 서비스 전체 이름처럼 쓰던 곳을 고친다.
+
+| 파일 | 지금 | 바꿈 |
+|---|---|---|
+| `report-site/report_site/urls.py:26-27` | admin 제목 `과천 관심 매물` | `관심 매물` |
+| `report-site/properties/delivery.py:170` | `☀️ 과천 관심 매물이 없습니다.` | `☀️ 관심 매물이 없습니다.` |
+| `real-estate-finder/real_estate_finder/cli.py:50` | argparse 설명 `과천 관심 매물 수집기` | `관심 매물 수집기` |
+
+**바꾸지 않는 것 두 가지.** `properties/statistics.py`의 `DEFAULT_REGION = "과천"`은 그대로 둔다(통계 화면과 카카오 통계 한 줄의 기본값). `report/templates/report/stats.html`의 안내 문구 `최근 1개월 · 과천을 봅니다`도 사실과 맞으므로 그대로 둔다.
+
+### 4단계 — 검증
+
+```powershell
+cd report-site
+..\real-estate-finder\.venv\Scripts\python.exe manage.py check
+..\real-estate-finder\.venv\Scripts\python.exe manage.py test
+
+cd ..\real-estate-finder
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m real_estate_finder check-api
+```
+
+`manage.py test`는 DB 생성 권한이 필요하다(Known Issues 참고). `check-api`는 활성 조건 수가 6에서 늘었는지 확인하는 용도다.
+
+사용자가 실행할 수동 확인(외부 부작용 있음):
+
+1. `report-site\run-site.bat` **재시작** — 실행 중인 프로세스는 옛 코드를 들고 있다.
+2. `real-estate-finder\run-scan.bat` 1회. 단지 수가 두 배가 되므로 수집이 5분에서 10분 안팎으로 늘어난다.
+3. 리포트에 새 단지 그룹이 보이는지, 통계 화면 지역 선택에 **판교**가 생겼는지.
+4. admin의 `Observation`에서 새 단지 행이 쌓였는지, 제외된 것은 `exclusion_code`가 무엇인지.
+
+### 5단계 — 문서
+
+`.agent/docs/RUNBOOK.md`에 "관심단지를 새로 추가했을 때" 절(= 이 문서의 1~2단계)을 넣고, `.agent/PROJECT_STATE.md`의 단지 수·지역 수를 갱신하고, 이 `Active Work` 절을 완료 기록으로 정리한다. `AGENTS.md`의 프로젝트 개요 한 줄(과천 중심 표현)도 확인한다.
+
+### 위험
+
+- **첫 스캔에서 카카오 알림이 뜬다.** 광교 추가분은 `notify_new: true`라 전 매물이 신규이고, 과천·판교 추가분은 24.5억 이하면 급매로 잡힌다. 한 통으로 묶여 나가므로 스팸은 아니지만 예상하지 못하면 놀랄 수 있다. 사용자에게 미리 알린다.
+- **판교에 25.5억/24.5억은 임의의 숫자다.** 사용자가 이 값을 고른 것이며, 판교 시세를 근거로 정한 값이 아니다. 시세가 그보다 낮으면 판교 매물 상당수가 "급매"로 잡히고, 높으면 리포트에서 전부 빠진다. **다만 상한을 넘긴 매물도 `exclusion_code='price'`로 통계에는 남으므로 분포는 정확하다.** 며칠 쌓인 뒤 통계 화면에서 실제 분포를 보고 admin에서 값을 조정하는 것이 바른 순서이며, 이를 사용자에게 제안한다.
+- 아파트로 분류되지 않은 관심단지는 이름이 비어 매칭되지 않는다(1단계 경고 참고).
+- 별칭 부분 일치로 다른 단지를 삼킬 수 있다(2단계 경고 참고).
 
 ## Completed Migration: 수집기 / 애플리케이션 역할 분리 (2026-09-03)
 
@@ -218,7 +380,9 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 #### 남은 결정
 
-`kakao-image-card` 브랜치를 `main`에 병합할지 결정한다. 그 외에 계획된 작업은 없다.
+`kakao-image-card` 브랜치를 `main`에 병합할지 결정한다.
+
+진행 중인 작업은 위쪽 **"Active Work: 관심 단지 추가 + 슈르·에코팰리스 표기 수정"** 절에 있다. 그것이 지금 이어서 할 일이다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
@@ -298,7 +462,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 휴대전화에서 `127.0.0.1`/`localhost`는 서버 PC를 가리키지 않으며 카카오 웹 도메인으로도 부적합하다(Tailscale Funnel 주소를 써야 하는 이유).
 - 토큰 경로(`REPORT_PATH_TOKEN`)는 우발적 노출만 막는다. 주소가 유출되면 인증 없이 누구나 볼 수 있다.
 - **코드를 바꿨으면 리포트 서버를 재시작해야 한다.** 실행 중인 프로세스는 옛 코드를 들고 있다. 이 구조에서는 재시작을 잊어도 조용히 넘어가지 않고 `check-api`가 404로 실패해 드러난다.
-- **급매가 아니면 대부분 카카오톡이 오지 않는다. 정상이다.** `notify_new`가 켜진 조건은 `gwanggyo-prugio-worldmark-84-85`(광교푸르지오월드마크) 하나뿐이라, 나머지 5개 과천 단지는 신규 매물이 나와도 알리지 않는다. 이미 같은 가격 이하로 알린 급매도 더 내려가지 않으면 다시 알리지 않는다. 사유는 항상 콘솔과 `Scan.notification`에 남으므로, 조용하다고 느껴지면 먼저 그것을 읽는다. 지금 전체를 받고 싶으면 `send-report.bat`이다.
+- **급매가 아니면 과천·판교 조건에서는 카카오톡이 오지 않는다. 정상이다.** `notify_new`가 켜진 조건은 광교 4개(광교푸르지오월드마크·광교더리브·광교경남아너스빌·광교센트럴뷰)다. 과천·판교 10개는 신규 매물이 나와도 알리지 않으며 급매 기준을 통과할 때만 보낸다. 이미 같은 가격 이하로 알린 급매도 더 내려가지 않으면 다시 알리지 않는다. 사유는 항상 콘솔과 `Scan.notification`에 남으므로, 조용하다고 느껴지면 먼저 그것을 읽는다. 지금 전체를 받고 싶으면 `send-report.bat`이다.
 - 루트와 예전 UI(`property-report-site/site-app/`)가 중첩 Git 저장소로 남아 있다. 그 디렉터리를 다시 건드릴 일이 생기면 UI 커밋 누락이나 루트 포인터만 변경되는 실수에 유의한다.
 - 마지막 `npm audit` 결과는 취약점 11개(낮음 1, 보통 2, 높음 8)였다(예전 UI 저장소 기준, 더 이상 서빙 경로가 아니므로 우선순위 낮음).
 - **Django 테스트에는 DB 생성 권한이 필요하다.** `property_report` 역할에 `CREATEDB`가 없어 `manage.py test`가 테스트 DB를 만들지 못한다. 테스트 동안만 부여했다가 되돌린다(`ALTER ROLE property_report CREATEDB;` → `NOCREATEDB;`).
