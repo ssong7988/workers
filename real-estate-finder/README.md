@@ -1,16 +1,21 @@
 # real-estate-finder
 
-과천 관심 아파트 매물을 매시간 확인하고 급매 및 평일 오전 보고를 본인 카카오톡으로 보내는 Python 프로그램입니다.
+네이버 부동산 관심단지에서 매물을 **수집**해 `report-site`로 넘기는 프로그램입니다.
 
-## 관심 조건
+여기서 하는 일은 그게 전부입니다. 어떤 매물이 조건에 맞는지, 급매인지, 신규인지, 카카오톡을 보낼지, 화면에 어떻게 보일지는 전부 `report-site`(Django + PostgreSQL)가 결정합니다. 그래서 **스캔하려면 리포트 서버가 켜져 있어야 합니다** — 수집한 데이터가 갈 곳이 없기 때문입니다.
 
-| 단지 | 일반층 조사/급매 | 1~3층·저층 조사/급매 |
-|---|---:|---:|
-| 래미안센트럴스위트 84A/B/C | 25억 / 24억 | 24억 / 23억 |
-| 과천센트럴파크푸르지오써밋 84 전 타입 | 25.5억 / 24.5억 | 24.5억 / 23.5억 |
-| 과천위버필드 84 전 타입 | 26억 / 25억 | 25억 / 24억 |
-| 래미안슈르·에코팰리스 84 전 타입 | 22.5억 / 21.5억 | 21.5억 / 20.5억 |
-| 광교푸르지오월드마크 전용 84~85㎡ | 가격 제한 없이 전체 | 가격 제한 없이 전체 |
+전체 구조는 [`.agent/docs/ARCHITECTURE.md`](../.agent/docs/ARCHITECTURE.md), 운영 절차는 [`.agent/docs/RUNBOOK.md`](../.agent/docs/RUNBOOK.md)를 참고하세요.
+
+## 가장 빠른 실행
+
+```text
+1) report-site\run-site.bat    먼저 켭니다
+2) real-estate-finder\run-scan.bat
+```
+
+`run-scan.bat`은 서버 확인 → Edge 실행 → 네이버 로그인 확인 → 수집 → 서버 전달을 순서대로 처리합니다. 급매나 신규 매물이 없으면 카카오톡을 보내지 않으며, 그때도 **미전송 사유가 창에 출력됩니다.** 조용히 끝나는 것과 실패를 혼동하지 않기 위해서입니다.
+
+급매가 아니어도 지금 전체 결과를 받고 싶으면 `send-report.bat`을 실행합니다. 이 스크립트는 `report-site`의 `manage.py send_digest`를 부르므로 브라우저도, 네이버 로그인도, 웹 서버도 필요 없습니다.
 
 ## 설치
 
@@ -20,106 +25,79 @@ py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python -m playwright install msedge
-Copy-Item config\searches.yaml config\searches.local.yaml
 ```
 
-수집기는 저장된 매물 URL이나 네이버 부동산 주소를 직접 열지 않습니다. 먼저 네이버 홈을 열고 화면의 `부동산` 링크를 클릭한 뒤, 부동산 검색창에 설정의 단지명을 입력해 화면 검색 결과로 이동합니다. `config/searches.local.yaml`은 선택 사항이며 로컬 설정이 필요할 때만 사용합니다. 기존 `kakao-notifier/.env`와 `kakao-notifier/data/kakao-token.json`도 필요합니다.
+`report-site`는 이 가상환경을 함께 씁니다. 별도로 만들지 마세요. PostgreSQL 준비와 최초 데이터 이관은 `RUNBOOK.md`를 따릅니다.
 
-## 실행 진입점
+## 명령
 
-| 파일 | 하는 일 |
+가상환경을 활성화한 뒤 실행합니다.
+
+| 명령 | 설명 |
 |---|---|
-| `run-scan.bat` | Edge 확인 → 로그인 확인 → 매물 조회. **급매 또는 신규 매물이 있을 때만** 카카오톡을 보냅니다. 보내지 않으면 그 사유를 창에 출력합니다. |
-| `send-report.bat` | 저장된 조건충족 매물 전체를 카카오톡 카드 1통으로 보냅니다. 새로 수집하지 않으므로 브라우저와 로그인이 필요 없습니다. |
-
-조회는 잘 됐는데 카카오톡이 오지 않았다면 대부분 급매·신규가 없었던 정상 동작입니다. `run-scan.bat` 창의 `카카오 미전송:` 줄에 이유가 적혀 있고, 그 결과를 지금 받고 싶으면 `send-report.bat`을 실행합니다.
-
-## 최초 실행
-
-Edge를 먼저 띄우고(아래 참고), 그다음 순서대로 실행합니다.
+| `check-api` | 리포트 서버 연결과 활성 검색 조건을 출력합니다. 읽기 전용 |
+| `browser-login` | Edge 로그인 프로필을 준비하고 로그인 상태를 확인합니다 |
+| `scan-once` | 수집해서 서버에 넘깁니다. 서버가 급매·신규가 있을 때만 카카오톡을 보냅니다 |
+| `smoke-test` | 수집해서 넘기되, 급매 알림 이력을 소모하지 않고 전체 카드를 보냅니다 |
+| `collect-favorites` | 브라우저 수집 결과를 `data/favorites-latest.json`에만 저장합니다. 서버 전송 없음 |
 
 ```powershell
-python -m real_estate_finder browser-login
-python -m real_estate_finder validate-config
-python -m real_estate_finder smoke-test
-```
-
-### 시작 지점: Edge를 직접 띄우고 거기에 로그인한다
-
-이 프로그램은 브라우저를 새로 만들지 않습니다. **사용자가 띄운 Edge에 붙습니다.** 그래서 모든 실행의 출발점은 아래 명령입니다.
-
-```powershell
-& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" `
-  --remote-debugging-port=9222 --user-data-dir="$env:LOCALAPPDATA\naver-land-edge"
-```
-
-이 Edge 창을 **켜 둔 채로** 조회 명령을 실행합니다. 프로그램은 여기 붙어서 화면을 조작하고, 끝나도 창과 탭을 닫지 않습니다.
-
-**`--user-data-dir`는 생략할 수 없습니다.** Chrome 136(Edge도 동일)부터 보안상 기본 프로필에서는 `--remote-debugging-port`가 조용히 무시됩니다. 평소 쓰던 Edge 프로필에는 붙을 수 없다는 뜻입니다. 경로는 **저장소 밖**을 쓰세요 — 저장소 안을 가리키면 프로필 파일 수천 개가 작업 트리에 쌓입니다.
-
-전용 프로필이라 처음에는 네이버에 로그인돼 있지 않습니다. 한 번만 로그인하면 그 프로필에 남습니다.
-
-```powershell
-python -m real_estate_finder browser-login
-```
-
-Edge 창에서 네이버 로그인을 완료하면 **자동으로 이어집니다**(최대 5분 대기). 이미 로그인돼 있으면 확인만 하고 끝납니다.
-
-이미 다른 Edge가 일반 모드로 실행 중이면 위 명령이 새 창만 띄우고 포트가 열리지 않을 수 있습니다. 그럴 때는 그 Edge를 모두 닫고 다시 실행하세요.
-
-> 참고: `--edge-cdp ""`를 주면 프로그램이 `data/browser-profile`로 Edge를 직접 띄우는 대체 모드로 동작합니다. 사용자가 브라우저를 통제하지 않게 되므로 기본 경로는 아닙니다.
-
-`smoke-test`는 오전까지 기다리지 않고 세 조건을 즉시 한 번 조회합니다. 조회 성공 여부와 조건 충족 매물을 본인 카카오톡으로 전송하며 정규 급매 발송 이력은 소모하지 않습니다.
-
-기본 모드의 `browser-login`은 CDP로 연결된 기존 Edge에서 네이버 로그인 상태를 확인합니다. 예약 실행 중 로그인 만료가 감지되면 조회를 중단하며, 별도 프로필 방식은 `--edge-cdp ""`를 지정한 경우에만 사용합니다.
-
-## 리포트 UI
-
-카카오톡의 `전체 매물 보기`는 `report-site/`(Django)가 서빙하는 주소를 사용합니다. `data/state.json`을 요청마다 그대로 읽으므로 빌드나 배포 단계가 없습니다 — 스캔이 끝나면 새로고침만으로 반영됩니다.
-
-```powershell
-cd ..\report-site
-.\run-site.ps1
-```
-
-`http://127.0.0.1:8000/r/<REPORT_PATH_TOKEN>/`에서 로컬로 확인할 수 있고, 외부 공개(Tailscale Funnel)와 최초 설정은 `.agent/docs/RUNBOOK.md`를 따릅니다.
-
-## 정규 명령과 테스트
-
-```powershell
-python -m real_estate_finder collect-favorites
+python -m real_estate_finder check-api
 python -m real_estate_finder scan-once
-python -m real_estate_finder scheduled-run
-python -m real_estate_finder send-digest
-python -m real_estate_finder preview-card
-python -m unittest discover -s tests -v
 ```
 
-## 카카오 알림은 이미지 카드로 나갑니다
+옵션은 `--headless`(브라우저 창 숨김), `--edge-cdp`(Edge DevTools 주소), `--api-base`(리포트 서버 주소)입니다.
 
-카카오 기본 텍스트 템플릿은 200자를 넘길 수 없어, 매물이 몇 건만 넘어가도 알림에서 목록이 잘려 나갔습니다. 그래서 `scan-once`의 급매·신규 알림과 `send-digest`의 전체 보고는 매물 목록을 카드 이미지 한 장으로 렌더링해 보냅니다. `send-digest`도 매물당 한 통이 아니라 한 통으로 끝납니다.
+`scan-once`와 `smoke-test`는 실제 카카오톡 메시지를 보낼 수 있습니다. 코드 확인 목적으로 함부로 실행하지 마세요.
 
-렌더링은 `real_estate_finder/card.py`가 담당합니다. 자기완결형 HTML을 만들어 headless Edge로 스크린샷하며, 브라우저 프로필은 OS 임시 폴더에 만들고 끝나면 지웁니다(저장소 안을 가리키면 `edge-shot-profile` 같은 찌꺼기가 남습니다).
+## 설정
 
-`preview-card`는 저장된 매물로 이미지만 만들고 전송하지 않습니다. 디자인을 확인할 때 씁니다.
+이 프로젝트에는 설정 파일이 없습니다. 검색 조건(단지, 가격 상한, 급매가, 전용면적, 저층 할인)은 PostgreSQL에 있고 **Django admin에서 고칩니다**.
+
+```text
+http://127.0.0.1:8000/r/<REPORT_PATH_TOKEN>/admin/
+```
+
+수집기가 쓰는 값은 두 개뿐이며 둘 다 환경 변수로 읽습니다.
+
+| 키 | 위치 | 기본값 |
+|---|---|---|
+| `FINDER_API_BASE` | 루트 `.env` 또는 환경 변수 | `http://127.0.0.1:8000` |
+| `FINDER_API_TOKEN` | `report-site/.env` | 없음 (필수) |
+
+토큰은 `report-site/.env`에서 직접 읽습니다. 복사해 두지 않으므로 양쪽이 어긋날 일이 없습니다.
+
+## 동작 방식
+
+```text
+cli.scan-once
+  -> ReportSiteClient.health()      서버가 없으면 브라우저를 열기 전에 중단
+  -> ReportSiteClient.conditions()  어느 단지가 어느 조건인지 받아옴
+  -> NaverBrowserCollector.collect_all()
+       로그인 확인 -> 관심부동산 -> 단지별 화면 필터 -> 묶음 펼치기/스크롤 -> 매물 파싱
+  -> 한 조건 안의 중복 제거
+  -> POST /api/scans/               서버가 저장·판정·전송을 모두 수행
+  -> 응답의 미전송/전송 사유 출력
+```
+
+수집은 로그인된 Edge를 Playwright CDP로 제어합니다. 비공개 API를 직접 호출하거나 접근 제한을 우회하지 않으며, CAPTCHA나 로그인 만료 화면을 만나면 중단합니다. 수집이 실패하면 모든 조건을 실패로 보고해 서버가 기존 매물을 비활성화하지 않게 합니다.
+
+## 파일
+
+| 파일 | 역할 |
+|---|---|
+| `real_estate_finder/cli.py` | 명령 정의, 실행 잠금, 수집과 전달 |
+| `real_estate_finder/api_client.py` | `report-site` API 호출 |
+| `real_estate_finder/collector.py` | 네이버 화면 수집 |
+| `real_estate_finder/models.py` | 조건과 원본 매물 형식 |
+| `real_estate_finder/parsing.py` | 화면 텍스트 → 숫자 |
+
+`data/`는 Git에서 제외됩니다. 브라우저 프로필, 수집 스냅샷, 실행 잠금이 들어갑니다.
+
+## 테스트
 
 ```powershell
-python -m real_estate_finder preview-card --out data\card-preview.png
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-렌더링이나 전송이 실패하면 기존 텍스트 메시지로 자동 대체되므로 알림 자체가 사라지지는 않습니다. 이미지 경로를 아예 끄려면 `--text-only`를 붙입니다.
-
-`collect-favorites`는 로그인된 Edge에서 네이버 홈의 `부동산` 링크를 클릭한 뒤
-`관심부동산`에 저장된 6개 단지의 `매물보기` 화면을 순서대로 확인합니다. 단지
-사이에는 8초 간격을 두며, 한 단지에서 최대 120건까지만 읽습니다. 결과는
-`data/favorites-latest.json`에 원자적으로 저장됩니다. CAPTCHA, 로그인 만료 또는
-접근 제한이 보이면 우회하지 않고 즉시 중단합니다.
-
-각 매물 화면에서는 중개사별 `매물목록 펼치기`를 열고 개별 매물을 확인합니다.
-묶음 카드의 대표 링크는 가장 저렴한 개별 매물을 선택하며, 가격이 같으면 매물번호가
-가장 큰 최신 링크를 선택합니다. 광교푸르지오월드마크는 전용 84~85㎡ 매매만 가격 제한 없이 집계하며, 나머지 단지는
-`전체면적` → `유사면적 묶기` → 전체 선택 해제 순서로 연 뒤, 공급면적이
-아니라 괄호 안 전용면적 숫자가 83~86인 항목만 선택합니다. 예를 들어
-`84~85㎡ (59)`는 제외하고 `116~117㎡ (84)`는 선택합니다.
-
-Windows 작업 스케줄러에서 `scheduled-run`을 매시간 정각, 사용자가 로그인한 상태에서 실행합니다. 평일 오전 8시 실행은 조회 후 전체 보고도 발송합니다. 상세 상태와 PostgreSQL 계획은 `project_state.md`를 참고하세요.
+브라우저도 네트워크도 쓰지 않습니다. 판정·리포트·카드 테스트는 코드와 함께 `report-site`로 옮겨갔습니다.

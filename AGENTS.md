@@ -15,13 +15,15 @@
 
 이 프로젝트는 네이버 부동산 매물을 수집하고 조건에 맞는 매물과 급매를 판별한 뒤, 카카오톡 카드와 웹 리포트로 전달한다.
 
-- `real-estate-finder/`: 수집, 필터링, 상태 관리, 카카오 카드 생성
+**역할이 둘로 갈려 있다. 이 경계를 흐리지 않는다.**
+
+- `real-estate-finder/`: **수집 전용.** 네이버에서 본 매물을 판정 없이 전량 `report-site` API로 넘긴다. 조건 판정, 상태, 표현, 전송 코드가 없다.
+- `report-site/`: **애플리케이션.** PostgreSQL에 원본을 전부 저장하고, 조건 필터·급매/신규/알림 판정·상태 갱신을 하고, 웹 리포트를 렌더링하고, 카카오 카드를 만들어 보낸다. 내부는 `properties/`(도메인) · `api/`(수집기 전용 경계) · `report/`(공개 화면)으로 나뉜다.
 - `kakao-notifier/`: 카카오 인증, 토큰 관리, 메시지 전송
-- `report-site/`: 웹 리포트를 서빙하는 Django 애플리케이션. `real-estate-finder/data/state.json`을 요청마다 읽으며 빌드·배포 단계가 없다.
 - `property-report-site/site-app/`: 예전 Next.js/Codex Sites UI. 서빙 경로에서 은퇴했고 별도 중첩 Git 저장소로 참고용으로만 남아 있다.
 - 공개 리포트는 `report-site/`를 Tailscale Funnel로 노출한 주소를 쓴다. 실제 주소는 `.agent/PROJECT_STATE.md`에서 확인한다.
-- 스캔은 `data/state.json`만 갱신한다. `report-site/`가 이를 즉시 서빙하므로 스캔 뒤 새로고침만으로 리포트가 갱신된다.
-- 장기적으로 수집 데이터를 PostgreSQL에 저장하도록 저장 계층만 교체한다. 서빙(Django)과 공개 URL 구조는 이미 목표 형태이므로 이후 바뀌는 것은 `report-site/report/views.py`의 데이터 로딩뿐이다.
+- 검색 조건은 PostgreSQL의 `SearchCondition`이며 Django admin에서 고친다. `report-site/properties/seed/searches.yaml`은 초기 시드일 뿐 운영 소스가 아니다.
+- **스캔은 리포트 서버 실행을 요구한다.** 데이터가 갈 곳이 없기 때문이다. `run-scan.ps1`은 브라우저를 열기 전에 `/api/health/`를 확인하고 실패하면 멈춘다.
 
 세부 운영 상태와 최신 조회 결과는 반드시 `.agent/PROJECT_STATE.md`에서 확인한다.
 
@@ -41,19 +43,21 @@
 - 검색은 우선 `rg` 또는 `rg --files`를 사용한다.
 - 기존 사용자 변경을 보존하고, 변경 전 `git status`를 확인한다.
 - 생성 결과물은 소스와 구분하여 `.gitignore`로 관리한다.
-- `report-site/`는 빌드·배포 단계가 없다. `run-site.ps1`으로 실행 중인 서버가 `data/state.json`을 그대로 서빙하므로, UI 코드(템플릿)를 바꿨을 때는 서버 재시작만 필요하다.
+- `report-site/`는 빌드·배포 단계가 없다. 요청마다 DB를 읽으므로 스캔 뒤 새로고침만으로 리포트가 갱신된다. 다만 **코드를 바꿨으면 `run-site.bat`을 재시작해야 한다** — 실행 중인 프로세스는 옛 코드를 들고 있다.
+- 판정·표현·전송 코드를 `real-estate-finder/`로 되돌려 놓지 않는다. 그런 작업은 `report-site/properties/`에서 한다.
 - 카카오톡의 공개 링크에는 `127.0.0.1`이나 `localhost`를 사용하지 않는다.
 - 카카오 카드의 `전체 매물 보기` 버튼은 리포트 서버(`report-site/`)가 현재 조회 시각과 일치하는 데이터를 서빙 중일 때만 포함한다.
-- `report-site/.env`의 `REPORT_PATH_TOKEN`과 루트 `.env`의 `KAKAO_REPORT_URL`은 Git에 커밋하지 않는다.
+- `report-site/.env`의 `REPORT_PATH_TOKEN`, `FINDER_API_TOKEN`, `POSTGRES_PASSWORD`와 루트 `.env`의 `KAKAO_REPORT_URL`은 Git에 커밋하지 않는다.
 - 예전 `property-report-site/site-app/`은 루트와 별도 Git 저장소다. 그 디렉터리를 다시 건드릴 일이 생기면 중첩 저장소에서 먼저 커밋한 뒤 루트에서 포인터 변경을 커밋한다.
 - 배포, 외부 메시지 전송, 토큰 갱신, Tailscale Funnel 설정은 대상과 결과를 확인하고 수행한다.
 
 ## 주요 검증 명령
 
-- 사용자용 메인 엔트리 포인트: 저장소 루트에서 `.\real-estate-finder\run-scan.ps1` 또는 `real-estate-finder\run-scan.bat` 더블클릭
+- 사용자용 메인 엔트리 포인트: `report-site\run-site.bat`을 먼저 켠 뒤 `real-estate-finder\run-scan.bat` 더블클릭
 - 수집기 테스트: `real-estate-finder/`에서 `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`
-- 리포트 서버 실행: `report-site/`에서 `.\run-site.ps1` 또는 `run-site.bat` 더블클릭
-- 리포트 서버 설정 검사: `report-site/`에서 `..\real-estate-finder\.venv\Scripts\python.exe manage.py check`
-- 리포트 서버 테스트: `report-site/`에서 `..\real-estate-finder\.venv\Scripts\python.exe manage.py test`
+- 수집기 ↔ 서버 연결 확인: `real-estate-finder/`에서 `.\.venv\Scripts\python.exe -m real_estate_finder check-api` (읽기 전용)
+- 애플리케이션 설정 검사: `report-site/`에서 `..\real-estate-finder\.venv\Scripts\python.exe manage.py check`
+- 마이그레이션 누락 검사: `report-site/`에서 `..\real-estate-finder\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run`
+- 애플리케이션 테스트: `report-site/`에서 `..\real-estate-finder\.venv\Scripts\python.exe manage.py test` (테스트 DB 생성 권한이 필요하다 — `.agent/PROJECT_STATE.md` 참고)
 
 작업별로 필요한 최소 검증을 실행하고, 실행하지 못한 검증은 인계 내용에 명시한다.
