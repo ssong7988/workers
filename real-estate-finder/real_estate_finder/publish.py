@@ -1,93 +1,25 @@
-"""Build and check the hosted property-report UI.
+"""Check whether the local report server is serving the latest scan.
 
-`app/page.tsx` imports `report-data.json` at build time, so writing that file
-does not update the hosted page. Builds and deployments are explicit tasks;
-hourly scans never trigger them automatically.
+The scanner writes `data/state.json`; the report site (Django, run via
+`report-site/run-site.bat`) reads it on every request, so there is no build or
+deploy step. This module only verifies the server (and its Tailscale Funnel
+tunnel, when used) is up and answering with the expected scan.
 """
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
-import subprocess
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime
-from pathlib import Path
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-SITE_ROOT = ROOT_DIR / "property-report-site"
-SITE_DIR = SITE_ROOT / "site-app"
-
-BUILD_TIMEOUT_SECONDS = 900
-# A deployment can take a moment to become ready.
+# A server restart or a slow tunnel can take a moment to become ready.
 VERIFY_ATTEMPTS = 4
 VERIFY_INTERVAL_SECONDS = 6.0
 
 _OBSERVED_AT = re.compile(r'data-observed-at="([^"]+)"')
-
-MANUAL_STEPS = (
-    "Codex Sites에서 리포트를 빌드·배포해 주세요:\n"
-    f"  1) cd {SITE_DIR}\n"
-    "  2) npm run build\n"
-    "  3) Codex Sites로 배포\n"
-    "  4) python -m real_estate_finder publish-report --verify-only"
-)
-
-
-class ManualPublishRequired(RuntimeError):
-    """Backward-compatible error type retained for older callers."""
-
-
-def _node_path() -> str | None:
-    """The bundled Node toolchain, if the workspace still carries one."""
-    candidates = sorted(SITE_ROOT.glob(".tools/node-v*"))
-    return str(candidates[-1]) if candidates else None
-
-
-def _build_env() -> dict[str, str]:
-    env = dict(os.environ)
-    node = _node_path()
-    if node:
-        env["PATH"] = f"{node}{os.pathsep}{env.get('PATH', '')}"
-    return env
-
-
-def _tail(output: str, lines: int = 20) -> str:
-    return "\n".join(output.strip().splitlines()[-lines:])
-
-
-def _run(
-    command: list[str], cwd: Path, env: dict[str, str], timeout: int
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=cwd,
-        env=env,
-        timeout=timeout,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-
-
-def build_site(site_dir: Path = SITE_DIR) -> None:
-    """Create a Codex Sites deployment build."""
-    env = _build_env()
-    npm = shutil.which("npm", path=env["PATH"])
-    if not npm:
-        raise RuntimeError(
-            "npm을 찾지 못했습니다. property-report-site/.tools의 Node를 설치하거나 PATH에 npm을 추가하세요."
-        )
-    result = _run([npm, "run", "build"], site_dir, env, BUILD_TIMEOUT_SECONDS)
-    if result.returncode != 0:
-        raise RuntimeError(
-            "사이트 빌드에 실패했습니다:\n" + _tail(result.stderr or result.stdout)
-        )
 
 
 def _fetch(url: str, timeout: float) -> str:
@@ -97,12 +29,12 @@ def _fetch(url: str, timeout: float) -> str:
 
 
 def live_observed_at(report_url: str, timeout: float = 20.0) -> str | None:
-    """The `observedAt` the hosted page is serving.
+    """The `observedAt` the report server is currently serving.
 
-    `None` covers two different situations — the site was unreachable, and the
-    server answered with a build too old to carry the marker at all. Neither one
-    may put the button on a card, so both collapse to the same answer here;
-    `describe_live` is what tells them apart for a human.
+    `None` covers two different situations — the server was unreachable, and it
+    answered without the marker at all. Neither one may put the button on a
+    card, so both collapse to the same answer here; `describe_live` is what
+    tells them apart for a human.
     """
     try:
         html = _fetch(report_url, timeout)
@@ -113,7 +45,7 @@ def live_observed_at(report_url: str, timeout: float = 20.0) -> str | None:
 
 
 def describe_live(report_url: str, timeout: float = 20.0) -> str:
-    """A human-readable account of what the deployed page is serving."""
+    """A human-readable account of what the report server is serving."""
     try:
         html = _fetch(report_url, timeout)
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -121,7 +53,7 @@ def describe_live(report_url: str, timeout: float = 20.0) -> str:
     match = _OBSERVED_AT.search(html)
     if match:
         return match.group(1)
-    return "표시된 기준 시각 없음 (배포된 빌드가 오래된 버전입니다)"
+    return "리포트 서버 응답에 기준 시각이 없습니다"
 
 
 def _same_moment(left: str, right: str) -> bool:
@@ -134,7 +66,7 @@ def _same_moment(left: str, right: str) -> bool:
 
 
 def is_live(expected_observed_at: str, report_url: str, *, attempts: int = 1) -> bool:
-    """Whether the hosted report already shows this scan."""
+    """Whether the report server already shows this scan."""
     for attempt in range(attempts):
         if attempt:
             time.sleep(VERIFY_INTERVAL_SECONDS)

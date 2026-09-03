@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .card import CardItem, build_card_image
@@ -17,8 +16,7 @@ from .notifier import (
     scan_summary_message,
 )
 from .parsing import matches_condition
-from .publish import MANUAL_STEPS, build_site, is_live
-from .report import write_report_data
+from .publish import is_live
 from .storage import FileStore
 
 
@@ -114,6 +112,14 @@ class FinderService:
                 if payload.get("condition_id") == condition.id and key not in seen_keys:
                     payload["active"] = False
 
+        # Save before sending any notification: the report site reads this file
+        # on every request, so the card's `전체 매물 보기` link must already
+        # match what gets served by the time is_live() checks it below.
+        if result.successful_conditions:
+            state["listings"] = next_state
+            state["last_successful_scan"] = iso_now()
+            self.store.save_state(state)
+
         if pending_notifications:
             # Alerts decide *whether* to send; the card carries every matched
             # listing so one message shows the whole picture, with the alerted
@@ -145,10 +151,6 @@ class FinderService:
         result.finished_at = iso_now()
         self.store.append_observations(observed)
         self.store.append_run(result)
-        if result.successful_conditions:
-            state["listings"] = next_state
-            state["last_successful_scan"] = result.finished_at
-            self.store.save_state(state)
         return result
 
     def scheduled_run(self) -> ScanResult:
@@ -219,20 +221,7 @@ class FinderService:
         channel = "텍스트"
         if self.use_cards:
             try:
-                report_output = (
-                    Path(__file__).resolve().parents[2]
-                    / "property-report-site"
-                    / "site-app"
-                    / "app"
-                    / "report-data.json"
-                )
                 observed_at = max(listing.observed_at for listing, _, _ in items)
-                write_report_data(
-                    [listing for listing, _, _ in items],
-                    self.config,
-                    report_output,
-                    observed_at=observed_at,
-                )
                 report_link = self._publish_report(observed_at)
                 image_path, width, height = build_card_image(
                     items,
@@ -259,19 +248,22 @@ class FinderService:
         return channel
 
     def _publish_report(self, observed_at: str) -> str | None:
-        """Link the report only when the hosted UI already serves this scan.
+        """Link the report only when the local report server already serves this scan.
 
-        The scanner writes the JSON but never builds or deploys the UI. A stale
-        hosted page simply means the Kakao card has no report button until an
-        explicit Codex Sites build and deployment is completed.
+        `state.json` is saved before any notification goes out (see `scan()`),
+        so the report server should already reflect this observation. A miss
+        here means the server or its Tailscale Funnel tunnel is down.
         """
         try:
             if is_live(observed_at, REPORT_URL):
                 return REPORT_URL
-            print("이번 결과는 아직 Codex Sites에 반영되지 않았습니다.")
-            print(MANUAL_STEPS)
+            print("리포트 서버가 이번 조회 결과를 아직 보여주지 않습니다.")
+            print(
+                "report-site\\run-site.bat이 실행 중인지, "
+                "Tailscale Funnel이 살아있는지 확인하세요."
+            )
         except Exception as exc:
-            print(f"Codex Sites 확인 실패: {exc}")
+            print(f"리포트 서버 확인 실패: {exc}")
         print("전체 매물 보기 버튼 없이 카드만 보냅니다.")
         return None
 

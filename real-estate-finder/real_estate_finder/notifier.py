@@ -9,9 +9,28 @@ from typing import Callable
 
 from .models import Listing, ScanResult
 
+ROOT_DIR = Path(__file__).resolve().parents[2]
 
-# Public Codex Sites URL used by Kakao. Localhost cannot be used for Kakao
-# message buttons because the domain must be registered and phone-accessible.
+
+def _load_root_env() -> None:
+    """Load the repo-root `.env` so `KAKAO_REPORT_URL` (the report-site's
+    Tailscale Funnel URL) is picked up even outside the `run-scan.ps1`/
+    `send-report.ps1` wrappers, which also dot-source `load-env.ps1`."""
+    env_path = ROOT_DIR / ".env"
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_root_env()
+
+# Falls back to the retired Codex Sites report until KAKAO_REPORT_URL is set
+# (root .env, once report-site is running behind a Tailscale Funnel URL).
 REPORT_URL = os.environ.get(
     "KAKAO_REPORT_URL", "https://my-property-report-20260902.ssong7988.chatgpt.site"
 ).strip()

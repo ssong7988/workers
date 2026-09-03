@@ -59,70 +59,71 @@ python -m real_estate_finder scan-once
 python -m real_estate_finder send-digest
 ```
 
-## 웹 화면을 로컬에서 보기
+## 웹 리포트 서버 실행
+
+`report-site/`(Django)가 `real-estate-finder/data/state.json`을 요청마다 그대로 읽어 렌더링한다. 빌드나 배포 단계가 없다 — 매물을 새로 조회하면 서버를 새로고침하는 것만으로 리포트가 갱신된다.
+
+최초 한 번, `report-site/.env`가 없다면 만든다.
 
 ```powershell
-cd property-report-site\site-app
-.\run-local.ps1
+cd report-site
+Copy-Item .env.example .env
+python -c "import secrets; print(secrets.token_hex(16))"
+# 위에서 나온 값을 .env의 REPORT_PATH_TOKEN=에 붙여넣는다.
 ```
 
-브라우저에서 `http://127.0.0.1:3000`을 연다. 이 주소는 해당 PC에서만 접근할 수 있으므로 카카오톡의 공개 링크로 사용할 수 없다.
-
-## Codex에서 UI 빌드·배포하기
-
-현재 공개 리포트는 Codex Sites 프로젝트에 배포된다. UI 소스가 변경됐거나 `property-report-site/site-app/app/report-data.json`의 새 조회 결과를 공개해야 할 때만 빌드·배포한다. 단순 매물 조회 때마다 실행하지 않는다.
-
-Codex에 아래처럼 요청하면 된다.
-
-```text
-.agent/PROJECT_STATE.md와 .agent/docs/RUNBOOK.md를 읽고,
-property-report-site/site-app의 최신 report-data.json 기준으로 UI를 빌드한 뒤
-기존 Codex Sites 프로젝트에 배포해줘.
-배포 후 공개 사이트의 observedAt이 report-data.json과 같은지 검증해줘.
-```
-
-배포 후 전체 매물 링크가 포함된 카카오톡 카드까지 보내려면 마지막 줄을 추가한다.
-
-```text
-검증에 성공하면 저장된 전체 매물을 send-digest로 카카오톡에 보내줘.
-```
-
-Codex가 수행해야 하는 실제 순서는 다음과 같다.
-
-1. `property-report-site/site-app/app/report-data.json`의 `observedAt`과 변경 내용을 확인한다.
-2. `real-estate-finder/`에서 아래 명령으로 Codex Sites용 빌드를 만든다.
-
-   ```powershell
-   .\.venv\Scripts\python.exe -m real_estate_finder publish-report
-   ```
-
-   이 명령은 내부적으로 `property-report-site/site-app/`에서 `npm run build`를 실행하지만 배포까지 하지는 않는다.
-3. `property-report-site/site-app/.openai/hosting.json`의 기존 `project_id`를 사용해 Codex Sites에 새 버전을 저장하고 배포한다.
-4. 배포가 성공하면 `real-estate-finder/`에서 아래 명령으로 공개 페이지의 기준 시각을 검증한다.
-
-   ```powershell
-   .\.venv\Scripts\python.exe -m real_estate_finder publish-report --verify-only
-   ```
-
-5. 링크가 포함된 전체 결과를 다시 보낼 필요가 있으면 다음 명령을 실행한다.
-
-   ```powershell
-   .\.venv\Scripts\python.exe -m real_estate_finder send-digest
-   ```
-
-### 사람이 직접 할 수 있는 범위
-
-에이전트 없이도 다음 명령으로 배포용 UI 빌드까지는 할 수 있다.
+서버 실행:
 
 ```powershell
-cd property-report-site\site-app
-npm run build
+cd report-site
+.\run-site.ps1
 ```
 
-하지만 현재 저장소에는 Codex Sites 배포 전체를 대신하는 고정된 로컬 명령이 없다. 실제 버전 저장과 배포는 Codex의 Sites 기능을 사용해야 한다. `sites` Git remote에 임의로 직접 push하지 말고 위 요청문으로 Codex에 배포를 맡긴다.
+더블클릭하려면 `run-site.bat`을 쓴다. 실행하면 콘솔에 로컬 주소(`http://127.0.0.1:8000/r/<토큰>/`)와, `KAKAO_REPORT_URL`이 설정돼 있으면 공개 주소도 함께 출력한다. 이 로컬 주소는 같은 PC에서만 열린다 — 카카오톡의 공개 링크로는 쓸 수 없다(아래 Tailscale Funnel 절차 필요).
+
+Ctrl+C로 멈춘다. 스캔은 이 서버가 켜져 있지 않아도 정상 동작한다 — `data/state.json`에 결과를 저장할 뿐이며, 다음에 서버를 켜면(또는 이미 켜져 있으면 다음 요청부터) 그 결과를 그대로 보여준다.
+
+## 외부에서 접속 가능하게 만들기: Tailscale Funnel (최초 1회)
+
+카카오톡 카드의 `전체 매물 보기` 버튼과 텍스트 링크는 휴대전화에서도 열리는 고정 HTTPS 주소가 있어야 한다. 도메인을 사지 않고 이를 얻는 방법이 Tailscale Funnel이다.
+
+1. [Tailscale for Windows](https://tailscale.com/download/windows)를 설치하고 로그인한다.
+2. Tailscale 관리 콘솔에서 이 기기에 HTTPS 인증서와 Funnel을 켠다. 콘솔이나 CLI가 필요한 링크를 안내해준다.
+3. `report-site\run-site.ps1`을 실행해 서버를 켜 둔 상태에서, 새 PowerShell 창을 열고:
+
+   ```powershell
+   tailscale funnel --bg 8000
+   ```
+
+   `https://<이 PC 이름>.<tailnet 이름>.ts.net` 형태의 주소가 출력된다. 이 주소는 PC를 재부팅해도 바뀌지 않는다. 상태 확인은 `tailscale funnel status`.
+
+4. 카카오 개발자 콘솔 → 내 애플리케이션 → 플랫폼 → Web에 위 주소를 등록한다. 등록되지 않은 도메인은 카카오가 조용히 다른 주소로 치환할 수 있다.
+5. 루트 `.env`(`.env.example`을 복사해 만든다)에 다음을 채운다.
+
+   ```text
+   KAKAO_REPORT_URL=https://<이 PC 이름>.<tailnet 이름>.ts.net/r/<report-site/.env의 REPORT_PATH_TOKEN>/
+   ```
+
+   `run-scan.ps1`, `send-report.ps1`, `report-site/run-site.ps1`이 `load-env.ps1`을 통해 이 값을 공유한다.
+
+**주의할 제약**
+
+- Tailscale Funnel은 공개 443/8443/10000 포트만 지원한다. `--bg 8000`은 공개 443을 로컬 8000으로 프록시하는 것이다.
+- **`run-site.bat`이 실행 중이고 PC가 절전에 들어가지 않아야** 공개 주소가 응답한다. 자동 시작은 일부러 등록하지 않았으므로, 리포트를 외부에서 열어야 할 때 직접 켠다. 서버가 꺼져 있으면 카카오 카드는 `전체 매물 보기` 버튼을 조용히 빼므로 깨진 링크가 나가지는 않는다.
+- 나중에 상시 공개로 바꾸고 싶으면 Windows 작업 스케줄러에 "로그온할 때" 트리거로 `report-site/run-site.ps1`을 등록하면 된다. Tailscale 서비스(`tailscaled`)는 별도 등록 없이 자동으로 뜨고, `funnel --bg` 설정도 재부팅 후 알아서 복구된다.
+- 토큰 경로(`REPORT_PATH_TOKEN`)는 우발적 노출만 막는다. 주소 자체가 유출되면 인증 없이 누구나 리포트를 볼 수 있다.
+
+## 리포트가 최신인지 확인하기
+
+```powershell
+cd real-estate-finder
+.\.venv\Scripts\python.exe -m real_estate_finder check-report
+```
+
+`data/state.json`의 활성 매물 기준 시각과, `KAKAO_REPORT_URL`(또는 기본값)이 실제로 서빙 중인 시각을 비교해 출력한다. 리포트 서버나 Tailscale Funnel이 꺼져 있으면 실패로 끝난다(종료 코드 1). 빌드나 배포는 하지 않는다 — 이 명령은 확인 전용이다.
 
 ## 현재 공개 리포트의 제한
 
-매물 조회 스크립트는 UI를 자동 빌드하거나 Codex Sites에 배포하지 않는다. 새 조회 결과를 현재 공개 리포트 URL에 반영하려면 위 절차로 UI 빌드와 Codex Sites 재배포를 별도로 수행해야 한다. 호스팅된 데이터의 조회 시각이 최신 결과와 다르면 카카오 카드의 `전체 매물 보기` 버튼은 생략된다.
-
-향후 PostgreSQL과 Django 웹 애플리케이션으로 전환하면, 조회 데이터가 데이터베이스에 저장되고 Django의 공개 URL에서 바로 조회되도록 이 절차를 대체한다.
+- `run-site.bat`이 꺼져 있거나 PC가 절전/종료 상태면 공개 리포트 주소가 응답하지 않는다. 이 구조의 본질적 제약이다.
+- 루트 `.env`의 `KAKAO_REPORT_URL`을 비우면 카카오 메시지가 이전에 쓰던 Codex Sites 주소로 폴백한다. 그 주소는 더 이상 갱신되지 않으므로 비우지 않는다.
+- 향후 PostgreSQL로 저장 계층을 전환해도 이 절차(서버 실행, Tailscale Funnel, `check-report`)는 그대로 유지된다. 바뀌는 것은 `report-site/report/views.py`가 `state.json` 대신 PostgreSQL을 읽는 부분뿐이다.

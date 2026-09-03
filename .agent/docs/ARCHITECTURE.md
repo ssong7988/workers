@@ -14,20 +14,23 @@ real-estate-finder/run-scan.ps1
 python -m real_estate_finder <command>
               |
               v
-CLI -> 설정 -> 네이버 화면 수집 -> 필터/급매 판정 -> 로컬 상태
+CLI -> 설정 -> 네이버 화면 수집 -> 필터/급매 판정 -> data/state.json (저장 먼저)
                                       |              |
                                       |              +-> 실행·관측 이력
                                       v
-                              카드 이미지 + 리포트 JSON
+                                  카드 이미지
                                       |
                          +------------+-------------+
                          |                          |
                          v                          v
-                kakao-notifier              Next.js 리포트 UI
-                카카오 나에게 보내기          Codex Sites 빌드/배포
+                kakao-notifier              report-site (Django)
+                카카오 나에게 보내기          data/state.json을 요청마다 읽어 렌더링
+                                                     |
+                                                     v
+                                          tailscale funnel -> 공개 HTTPS 주소
 ```
 
-현재 시스템은 하나의 프로세스로 묶인 모놀리식 Python 애플리케이션에 가깝다. `real-estate-finder`가 수집, 판정, 상태 관리, 카드 생성, 리포트 데이터 생성을 조정하고, `kakao-notifier`와 `property-report-site/site-app`을 경계 밖 어댑터처럼 사용한다.
+현재 시스템은 하나의 프로세스로 묶인 모놀리식 Python 애플리케이션에 가깝다. `real-estate-finder`가 수집, 판정, 상태 관리, 카드 생성을 조정하고, `kakao-notifier`와 `report-site`를 경계 밖 어댑터처럼 사용한다. `report-site`는 빌드·배포 단계 없이 `data/state.json`을 직접 읽으므로, 스캔과 리포트 사이에 별도의 "발행" 단계가 없다.
 
 목표 구조는 다음과 같다.
 
@@ -35,7 +38,7 @@ CLI -> 설정 -> 네이버 화면 수집 -> 필터/급매 판정 -> 로컬 상�
 수집기 -> PostgreSQL -> Django 웹 애플리케이션 -> 고정 공개 URL -> 카카오톡
 ```
 
-목표 구조는 아직 구현되지 않았다. 현재 코드에 PostgreSQL 또는 Django가 있다고 가정하지 않는다.
+서빙 계층(Django, 요청 시 렌더링, 고정 공개 URL)은 이미 이 목표대로 전환됐다. 아직 구현되지 않은 것은 저장 계층뿐이다 — 현재 `report-site`는 PostgreSQL이 아니라 `real-estate-finder/data/state.json`(파일)을 그대로 읽는다.
 
 ## 2. 저장소 경계
 
@@ -53,17 +56,20 @@ outputs/
 │       └── RUNBOOK.md         # 사람이 실행하는 운영 절차
 ├── real-estate-finder/        # 핵심 Python 애플리케이션
 ├── kakao-notifier/            # 독립 실행 가능한 카카오 API 모듈
+├── report-site/                # 웹 리포트 서버 (Django, 빌드/배포 없음)
 ├── property-report-site/
-│   └── site-app/              # 별도 Git 저장소인 웹 UI
+│   └── site-app/              # 은퇴한 UI. 별도 Git 저장소, 참고용으로만 보존
+├── .env                        # KAKAO_REPORT_URL (공유, Git 제외)
+├── load-env.ps1                 # 위 .env를 여러 PS 스크립트가 공유하는 헬퍼
 ├── AGENTS.md                   # 모든 코딩 에이전트의 공통 규칙
 └── README.md                   # 사용자용 짧은 소개
 ```
 
-### 중첩 UI 저장소
+### 은퇴한 중첩 UI 저장소
 
-`property-report-site/site-app/`은 루트 Git이 gitlink로 추적하는 별도 Git 저장소다. Git submodule과 비슷한 형태지만 `.gitmodules`에 의존하지 않고, 루트에는 특정 UI 커밋 포인터만 기록된다.
+`property-report-site/site-app/`은 루트 Git이 gitlink로 추적하는 별도 Git 저장소였다. Git submodule과 비슷한 형태지만 `.gitmodules`에 의존하지 않고, 루트에는 특정 UI 커밋 포인터만 기록됐다. Django(`report-site/`)로 서빙을 전환하면서 이 디렉터리는 더 이상 배포 경로가 아니지만, 되돌리기 어려운 삭제를 피하기 위해 그대로 남겨 두었다.
 
-UI 변경 시 순서는 반드시 다음과 같다.
+이 디렉터리를 다시 건드릴 일이 생기면(예: 완전 삭제를 결정한 경우) 순서는 다음과 같다.
 
 1. `property-report-site/site-app/` 안에서 변경, 검증, 커밋한다.
 2. 루트 저장소에서 변경된 `property-report-site/site-app` 포인터를 커밋한다.
@@ -183,34 +189,35 @@ FinderService.scan
 | 파일 | 책임 |
 |---|---|
 | `card.py` | 자기완결형 HTML을 만들고 임시 headless Edge로 PNG 렌더링 |
-| `report.py` | 카드에 담길 매물로 UI의 `app/report-data.json` 생성 |
-| `publish.py` | UI 빌드 실행과 공개 사이트 `observedAt` 검증 |
+| `report.py` | `build_report_payload()` — 매물을 조건별로 그룹핑하고 가격/면적 텍스트를 만드는 순수 함수. 카카오 카드와 `report-site` Django 뷰가 함께 쓴다 |
+| `publish.py` | 리포트 서버(및 Tailscale Funnel)가 이번 조회를 서빙 중인지 `observedAt`으로 확인 |
 | `notifier.py` | 메시지 요약 포맷과 `kakao-notifier` 동적 로딩 어댑터 |
 
 카드 전송 경로는 다음 순서다.
 
 ```text
-FinderService._safe_send_card
-  -> report.write_report_data
-     -> property-report-site/site-app/app/report-data.json 교체
-  -> publish.is_live
-     -> 공개 페이지의 data-observed-at 비교
-  -> card.build_card_image
-     -> real-estate-finder/data/cards/card.png
-  -> KakaoNotifier.send_image
-     -> kakao-notifier/kakao_notifier.py 동적 로딩
+FinderService.scan
+  -> store.save_state()             (알림 전송보다 먼저 — report-site가 최신 상태를 서빙하도록)
+  -> FinderService._safe_send_card
+     -> publish.is_live
+        -> 리포트 서버(공개 URL)의 data-observed-at 비교
+     -> card.build_card_image
+        -> real-estate-finder/data/cards/card.png
+     -> KakaoNotifier.send_image
+        -> kakao-notifier/kakao_notifier.py 동적 로딩
 ```
+
+`report-site`(Django)는 이 경로와 별개로, 요청이 올 때마다 `data/state.json`을 직접 읽어 `build_report_payload()`로 렌더링한다. 스캔이 쓰는 파일과 리포트 서버가 읽는 파일이 같으므로 중간 JSON 스냅샷이나 발행 단계가 없다.
 
 주의할 점:
 
-- `report-data.json`은 모든 스캔에서 무조건 갱신되지 않는다. 신규/급매 알림 카드가 발생하거나 `send-digest`/성공한 `smoke-test`가 카드 전송 경로를 탈 때 갱신된다.
-- 스캔은 UI를 빌드하거나 배포하지 않는다.
-- UI는 `report-data.json`을 빌드 시점에 import하므로 JSON 변경만으로 공개 사이트가 바뀌지 않는다.
-- 공개 사이트의 `observedAt`이 카드 데이터와 같은 시각일 때만 `전체 매물 보기` 버튼을 넣는다.
+- `state.json`은 알림 전송 여부와 무관하게 성공한 조건이 하나라도 있으면 매 스캔마다 저장된다.
+- 스캔은 UI를 빌드하거나 배포하지 않는다 — 애초에 빌드 단계가 없다.
+- 리포트 서버(공개 URL)의 `observedAt`이 카드 데이터와 같은 시각일 때만 `전체 매물 보기` 버튼을 넣는다. PC가 꺼져 있거나 Tailscale Funnel이 죽어 있으면 버튼이 빠진다.
 - 카드 렌더링 또는 이미지 전송이 실패하면 짧은 텍스트 알림으로 폴백한다.
 - 폴백 텍스트 전송도 실패하면 `notification-queue.jsonl`에 기록하고 오류를 다시 올린다.
 
-`service.py`가 `build_site`를 import하고 `build_report` 인자를 보존하지만, 현재 스캔 경로에서는 빌드를 호출하지 않는다. 실제 빌드는 `publish-report` 명령을 명시적으로 실행할 때만 한다.
+`FinderService.__init__`은 `build_report` 인자를 하위 호환을 위해 여전히 받지만 아무 동작도 바꾸지 않는다 — 빌드 자체가 없기 때문이다.
 
 ## 4. 카카오 모듈
 
@@ -232,33 +239,31 @@ FinderService._safe_send_card
 
 카카오 feed 카드의 이미지 URL은 카카오 이미지 업로드 API의 원본 URL을 사용한다. 리포트 링크가 유효하면 두 번째 버튼으로 추가한다. 등록되지 않은 도메인은 카카오가 조용히 다른 주소로 치환할 수 있으므로 URL 변경은 `.env`만 수정해서 끝내지 않고 카카오 개발자 콘솔의 웹 도메인도 함께 확인한다.
 
-## 5. 웹 리포트 UI
+## 5. 웹 리포트 서버
 
-경로: `property-report-site/site-app/`
+경로: `report-site/`
+
+Django 애플리케이션이며 데이터베이스, 세션, 로그인이 없다. 정적 파일도 없다 — 페이지 스타일은 템플릿 안에 인라인 `<style>`로 넣었다(빌드 단계를 다시 들이지 않기 위해).
 
 | 파일/경로 | 책임 |
 |---|---|
-| `app/page.tsx` | 리포트 JSON을 읽어 단지/매물 카드를 렌더링 |
-| `app/report-data.json` | Python이 생성하는 공개 데이터 스냅샷 |
-| `app/globals.css` | 화면 스타일 대부분 |
-| `app/layout.tsx` | 루트 레이아웃 |
-| `components/ui/` | 생성된 범용 UI 컴포넌트 모음; 현재 페이지가 모두 쓰는 것은 아님 |
-| `package.json` | Codex Sites와 로컬 Next.js 실행 명령 |
-| `vite.config.ts` | Codex Sites/vinext 빌드 설정과 hosting binding |
-| `next.config.ts` | 로컬 Next.js 설정 |
-| `.openai/hosting.json` | 기존 Codex Sites 프로젝트 연결 정보 |
-| `run-local.ps1`, `run-local.bat` | 로컬 UI 실행 래퍼 |
+| `manage.py` | Django CLI 진입점 |
+| `report_site/settings.py` | 최소 설정. `real-estate-finder`를 `sys.path`에 추가하고, `REPORT_PATH_TOKEN`을 `.env`에서 읽는다(없으면 기동 실패) |
+| `report_site/urls.py` | `r/<REPORT_PATH_TOKEN>/` 한 경로만 마운트. 그 외 모든 경로는 404 |
+| `report_site/wsgi.py` | waitress가 쓰는 WSGI 진입점 |
+| `report/views.py` | `data/state.json` 읽기(재시도 포함) → `real_estate_finder.report.build_report_payload()` 호출 → 템플릿 렌더. `Cache-Control: no-store` |
+| `report/templates/report/index.html` | 화면 마크업 + 인라인 CSS/SVG. `data-observed-at` 속성을 유지해야 `publish.is_live()`가 동작한다 |
+| `.env` | `REPORT_PATH_TOKEN`(추측 불가 토큰). Git 제외 |
+| `.env.example` | 견본. 커밋됨 |
+| `run-site.ps1`, `run-site.bat` | waitress로 `127.0.0.1:8000`에서 실행하는 래퍼 |
 
-현재 실제 화면은 `app/page.tsx`, `app/globals.css`, `app/report-data.json`에 집중되어 있다. UI 문구나 배치 변경을 조사할 때 `components/ui/` 전체를 먼저 읽을 필요가 없다. `page.tsx`가 import하는 컴포넌트만 따라간다.
+`report/views.py`가 `real_estate_finder.storage.FileStore`, `real_estate_finder.models.Listing`, `real_estate_finder.report.build_report_payload`를 그대로 가져다 쓴다. 표시 로직을 이중 구현하지 않기 위해서다.
 
-두 실행 계열이 공존한다.
+윈도우에서 `FileStore.save_state()`가 `os.replace()`로 파일을 교체하는 순간과 뷰의 읽기가 겹치면 `PermissionError`가 날 수 있다. 그래서 `save_state()`와 뷰의 읽기 양쪽에 짧은 재시도가 들어있다.
 
-| 목적 | 명령 | 구현 |
-|---|---|---|
-| Codex Sites 개발/빌드 | `npm run dev`, `npm run build` | vinext + Vite + Sites plugin |
-| 로컬 Next.js 개발/빌드 | `npm run dev:local`, `build:local`, `start:local` | Next.js |
+외부 공개는 `report-site/` 코드가 아니라 Tailscale Funnel(`tailscale funnel --bg 8000`)이 담당한다. 절차는 `RUNBOOK.md`를 따른다.
 
-`npm run build`는 배포 가능한 산출물을 만들 뿐 공개 사이트에 배포하지 않는다. 배포와 배포 후 시각 검증은 `RUNBOOK.md` 절차를 따른다.
+예전 `property-report-site/site-app/`(Next.js, Codex Sites 빌드/배포)은 은퇴했다. 코드에서 이를 참조하는 곳은 더 이상 없다.
 
 ## 6. 명령별 실제 경로
 
@@ -275,10 +280,9 @@ FinderService._safe_send_card
 | `scheduled-run` | `scan-once` 성격 + 평일 설정 시각에 digest 전송 |
 | `send-digest` | `state.json`의 활성 매물로 전체 카드 전송; 새 수집 없음. `send-report.bat`이 이 명령을 부른다 |
 | `preview-card` | 저장된 활성 매물로 PNG만 생성; 카카오 전송 없음 |
-| `publish-report` | 현재 JSON 확인 후 `npm run build`; 배포는 별도 |
-| `publish-report --verify-only` | 공개 사이트의 기준 시각만 비교 |
+| `check-report` | `state.json`의 활성 매물 기준 시각과 리포트 서버(`REPORT_URL`)가 서빙 중인 시각을 비교만 함; 빌드나 배포 없음 |
 
-`send-digest`, `smoke-test`, 알림이 발생한 `scan-once`는 외부 카카오 메시지를 보낼 수 있다. `publish-report`는 빌드만 하고 외부 배포를 완료하지 않는다.
+`send-digest`, `smoke-test`, 알림이 발생한 `scan-once`는 외부 카카오 메시지를 보낼 수 있다. `check-report`는 읽기 전용 확인이며 아무것도 쓰거나 배포하지 않는다.
 
 ## 7. 작업별 최소 읽기 경로
 
@@ -294,17 +298,18 @@ FinderService._safe_send_card
 | 카카오 메시지 문구 | `real_estate_finder/notifier.py` | `tests/test_card.py`, `tests/test_core.py` |
 | 카카오 OAuth/토큰/API | `kakao-notifier/auth.py`, `common.py`, `kakao_notifier.py` | `kakao-notifier/test_kakao_notifier.py` |
 | 카드 이미지 디자인 | `card.py` | `tests/test_card.py`, `preview-card` |
-| 리포트 JSON 스키마 | `report.py`, `models.py`, UI `app/page.tsx` | 관련 서비스 테스트 + UI 빌드 |
-| 웹 화면 디자인 | UI `app/page.tsx`, `app/globals.css`, 필요한 컴포넌트만 | `npm run build` |
-| Codex Sites 빌드/시각 검증 | `publish.py`, `cli.py`의 `_publish_report`, `RUNBOOK.md` | `tests/test_publish.py`, UI 빌드 |
-| 로컬 UI 실행 | UI `package.json`, `next.config.ts`, `run-local.ps1` | `npm run build:local` |
-| 파일 저장을 PostgreSQL로 전환 | `storage.py`, `service.py`, `models.py`, `cli.py` | `tests/test_core.py`, `tests/test_service.py` |
+| 리포트 표시 로직(가격/면적 포맷, 그룹핑) | `report.py`의 `build_report_payload`, `models.py` | `tests/test_report.py` |
+| 웹 리포트 화면 디자인 | `report-site/report/templates/report/index.html` (인라인 CSS) | `manage.py test`, 육안 확인 |
+| 리포트 서버 라우팅/토큰/설정 | `report-site/report_site/settings.py`, `urls.py`, `.env` | `manage.py check`, `report/tests/test_views.py` |
+| 카카오 링크 라이브 확인 로직 | `publish.py`, `cli.py`의 `_check_report`, `RUNBOOK.md` | `tests/test_publish.py` |
+| 외부 공개(Tailscale Funnel) 설정 | `RUNBOOK.md`, `report-site/run-site.ps1`, `load-env.ps1` | 수동 확인 (휴대폰 LTE 등) |
+| 파일 저장을 PostgreSQL로 전환 | `storage.py`, `service.py`, `models.py`, `cli.py`, `report-site/report/views.py` | `tests/test_core.py`, `tests/test_service.py` |
 | CLI 명령 추가 | `cli.py`, 해당 서비스 모듈 | 명령 성격에 맞는 테스트 |
 
 다음 파일은 보통 처음부터 읽지 않는다.
 
 - `collector.py` 전체: 관련 메서드부터 좁혀 읽는다.
-- UI `components/ui/` 전체: `page.tsx`가 실제 import한 것만 읽는다.
+- `property-report-site/site-app/` 전체: 서빙 경로에서 은퇴했다. 코드가 이를 참조하지 않는다.
 - `node_modules/`, `.next/`, `dist/`, `.vinext/`, `.wrangler/`: 생성 결과물이므로 소스 조사에서 제외한다.
 - `.venv/`, `__pycache__/`: 생성 결과물이므로 제외한다.
 - `real-estate-finder/project_state.md`: 세부 과거 문맥일 수 있지만 최신 공통 상태는 `.agent/PROJECT_STATE.md`가 우선이다.
@@ -314,7 +319,7 @@ FinderService._safe_send_card
 변경 범위에 맞는 최소 검증을 선택한다.
 
 ```powershell
-# Python 수집기, 판정, 서비스, 발행 로직 전체
+# Python 수집기, 판정, 서비스, 표시 로직 전체
 cd real-estate-finder
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
@@ -322,34 +327,32 @@ cd real-estate-finder
 cd ..\kakao-notifier
 .\.venv\Scripts\python.exe -m unittest -v test_kakao_notifier.py
 
-# Codex Sites UI 빌드
-cd ..\property-report-site\site-app
-npm run build
-
-# 로컬 Next.js 경로까지 건드렸을 때
-npm run build:local
+# 리포트 서버 설정 검사와 테스트
+cd ..\report-site
+..\real-estate-finder\.venv\Scripts\python.exe manage.py check
+..\real-estate-finder\.venv\Scripts\python.exe manage.py test
 ```
 
 실제 네이버 수집과 카카오 전송은 외부 상태와 사용자 계정에 영향을 준다. 단순 코드 검증을 위해 `scan-once`, `smoke-test`, `send-digest`를 임의로 실행하지 않는다. 필요하면 대상과 부작용을 확인한 뒤 실행한다.
 
 ## 9. 변경 시 지켜야 할 경계
 
-- 비밀정보는 `.env`, 토큰 파일, 브라우저 프로필 밖으로 복사하거나 문서화하지 않는다.
+- 비밀정보는 `.env`(루트와 `report-site/` 양쪽), 토큰 파일, 브라우저 프로필 밖으로 복사하거나 문서화하지 않는다.
 - 런타임 데이터와 생성 결과물을 Git에 추가하지 않는다.
-- 스캔과 UI 빌드/배포의 분리를 유지한다.
+- `state.json`은 알림 전송보다 먼저 저장한다(`service.py`의 `scan()`). 순서가 바뀌면 `is_live()`가 항상 실패해 `전체 매물 보기` 버튼이 매번 빠진다.
 - 카카오 공개 링크에 `localhost`나 `127.0.0.1`을 넣지 않는다.
-- 공개 리포트 시각 검증 없이 `전체 매물 보기` 버튼을 강제로 넣지 않는다.
+- 리포트 서버 시각 검증 없이 `전체 매물 보기` 버튼을 강제로 넣지 않는다.
 - 수집 실패 시 기존 매물을 전부 비활성화하지 않는다.
 - 알림 렌더링 실패가 중요한 급매 알림 유실로 이어지지 않도록 텍스트 폴백을 유지한다.
 - 카카오를 보내지 않는 모든 경로는 그 사유를 남긴다. 조용한 종료는 실패와 구분되지 않는다.
-- 리포트 JSON 필드를 바꾸면 Python 생산자(`report.py`)와 TypeScript 소비자(`app/page.tsx`)를 함께 변경한다.
-- UI 변경은 중첩 저장소와 루트 포인터의 두 커밋 경계를 지킨다.
+- 리포트가 쓰는 필드를 바꾸면 `build_report_payload()`(`report.py`)와 그 소비자인 카카오 카드 텍스트, `report-site/report/templates/report/index.html`을 함께 확인한다.
+- `property-report-site/site-app/`을 다시 건드릴 일이 생기면 중첩 저장소와 루트 포인터의 두 커밋 경계를 지킨다.
 
 ## 10. 문서의 역할 구분
 
-- `../PROJECT_STATE.md`: 지금 무엇이 배포되어 있고 최근 결과와 결정이 무엇인지
+- `../PROJECT_STATE.md`: 지금 무엇이 서빙되고 있고 최근 결과와 결정이 무엇인지
 - `ARCHITECTURE.md`: 코드가 어떻게 연결되고 어떤 작업에 어떤 파일을 읽는지
-- `RUNBOOK.md`: 사람이 설치, 조회, 빌드, 배포를 어떻게 실행하는지
+- `RUNBOOK.md`: 사람이 설치, 조회, 리포트 서버 실행, Tailscale Funnel 설정을 어떻게 하는지
 - 각 하위 프로젝트 `README.md`: 해당 구성 요소의 상세 사용법
 
-아키텍처, 저장 계층, 배포 방식 또는 실제 주 실행 경로가 바뀌면 이 문서와 `../PROJECT_STATE.md`를 같은 작업에서 갱신한다.
+아키텍처, 저장 계층, 서빙 방식 또는 실제 주 실행 경로가 바뀌면 이 문서와 `../PROJECT_STATE.md`를 같은 작업에서 갱신한다.

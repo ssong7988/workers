@@ -2,3 +2,7 @@ playwright>=1.55,<2
 PyYAML>=6.0,<7
 # Windows ships no IANA time zone database, so ZoneInfo("Asia/Seoul") needs this.
 tzdata>=2024.1
+# report-site/: serves the property report from data/state.json on every
+# request, replacing the old Codex Sites build/deploy step.
+Django>=5.2,<6
+waitress>=3,<4

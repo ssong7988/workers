@@ -2,3 +2,6 @@ real-estate-finder/run-scan.bat text eol=crlf
 real-estate-finder/run-scan.ps1 text eol=crlf
 real-estate-finder/send-report.bat text eol=crlf
 real-estate-finder/send-report.ps1 text eol=crlf
+report-site/run-site.bat text eol=crlf
+report-site/run-site.ps1 text eol=crlf
+load-env.ps1 text eol=crlf

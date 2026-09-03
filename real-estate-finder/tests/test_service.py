@@ -127,9 +127,7 @@ class ServiceTests(unittest.TestCase):
             service = FinderService(
                 CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
             )
-            with mock.patch.object(service_module, "write_report_data"), mock.patch.object(
-                service_module, "is_live", return_value=True
-            ), mock.patch.object(service_module, "build_site"):
+            with mock.patch.object(service_module, "is_live", return_value=True):
                 service.smoke_test()
             self.assertEqual(len(image_sender.calls), 1)
             self.assertEqual(len(sent), 0)
@@ -217,10 +215,8 @@ class CardPathTests(unittest.TestCase):
 
         for patcher in (
             mock.patch.object(service_module, "build_card_image", fake_build),
-            # Never touch the real site checkout or run a deploy from a test.
-            mock.patch.object(service_module, "write_report_data"),
+            # Never hit the real report server from a test.
             mock.patch.object(service_module, "is_live", return_value=True),
-            mock.patch.object(service_module, "build_site"),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -250,35 +246,32 @@ class CardPathTests(unittest.TestCase):
             CONFIG, FakeCollector(make_listing(2_500_000_000)), store, notifier
         )
 
-    def test_scan_does_not_build_the_ui(self) -> None:
-        """The UI has its own deployment lifecycle; a scan only refreshes its data."""
+    def test_state_is_saved_before_the_report_link_is_checked(self) -> None:
+        """The report site reads state.json on every request; if it were
+        checked before saving, the button would never appear because the
+        server is still serving the previous scan."""
+        seen_active_keys: list[list[str]] = []
+
+        def spying_is_live(_observed_at: str, _report_url: str, **_kwargs) -> bool:
+            state = store.load_state()
+            seen_active_keys.append(
+                [key for key, payload in state["listings"].items() if payload.get("active")]
+            )
+            return True
+
         image_sender = RecordingImageSender()
         notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
         with tempfile.TemporaryDirectory() as directory:
             store = FileStore(Path(directory))
-            with mock.patch.object(service_module, "build_site") as build:
+            with mock.patch.object(service_module, "is_live", side_effect=spying_is_live):
                 self._card_service(store, notifier).scan()
 
-        self.assertEqual(build.call_count, 0, "스캔이 UI 빌드를 실행하면 안 된다")
+        self.assertEqual(len(seen_active_keys), 1)
+        self.assertIn("weverfield:123", seen_active_keys[0], "저장이 안 됐거나 늦게 됐다")
 
-    def test_build_failure_never_holds_up_the_alert(self) -> None:
-        image_sender = RecordingImageSender()
-        sent: list[str] = []
-        notifier = KakaoNotifier(
-            Path("."), sender=lambda message, _url: sent.append(message), image_sender=image_sender
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            store = FileStore(Path(directory))
-            with mock.patch.object(
-                service_module, "build_site", side_effect=RuntimeError("타입 오류")
-            ):
-                self._card_service(store, notifier).scan()
-
-        self.assertEqual(len(image_sender.calls), 1, "빌드가 깨져도 카드는 나가야 한다")
-        self.assertEqual(sent, [], "텍스트 경로로 떨어지면 안 된다")
-
-    def test_build_can_be_turned_off_for_frequent_scans(self) -> None:
-        """Hourly scans will run with the build on its own schedule instead."""
+    def test_build_report_flag_is_accepted_but_unused(self) -> None:
+        """Kept only for backward-compatible construction; there is no build
+        step for `_publish_report()` to skip any more."""
         image_sender = RecordingImageSender()
         notifier = KakaoNotifier(Path("."), sender=lambda *_: None, image_sender=image_sender)
         with tempfile.TemporaryDirectory() as directory:
@@ -290,11 +283,10 @@ class CardPathTests(unittest.TestCase):
                 notifier,
                 build_report=False,
             )
-            with mock.patch.object(service_module, "build_site") as build:
+            with mock.patch.object(service_module, "is_live", return_value=True):
                 service.scan()
 
-        self.assertEqual(build.call_count, 0)
-        self.assertEqual(len(image_sender.calls), 1, "빌드를 껐어도 카드는 나가야 한다")
+        self.assertEqual(len(image_sender.calls), 1)
 
     def test_unpublished_report_drops_the_button(self) -> None:
         """A button onto the previously deployed report is worse than no button."""

@@ -15,14 +15,7 @@ from .config import load_config, validate_config
 from .models import Listing
 from .notifier import REPORT_URL, KakaoNotifier
 from .parsing import explain_condition
-from .publish import (
-    MANUAL_STEPS,
-    SITE_DIR,
-    VERIFY_ATTEMPTS,
-    build_site,
-    describe_live,
-    is_live,
-)
+from .publish import VERIFY_ATTEMPTS, describe_live, is_live
 from .service import FinderService
 from .storage import FileStore
 
@@ -88,14 +81,9 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument(
         "--out", type=Path, default=PROJECT_DIR / "data" / "card-preview.png"
     )
-    publish = commands.add_parser(
-        "publish-report",
-        help="현재 리포트 데이터로 Codex Sites 배포 빌드 생성",
-    )
-    publish.add_argument(
-        "--verify-only",
-        action="store_true",
-        help="빌드를 건너뛰고 Codex Sites 반영 여부만 확인",
+    commands.add_parser(
+        "check-report",
+        help="리포트 서버가 저장된 state.json의 최신 조회를 보여주는지 확인",
     )
     explain = commands.add_parser(
         "explain-filters",
@@ -148,42 +136,37 @@ def _explain_filters(config, store: FileStore, show_passed: bool) -> None:
         print()
 
 
-def _publish_report(verify_only: bool) -> None:
-    """Build the Codex Sites UI from the report written by the last scan.
+def _check_report(store: FileStore) -> None:
+    """Compare the local state against what the report server is serving.
 
-    Scans only write JSON. Building and deploying remain explicit so frequent
-    scans do not repeatedly spend time rebuilding an unchanged UI.
+    The report server (Django, `report-site/run-site.bat`) reads
+    `data/state.json` on every request, so there is nothing to build. This
+    only checks that the server and its tunnel are up and not stale.
     """
-    report_data = SITE_DIR / "app" / "report-data.json"
-    if not report_data.exists():
-        raise RuntimeError(f"리포트 데이터가 없습니다: {report_data}")
-    data = json.loads(report_data.read_text(encoding="utf-8"))
-    observed_at = data["observedAt"]
-    total = sum(len(item["listings"]) for item in data["complexes"])
-    print(
-        f"발행 대상: 단지 {len(data['complexes'])}개, 매물 {total}건, 기준 {observed_at}"
-    )
-    print(f"현재 Codex Sites: {describe_live(REPORT_URL)}")
-
-    if not verify_only:
-        print("Codex Sites 배포본을 빌드합니다...")
-        build_site()
-        print("빌드 완료. 이제 Codex Sites로 배포하세요.")
-        print(MANUAL_STEPS)
-        return
+    state = store.load_state()
+    listings = [
+        payload
+        for payload in state.get("listings", {}).values()
+        if payload.get("active")
+    ]
+    if not listings:
+        raise RuntimeError("저장된 활성 매물이 없습니다. 먼저 scan-once를 실행하세요.")
+    observed_at = max(payload["observed_at"] for payload in listings)
+    print(f"로컬 상태: 활성 매물 {len(listings)}건, 기준 {observed_at}")
+    print(f"현재 리포트 서버: {describe_live(REPORT_URL)}")
 
     if is_live(observed_at, REPORT_URL, attempts=VERIFY_ATTEMPTS):
-        print(f"배포 확인 완료: {REPORT_URL} 가 {observed_at} 결과를 보여줍니다.")
+        print(f"확인 완료: {REPORT_URL} 가 {observed_at} 결과를 보여줍니다.")
         return
-    print(f"Codex Sites에 아직 반영되지 않았습니다: {REPORT_URL}")
+    print(f"리포트 서버에 아직 반영되지 않았습니다: {REPORT_URL}")
     raise SystemExit(1)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "publish-report":
-            _publish_report(args.verify_only)
+        if args.command == "check-report":
+            _check_report(FileStore(PROJECT_DIR / "data"))
             return
         if args.config.name == "searches.local.yaml" and not args.config.exists():
             args.config = PROJECT_DIR / "config" / "searches.yaml"

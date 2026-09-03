@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import subprocess
 import unittest
-from pathlib import Path
 from unittest import mock
 
 from real_estate_finder import publish
@@ -13,10 +11,6 @@ PAGE = (
     '<div class="mt-3" data-observed-at="' + OBSERVED_AT + '">'
     "<span>2026. 09. 02. 오후 04:53 조회</span></div>"
 )
-
-
-def _completed(returncode: int, stdout: str = "", stderr: str = ""):
-    return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
 
 class LiveCheckTests(unittest.TestCase):
@@ -55,41 +49,10 @@ class DescribeLiveTests(unittest.TestCase):
             message = publish.describe_live("https://report")
         self.assertIn("접속하지 못했습니다", message)
 
-    def test_distinguishes_a_build_too_old_to_carry_the_marker(self) -> None:
-        with mock.patch.object(publish, "_fetch", return_value="<div>옛 빌드</div>"):
+    def test_distinguishes_a_response_too_old_to_carry_the_marker(self) -> None:
+        with mock.patch.object(publish, "_fetch", return_value="<div>옛 응답</div>"):
             message = publish.describe_live("https://report")
-        self.assertIn("오래된 버전", message)
-
-
-class BuildTests(unittest.TestCase):
-    def test_runs_the_site_build_in_the_site_directory(self) -> None:
-        calls: list[tuple] = []
-
-        def fake_run(command, cwd, env, timeout):
-            calls.append((command, cwd))
-            return _completed(0)
-
-        with mock.patch.object(publish.shutil, "which", return_value="npm"), mock.patch.object(
-            publish, "_run", fake_run
-        ):
-            publish.build_site(Path("site"))
-
-        self.assertEqual(calls, [(["npm", "run", "build"], Path("site"))])
-
-    def test_build_failure_carries_the_output(self) -> None:
-        with mock.patch.object(publish.shutil, "which", return_value="npm"), mock.patch.object(
-            publish, "_run", return_value=_completed(1, stderr="Build failed: 타입 오류")
-        ):
-            with self.assertRaises(RuntimeError) as caught:
-                publish.build_site(Path("site"))
-        self.assertIn("타입 오류", str(caught.exception))
-
-
-class ManualStepsTests(unittest.TestCase):
-    def test_points_at_codex_sites(self) -> None:
-        self.assertIn("Codex Sites", publish.MANUAL_STEPS)
-        self.assertIn("npm run build", publish.MANUAL_STEPS)
-        self.assertIn("--verify-only", publish.MANUAL_STEPS)
+        self.assertIn("기준 시각이 없습니다", message)
 
 
 if __name__ == "__main__":

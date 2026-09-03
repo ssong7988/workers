@@ -22,11 +22,15 @@ Thumbs.db
 real-estate-finder/data/
 real-estate-finder/config/searches.local.yaml
 
-# Hosted report workspace (tracked separately)
+# Hosted report workspace (tracked separately, retired as the serving path;
+# see .agent/PROJECT_STATE.md)
 property-report-site/.tools/
 property-report-site/node-v*.zip
 property-report-site/node-shasums.txt
 property-report-site/*.tar.gz
+
+# report-site/ (Django) has no database, but ignore it defensively
+report-site/db.sqlite3
 
 # Browser profiles left behind by screenshot tooling
 **/edge-shot-profile*/

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>관심부동산 매물 리포트</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f5f7f6; color: #0f172a; font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  .header { background: #102f25; color: #fff; }
+  .header-inner { max-width: 56rem; margin: 0 auto; padding: 2rem 1.25rem; }
+  @media (min-width: 640px) { .header-inner { padding: 2.75rem 2rem; } }
+  .eyebrow { display: flex; align-items: center; gap: .5rem; font-size: .875rem; font-weight: 600; color: #a7f3d0; }
+  .title { margin: .75rem 0 0; font-size: 1.875rem; font-weight: 700; letter-spacing: -0.01em; }
+  @media (min-width: 640px) { .title { font-size: 2.25rem; } }
+  .observed { margin-top: .75rem; display: flex; align-items: center; gap: .5rem; font-size: .875rem; color: rgba(209, 250, 229, .75); }
+  .body { max-width: 56rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+  @media (min-width: 640px) { .body { padding: 2rem 2rem; } }
+  .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
+  .tile { border-radius: 1rem; border: 1px solid; padding: 1rem; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .tile-value { font-size: 1.5rem; font-weight: 800; }
+  @media (min-width: 640px) { .tile-value { font-size: 1.875rem; } }
+  .tile-label { margin-top: .25rem; font-size: 11px; font-weight: 600; }
+  @media (min-width: 640px) { .tile-label { font-size: 12px; } }
+  .tile-green { color: #065f46; background: #ecfdf5; border-color: #d1fae5; }
+  .tile-navy { color: #1e293b; background: #fff; border-color: #e2e8f0; }
+  .tile-red { color: #b91c1c; background: #fef2f2; border-color: #fee2e2; }
+  .urgent-section { margin-top: 1.25rem; border-radius: 1rem; border: 1px solid #fecaca; background: #fef2f2; padding: 1.25rem; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .urgent-heading { display: flex; align-items: center; gap: .5rem; font-weight: 700; color: #991b1b; }
+  .urgent-grid { margin-top: 1rem; display: grid; gap: .75rem; }
+  @media (min-width: 640px) { .urgent-grid { grid-template-columns: repeat(2, 1fr); } }
+  .urgent-card { display: block; border-radius: .75rem; border: 1px solid #fecaca; background: #fff; padding: 1rem; transition: transform .15s, box-shadow .15s; }
+  .urgent-card:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.08); }
+  .urgent-complex { font-size: .875rem; font-weight: 600; color: #475569; }
+  .urgent-price-row { margin-top: .25rem; display: flex; align-items: flex-end; justify-content: space-between; }
+  .urgent-price { font-size: 1.5rem; font-weight: 800; color: #b91c1c; }
+  .urgent-meta { margin-top: .5rem; font-size: .875rem; color: #64748b; }
+  .section-title { margin-top: 1.75rem; display: flex; align-items: center; gap: .5rem; padding: 0 .25rem; font-size: 1.125rem; font-weight: 700; }
+  .complex-list { margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+  .complex-card { overflow: hidden; border-radius: 1rem; border: 1px solid #e2e8f0; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .complex-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; border-bottom: 1px solid #f1f5f9; padding: 1rem 1.25rem; }
+  .complex-name { margin: 0; font-weight: 700; line-height: 1.25; }
+  .complex-rule { margin: .25rem 0 0; font-size: 12px; color: #64748b; }
+  .complex-count { flex-shrink: 0; border-radius: 999px; background: #ecfdf5; padding: .25rem .65rem; font-size: 12px; font-weight: 700; color: #065f46; }
+  .listing { display: grid; grid-template-columns: 1fr auto; gap: .75rem; padding: .875rem 1.25rem; border-top: 1px solid #f1f5f9; transition: background .15s; }
+  .listing:first-child { border-top: none; }
+  .listing:hover { background: #f8fafc; }
+  .listing.urgent { background: rgba(254, 242, 242, .7); }
+  .listing-price-row { display: flex; align-items: center; gap: .5rem; }
+  .listing-price { color: #0f172a; }
+  .listing.urgent .listing-price { color: #b91c1c; }
+  .badge { border-radius: .25rem; background: #dc2626; padding: .1rem .4rem; font-size: 10px; font-weight: 700; color: #fff; }
+  .listing-meta { margin: .25rem 0 0; font-size: 12px; color: #64748b; }
+  .listing-link { display: flex; align-items: center; gap: .25rem; font-size: 12px; font-weight: 600; color: #047857; white-space: nowrap; }
+  .empty { padding: 3rem 1rem; text-align: center; color: #64748b; }
+  .footer { padding: 1.75rem .5rem; text-align: center; font-size: 12px; line-height: 1.4; color: #94a3b8; }
+  .icon { display: inline-block; vertical-align: -3px; }
+</style>
+</head>
+<body>
+<header class="header"><div class="header-inner">
+  <div class="eyebrow">
+    <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>
+    관심부동산 매물 리포트
+  </div>
+  <h1 class="title">오늘의 조회 결과</h1>
+  <div class="observed" data-observed-at="{{ observed_at }}">
+    <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    {{ observed_at_display }} 조회 · 네이버 부동산 기준
+  </div>
+</div></header>
+
+<div class="body">
+  <section class="summary">
+    <div class="tile tile-green"><div class="tile-value">{{ complexes|length }}</div><div class="tile-label">관심 단지</div></div>
+    <div class="tile tile-navy"><div class="tile-value">{{ total }}</div><div class="tile-label">확인 매물</div></div>
+    <div class="tile tile-red"><div class="tile-value">{{ urgent|length }}</div><div class="tile-label">급매</div></div>
+  </section>
+
+  {% if urgent %}
+  <section class="urgent-section">
+    <div class="urgent-heading">
+      <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      즉시 확인할 급매
+    </div>
+    <div class="urgent-grid">
+      {% for item in urgent %}
+      <a class="urgent-card" href="{{ item.url }}" target="_blank" rel="noreferrer">
+        <div class="urgent-complex">{{ item.complex }}</div>
+        <div class="urgent-price-row">
+          <span class="urgent-price">{{ item.price }}</span>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+        </div>
+        <div class="urgent-meta">전용 {{ item.area }}㎡ · {{ item.floor }} · {{ item.direction }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <div class="section-title">
+    <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#047857" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+    단지별 매물
+  </div>
+
+  {% if complexes %}
+  <section class="complex-list">
+    {% for complex in complexes %}
+    <article class="complex-card">
+      <div class="complex-head">
+        <div>
+          <h2 class="complex-name">{{ complex.name }}</h2>
+          <p class="complex-rule">{{ complex.rule }}</p>
+        </div>
+        <span class="complex-count">{{ complex.listings|length }}건</span>
+      </div>
+      <div>
+        {% for listing in complex.listings %}
+        <a class="listing{% if listing.urgent %} urgent{% endif %}" href="{{ listing.url }}" target="_blank" rel="noreferrer">
+          <div>
+            <div class="listing-price-row">
+              <strong class="listing-price">{{ listing.price }}</strong>
+              {% if listing.urgent %}<span class="badge">급매</span>{% endif %}
+            </div>
+            <p class="listing-meta">전용 {{ listing.area }}㎡ · {{ listing.floor }} · {{ listing.direction }}</p>
+          </div>
+          <div class="listing-link">
+            매물 보기
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% else %}
+  <div class="empty">현재 조건에 맞는 활성 매물이 없습니다.</div>
+  {% endif %}
+
+  <p class="footer">표시된 모든 링크는 묶음을 펼쳐 선택한 개별 매물로 연결됩니다. 호가와 거래 상태는 네이버 부동산에서 최종 확인하세요.</p>
+</div>
+</body>
+</html>

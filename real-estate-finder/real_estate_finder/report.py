@@ -1,10 +1,8 @@
-"""Generate the hosted report's data from the exact digest listings."""
+"""Build the property report payload shared by the digest card and the report site."""
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
-from pathlib import Path
 
 from .models import AppConfig, Listing, SearchCondition
 
@@ -31,10 +29,15 @@ def _rule_text(condition: SearchCondition) -> str:
     return f"{price} · {area}"
 
 
-def write_report_data(
-    listings: list[Listing], config: AppConfig, output: Path, *, observed_at: str
-) -> None:
-    """Write only direct article URLs; a complex/home fallback is never emitted."""
+def build_report_payload(
+    listings: list[Listing], config: AppConfig, *, observed_at: str
+) -> dict:
+    """Group matched listings by search condition, in the report's on-screen shape.
+
+    Only direct article URLs are included; a complex/home fallback is never
+    emitted. Shared by the Kakao digest card and the report site so their
+    price/area text and grouping cannot drift apart.
+    """
     grouped: dict[str, list[Listing]] = defaultdict(list)
     for listing in listings:
         if listing.listing_id.isdigit() and "/articles/" in listing.url:
@@ -67,8 +70,4 @@ def write_report_data(
             }
         )
 
-    payload = {"observedAt": observed_at, "complexes": complexes}
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(output)
+    return {"observedAt": observed_at, "complexes": complexes}

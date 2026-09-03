@@ -11,6 +11,9 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+# Share KAKAO_REPORT_URL (the report-site's public URL) with the digest.
+. (Join-Path $Root '..\load-env.ps1')
+
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 
 if (-not (Test-Path $Python)) {

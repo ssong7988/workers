@@ -75,21 +75,14 @@ Edge 창에서 네이버 로그인을 완료하면 **자동으로 이어집니�
 
 ## 리포트 UI
 
-현재 카카오톡의 `전체 매물 보기`는 Codex Sites 공개 주소를 사용합니다. 매물
-스캔에서는 UI 빌드를 실행하지 않으며, 공개 리포트를 갱신할 때만 별도로 빌드하고
-배포합니다.
+카카오톡의 `전체 매물 보기`는 `report-site/`(Django)가 서빙하는 주소를 사용합니다. `data/state.json`을 요청마다 그대로 읽으므로 빌드나 배포 단계가 없습니다 — 스캔이 끝나면 새로고침만으로 반영됩니다.
 
 ```powershell
-cd ..\property-report-site\site-app
-npm run build
+cd ..\report-site
+.\run-site.ps1
 ```
 
-향후 DNS와 Tunnel을 준비하면 아래 로컬 방식을 다시 기본값으로 전환할 수 있도록
-스크립트를 유지합니다.
-
-```powershell
-.\run-local.ps1
-```
+`http://127.0.0.1:8000/r/<REPORT_PATH_TOKEN>/`에서 로컬로 확인할 수 있고, 외부 공개(Tailscale Funnel)와 최초 설정은 `.agent/docs/RUNBOOK.md`를 따릅니다.
 
 ## 정규 명령과 테스트
 

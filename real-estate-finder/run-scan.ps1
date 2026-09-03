@@ -13,6 +13,9 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+# Share KAKAO_REPORT_URL (the report-site's public URL) with the scan.
+. (Join-Path $Root '..\load-env.ps1')
+
 $Port = 9222
 $Endpoint = "http://127.0.0.1:$Port"
 # Modern Edge ignores --remote-debugging-port for the default profile.

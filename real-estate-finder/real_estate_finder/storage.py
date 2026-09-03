@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -46,7 +47,18 @@ class FileStore:
         self.ensure()
         temporary = self.state_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temporary, self.state_path)
+        # The report site reads this file on every request. On Windows,
+        # os.replace() can briefly fail with PermissionError if a reader has
+        # it open at the exact moment of the swap; retry rather than lose the
+        # scan's result.
+        for attempt in range(3):
+            try:
+                os.replace(temporary, self.state_path)
+                return
+            except PermissionError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.05)
 
     def append_observations(self, listings: list[Listing]) -> None:
         self.ensure()
