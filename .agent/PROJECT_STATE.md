@@ -32,14 +32,15 @@
 - `send-report.ps1`로 실제 카카오톡 카드 1통(매물 41건)을 전송해 `전체 매물 보기` 버튼 동작까지 사용자가 휴대폰에서 확인했다.
 - 리포트 화면은 관심 단지 6개, 확인 매물 41건, 급매 1건을 정확히 렌더링한다.
 - 카카오 이미지는 카카오 이미지 업로드 API를 사용한다(변경 없음).
-- 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`)와 Django 테스트 28개 전부 통과, `manage.py check`, `makemigrations --check` 통과.
+- 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`)와 Django 테스트 37개 전부 통과, `manage.py check`, `makemigrations --check` 통과.
 - PostgreSQL 서비스 `postgresql-x64-18`이 자동 시작으로 등록돼 실행 중이며, `property_report` 역할/DB 생성과 Django 마이그레이션 적용을 완료했다.
 - `import_searches`와 `import_state`를 실행해 공통 규칙 1개, 검색조건 6개, 수집 실행 27개, 원본 관측 1,304개, 전체 매물 62개를 이관했다. 활성 매물 41개, 활성 급매 1개이며 `last_urgent_alert_price_won`이 있는 기존 매물 2개의 기록도 보존됐다.
 - 이관 명령은 두 번 실행해 중복이 생기지 않음을 확인했다. DB 기반 Django 테스트 16개와 `manage.py check`, `makemigrations --check`가 통과했다.
+- finder용 `/api/health/`, `/api/conditions/`, `/api/scans/`, `/api/digest/` 경계와 Bearer 인증을 추가했다. 실제 DB에서 health 200, conditions 200, 활성 조건 6개 응답을 확인했다. 카카오 이관 전 알림 이력 소모를 막기 위해 현재 알림 요청과 digest는 명시적으로 501을 반환한다.
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 4단계까지 완료했다. PostgreSQL의 원본 관측·현재 매물에 조건 판정과 스캔 상태 갱신을 적용할 수 있다. 다음 구현은 5단계 finder용 API다.**
+**상태: 5단계까지 완료했다. Bearer 인증된 finder용 API가 열렸고 상태 저장 전용 스캔 요청을 처리할 수 있다. 다음 구현은 6단계 리포트 DB 전환이다.**
 
 ### 왜
 
@@ -71,7 +72,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - [x] 2. `properties` 앱 + 모델 + 마이그레이션 + admin + `createsuperuser`
 - [x] 3. `import_searches` / `import_state` 관리 명령 작성, 기존 데이터 이관 실행
 - [x] 4. `parsing.py` → `properties/matching.py`, `service.scan()` 판정부 → `properties/scanning.py` + 테스트 이관
-- [ ] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`)
+- [x] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`). 알림 전송과 digest 본체는 7단계 이관 전까지 명시적 501
 - [ ] 6. `report` 뷰를 DB 기반으로 전환 (템플릿 무변경)
 - [ ] 7. `card.py` / `notifier.py` / `publish.py` 이관 + `send_digest`·`preview_card`·`check_report` 관리 명령
 - [ ] 8. finder 축소 + `api_client.py` + `cli.py` 정리 + `run-scan.ps1` 사전 확인 + `send-report.ps1` 재연결
@@ -81,7 +82,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 4단계 조건 판정과 트랜잭션 기반 스캔 상태 갱신까지 완료했다. 다음 코드는 5단계 `api` 앱과 finder용 엔드포인트다.
+브랜치 `kakao-image-card`. 5단계 finder용 API 경계까지 완료했다. 다음 코드는 6단계 `report` 뷰의 PostgreSQL 전환이다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -130,10 +131,18 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 트랜잭션이 끝난 뒤 API 계층이 전송할 수 있도록 `ScanDecision`에 알림 후보와 전체 통과 매물을 반환한다. 전송 대상이 없으면 기존 정책과 같은 미전송 사유를 `Scan.notification`에 기록한다.
 - 원본 전량·제외 사유, 최초 확인 시각 보존, 급매 재알림, 신규 알림, 실패 조건 비활성화 방지, 잘못된 입력 전체 롤백을 포함한 테스트를 추가했다. Django 테스트 28개와 finder 테스트 81개가 통과했고, 테스트 후 DB 역할을 `NOCREATEDB`로 복구했다.
 
+#### 5단계에서 완료한 코드
+
+- `api` 앱과 `/api/health/`, `/api/conditions/`, `/api/scans/`, `/api/digest/` 라우팅을 추가했다. 네 경로 모두 `Authorization: Bearer <FINDER_API_TOKEN>`을 상수 시간 비교로 검증한다.
+- `health`는 PostgreSQL 연결까지 확인하고, `conditions`는 `GlobalRule`과 활성 `SearchCondition`만 JSON으로 반환한다.
+- `scans`는 Content-Type과 필드 타입, 성공·실패 조건 중복을 검증한 뒤 `record_scan()`을 호출한다. Bearer 인증된 POST는 CSRF 토큰 없이 사용할 수 있다.
+- 아직 카카오 전송 코드가 Django에 없으므로 `notify_urgent=true`, smoke 요청과 `digest`는 쓰기 없이 `notification_not_available` 501을 반환한다. 상태 저장만 필요한 `notify_urgent=false` 스캔은 201로 처리한다. 이 제한은 7단계에서 실제 동기 전송으로 교체한다.
+- 인증, 메서드 제한, DB health, 활성 조건 직렬화, 스캔 저장, JSON 오류, 상충 조건, CSRF 면제, 알림 미지원 경로 테스트를 추가했다. Django 테스트 37개가 통과했고 실제 DB 내부 요청에서 health 200, conditions 200, 활성 조건 6개를 확인했다.
+
 #### 다음에 할 일 (순서대로)
 
-1. 5단계: `api` 앱을 만들고 Bearer 인증을 적용한다.
-2. `health`, `conditions`, `scans`, `digest` 엔드포인트를 구현하고 `POST /api/scans/`에서 `record_scan()`을 호출한다.
+1. 6단계: `report` 뷰가 `state.json` 대신 PostgreSQL의 활성 `Listing`을 조회하게 한다.
+2. 기존 템플릿과 `data-observed-at` 계약을 유지하며 화면의 단지 6개·활성 41개·급매 1개가 동일한지 검증한다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 

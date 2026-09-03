@@ -10,13 +10,14 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 
 from report import views
 
 _PRIVATE = f"r/{settings.REPORT_PATH_TOKEN}/"
 
 urlpatterns = [
+    path("api/", include("api.urls")),
     path(_PRIVATE, views.index, name="report-index"),
     path(f"{_PRIVATE}admin/", admin.site.urls),
 ]
