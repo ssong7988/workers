@@ -41,14 +41,15 @@ class SearchConditionAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "name",
+        "region",
         "max_price_won",
         "urgent_price_won",
         "notify_new",
         "enabled",
         "updated_at",
     )
-    list_filter = ("enabled", "notify_new", "apply_low_floor_discount")
-    search_fields = ("id", "name")
+    list_filter = ("region", "enabled", "notify_new", "apply_low_floor_discount")
+    search_fields = ("id", "name", "region")
     ordering = ("name",)
 
 
@@ -79,8 +80,9 @@ class ObservationAdmin(admin.ModelAdmin):
         "condition",
         "price_won",
         "excluded",
+        "exclusion_code",
     )
-    list_filter = ("condition", "is_low_floor")
+    list_filter = ("exclusion_code", "condition", "is_low_floor")
     search_fields = ("listing_id", "complex_name", "description", "exclusion_reason")
     date_hierarchy = "observed_at"
     readonly_fields = tuple(field.name for field in Observation._meta.fields)

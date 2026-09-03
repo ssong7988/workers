@@ -12,6 +12,7 @@ schedule:
 
 searches:
   - id: raemian-central-suite-84
+    region: 과천
     name: 래미안센트럴스위트 84
     complex_names: [래미안센트럴스위트, 래미안 과천 센트럴스위트]
     search_url: ""
@@ -22,6 +23,7 @@ searches:
     enabled: true
 
   - id: gwacheon-central-park-prugio-summit-84
+    region: 과천
     name: 과천센트럴파크푸르지오써밋 84
     complex_names: [과천센트럴파크푸르지오써밋, 과천 센트럴파크 푸르지오, 과천 센트럴파크 푸르지오 써밋]
     search_url: ""
@@ -32,6 +34,7 @@ searches:
     enabled: true
 
   - id: gwacheon-weverfield-84
+    region: 과천
     name: 과천위버필드 84
     complex_names: [과천위버필드, 과천 위버필드, 위버필드]
     search_url: ""
@@ -42,6 +45,7 @@ searches:
     enabled: true
 
   - id: raemian-sur-all
+    region: 과천
     name: 래미안슈르 전체
     complex_names: [래미안슈르]
     search_url: ""
@@ -54,6 +58,7 @@ searches:
     enabled: true
 
   - id: raemian-eco-palace-all
+    region: 과천
     name: 래미안에코팰리스 전체
     complex_names: [래미안에코팰리스]
     search_url: ""
@@ -66,6 +71,7 @@ searches:
     enabled: true
 
   - id: gwanggyo-prugio-worldmark-84-85
+    region: 광교
     name: 광교푸르지오월드마크 전용 84~85㎡ 전체 매매
     complex_names: [광교푸르지오월드마크, 광교푸르지오월드마크(주상복합)]
     search_url: ""

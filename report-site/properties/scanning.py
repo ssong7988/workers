@@ -11,7 +11,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .matching import explain_condition
+from .matching import classify_exclusion, explain_condition
 from .models import GlobalRule, Listing, Observation, Scan, SearchCondition
 
 
@@ -175,6 +175,7 @@ def record_scan(
         )
         reason = explain_condition(observation, condition, rule)
         observation.exclusion_reason = reason or ""
+        observation.exclusion_code = classify_exclusion(reason)
         observation.save()
         collected_count += 1
         if reason is not None:

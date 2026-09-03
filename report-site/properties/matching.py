@@ -70,6 +70,30 @@ def _eok(price_won: int) -> str:
     return f"{price_won / 100_000_000:.2f}억"
 
 
+# Maps each `explain_condition` branch to a stable code. The reasons above are
+# Korean display strings that will be reworded; the codes are what the database
+# and the statistics query rely on, so the two are kept side by side and pinned
+# by a test that walks every branch.
+EXCLUSION_CODES: tuple[tuple[str, str], ...] = (
+    ("단지명 불일치", "complex"),
+    ("면적 미달", "area"),
+    ("면적 초과", "area"),
+    ("타입 제외", "type"),
+    ("층 해석 실패", "floor"),
+    ("가격 초과", "price"),
+)
+
+
+def classify_exclusion(reason: str | None) -> str:
+    """Return the stable code for an exclusion reason, or "" when it matched."""
+    if not reason:
+        return ""
+    for prefix, code in EXCLUSION_CODES:
+        if reason.startswith(prefix):
+            return code
+    return "other"
+
+
 def explain_condition(
     listing: MatchableListing, condition: SearchCondition, rule: GlobalRule
 ) -> str | None:

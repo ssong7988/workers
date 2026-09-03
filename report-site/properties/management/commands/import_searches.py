@@ -75,6 +75,7 @@ class Command(BaseCommand):
             allowed = item.get("allowed_types", "all")
             values = {
                 "name": name,
+                "region": str(item.get("region", "")).strip(),
                 "complex_names": [
                     str(value).strip()
                     for value in item.get("complex_names", [name])

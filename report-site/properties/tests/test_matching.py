@@ -5,6 +5,7 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 
 from properties.matching import (
+    classify_exclusion,
     explain_condition,
     matches_condition,
     normalize_type_name,
@@ -83,3 +84,25 @@ class MatchingTests(SimpleTestCase):
         self.assertEqual(parse_price_won("24억 5,000"), 2_450_000_000)
         self.assertEqual(parse_price_won("255,000만원"), 2_550_000_000)
         self.assertEqual(normalize_type_name("84.94 a"), "84A")
+
+    def test_every_exclusion_branch_maps_to_a_code(self) -> None:
+        """The reasons are Korean display strings; the codes are what the
+        statistics query filters on. If a reason is reworded without updating
+        `EXCLUSION_CODES`, this fails instead of silently returning "other"."""
+        cases = (
+            (self.listing(complex_name="다른 단지"), "complex"),
+            (self.listing(exclusive_area_m2=Decimal("82.999")), "area"),
+            (self.listing(exclusive_area_m2=Decimal("86.001")), "area"),
+            (self.listing(type_name="106A"), "type"),
+            (self.listing(floor_text="미상"), "floor"),
+            (self.listing(price_won=2_700_000_000), "price"),
+        )
+        for item, expected in cases:
+            with self.subTest(expected=expected):
+                reason = explain_condition(item, self.condition, self.rule)
+                self.assertIsNotNone(reason)
+                self.assertEqual(classify_exclusion(reason), expected)
+
+    def test_matching_listing_has_no_exclusion_code(self) -> None:
+        self.assertEqual(classify_exclusion(None), "")
+        self.assertEqual(classify_exclusion(""), "")

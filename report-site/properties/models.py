@@ -94,6 +94,9 @@ class SearchCondition(models.Model):
 
     id = models.SlugField("조건 ID", primary_key=True, max_length=100)
     name = models.CharField("이름", max_length=200)
+    # Groups conditions for the statistics screen. Free text so a new area needs
+    # no migration; the screen offers whatever values the table already holds.
+    region = models.CharField("지역", max_length=50, blank=True, db_index=True)
     complex_names = models.JSONField(
         "단지명 별칭", default=list, validators=[_validate_string_list]
     )
@@ -243,6 +246,22 @@ class Observation(PropertyFields):
         blank=True,
     )
     exclusion_reason = models.TextField("제외 사유", blank=True)
+    # Stable machine-readable form of `exclusion_reason`, which is a Korean
+    # display string. Statistics filter on this, never on the text.
+    exclusion_code = models.CharField(
+        "제외 구분",
+        max_length=16,
+        blank=True,
+        db_index=True,
+        choices=(
+            ("", "조건 충족"),
+            ("complex", "단지명 불일치"),
+            ("area", "면적"),
+            ("type", "타입"),
+            ("floor", "층 해석 실패"),
+            ("price", "가격 초과"),
+        ),
+    )
     raw_payload = models.JSONField("수집 원본", default=dict, blank=True)
 
     class Meta:
