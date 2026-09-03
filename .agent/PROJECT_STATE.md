@@ -5,17 +5,17 @@
 ## Current Architecture
 
 - 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.agent/docs/ARCHITECTURE.md`에 정리되어 있다.
-- `real-estate-finder/`가 네이버 부동산 매물을 수집하고 검색 조건, 급매 조건, 이전 상태를 기준으로 결과를 만든다.
-- `report-site/properties/`가 카드 생성·전송 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. 기존 finder 쪽 카드·전송 코드는 8단계 정리 전까지 중복으로 남아 있다.
+- `real-estate-finder/`는 네이버 부동산 매물을 수집해 `report-site` API로 넘기기만 한다. 조건 판정·상태·표현·전송 코드는 없다.
+- `report-site/properties/`가 카드 생성·전송 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. finder 쪽 중복 코드는 8단계에서 삭제했다.
 - `report-site/`(Django + waitress)가 PostgreSQL의 활성 `Listing`을 요청마다 읽어 전체 매물 웹 리포트를 렌더링한다. 빌드나 배포 단계는 없다.
 - `property-report-site/site-app/`(예전 Next.js/Codex Sites UI)은 서빙 경로에서 은퇴했다. 루트와 별도 중첩 Git 저장소이며 삭제하지 않고 참고용으로만 남겼다.
 - 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
-- 급매가 아닌 전체 결과를 카카오톡으로 보내는 진입점은 `real-estate-finder/send-report.bat`이며 `send-digest`를 실행한다. 브라우저와 네이버 로그인이 필요 없다.
+- 급매가 아닌 전체 결과를 카카오톡으로 보내는 진입점은 `real-estate-finder/send-report.bat`이며 `report-site`의 `manage.py send_digest`를 실행한다. 브라우저·로그인·웹 서버가 필요 없고 DB만 있으면 된다.
 - 리포트 서버 실행 진입점은 `report-site/run-site.bat` 또는 `report-site/run-site.ps1`이다.
-- `scan-once`는 급매 또는 신규 매물이 있을 때만 카카오톡을 보낸다. 보내지 않은 경우에도 사유를 콘솔에 출력하고 `data/scan-runs.jsonl`의 `notification` 필드에 기록한다.
-- 검색 설정은 `config/searches.yaml`에 있고 런타임 데이터 및 생성 결과물은 Git에서 제외한다.
-- 스캔은 `data/state.json`을 알림 전송보다 먼저 저장한다(`service.py`의 `scan()`). 그래야 카드가 `is_live()`로 리포트 서버를 확인하는 시점에 이미 이번 조회 결과가 서빙되고 있다.
-- `is_live()`(`real_estate_finder/publish.py`)는 이제 빌드가 최신인지가 아니라 리포트 서버(그리고 Tailscale Funnel)가 살아있고 이번 조회를 서빙 중인지만 확인한다.
+- `scan-once`는 수집 결과를 `POST /api/scans/`로 넘기고, Django가 급매 또는 신규가 있을 때만 카카오톡을 보낸다. 보내지 않은 경우에도 사유가 응답의 `scan.notification`으로 돌아와 콘솔에 출력되고 `Scan` 행에도 남는다.
+- 검색 설정은 PostgreSQL의 `SearchCondition`이며 Django admin에서 고친다. `report-site/properties/seed/searches.yaml`은 초기 시드일 뿐이다.
+- `record_scan()`의 트랜잭션이 알림 전송보다 먼저 커밋된다. 그래야 카드가 `is_live()`로 확인하는 시점에 이미 이번 조회 결과가 서빙되고 있다.
+- `is_live()`(`report-site/properties/publish.py`)는 리포트 서버(그리고 Tailscale Funnel)가 살아있고 이번 조회를 서빙 중인지만 확인한다.
 - 외부 공개는 Tailscale Funnel로 `report-site/`의 8000번 포트를 노출해 고정 HTTPS 주소(`https://<pc>.<tailnet>.ts.net`)를 얻는 방식이다. 접근 제어는 추측 불가능한 경로 토큰(`REPORT_PATH_TOKEN`)이다.
 - `KAKAO_REPORT_URL`은 루트 `.env`(`load-env.ps1`이 `run-scan.ps1`/`send-report.ps1`/`report-site/run-site.ps1`에 공유)로 관리하고, `REPORT_PATH_TOKEN`은 `report-site/.env`로 관리한다. 둘 다 Git에서 제외한다.
 
@@ -39,10 +39,11 @@
 - finder용 `/api/health/`, `/api/conditions/`, `/api/scans/`, `/api/digest/` 경계와 Bearer 인증을 추가했다. 실제 DB에서 health 200, conditions 200, 활성 조건 6개 응답을 확인했다. 스캔 알림과 digest는 7단계에서 Django 동기 전송에 연결됐다.
 - 리포트 뷰를 PostgreSQL 기반으로 전환했다. 이관 전 파일 기반 payload와 DB 기반 payload 전체가 동일하며 단지 6개, 매물 41개, 급매 1개, 기준 시각 `2026-09-03T08:38:55+09:00`이 그대로임을 확인했다.
 - 실제 DB 활성 매물 41개로 Django `preview_card`를 실행해 1080×8168 PNG(약 617KB)를 생성하고 육안 확인했다. `check_report`도 DB 시각과 공개 리포트 시각이 같은 순간임을 확인해 통과했다. 실제 카카오 전송은 실행하지 않았다.
+- `real-estate-finder`를 수집 전용으로 축소했다. 판정·상태·표현·전송 모듈 7개와 `searches.yaml`을 삭제했고(약 2,000줄), `api_client.py`와 5개 명령만 남았다. finder 테스트 32개 통과. 실제 DB에 붙은 임시 서버로 `check-api`(활성 조건 6개), 잘못된 본문 400, 잘못된 토큰 401을 확인했다.
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 7단계까지 완료했다. Django가 DB 상태 커밋 뒤 카드·카카오 동기 전송과 폴백·실패 기록을 담당한다. 다음 구현은 8단계 finder API 클라이언트 전환이다.**
+**상태: 8단계까지 완료했다. `real-estate-finder`는 수집 전용이 되었고 판정·표현·전송 코드는 전부 사라졌다. 남은 것은 9단계 문서 갱신과 실제 브라우저 수집 1회 종단 확인이다.**
 
 ### 왜
 
@@ -77,14 +78,14 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - [x] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`). 알림 전송과 digest 본체는 7단계 이관 전까지 명시적 501
 - [x] 6. `report` 뷰를 DB 기반으로 전환 (템플릿 무변경)
 - [x] 7. `card.py` / `notifier.py` / `publish.py` 이관 + `send_digest`·`preview_card`·`check_report` 관리 명령
-- [ ] 8. finder 축소 + `api_client.py` + `cli.py` 정리 + `run-scan.ps1` 사전 확인 + `send-report.ps1` 재연결
+- [x] 8. finder 축소 + `api_client.py` + `cli.py` 정리 + `run-scan.ps1` 사전 확인 + `send-report.ps1` 재연결
 - [ ] 9. `ARCHITECTURE.md`, `RUNBOOK.md`, `AGENTS.md`, 각 `README.md` 갱신
 
 각 단계 끝에서 테스트가 통과하는 상태를 유지하고, 단계를 끝낼 때마다 위 체크박스와 이 문서를 갱신한다. 삭제 범위가 크므로 단계별로 커밋을 나눈다.
 
 ### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 7단계 카드·카카오 전송 이관까지 구현·검증했다. 다음 코드는 8단계 finder 축소와 API 클라이언트 연결이다.
+브랜치 `kakao-image-card`. 8단계 finder 축소까지 구현·검증했다. 다음은 9단계 문서 갱신이며, 그 전후로 실제 브라우저 수집 1회 종단 확인이 필요하다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -159,11 +160,25 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - `send_digest`, `preview_card`, `check_report` Django 관리 명령을 추가했다. 실제 DB 41개 매물로 `preview_card`가 1080×8168 PNG(616,559바이트)를 만들었고 육안 레이아웃을 확인했다. `check_report`는 DB의 UTC 시각과 공개 리포트의 +09:00 시각이 같은 순간임을 확인해 통과했다.
 - 실제 카카오 메시지는 보내지 않았다. 모든 전송 테스트는 대체 sender로 수행했고 Django 테스트 49개, `manage.py check`, `makemigrations --check`가 통과했다. 테스트 후 `property_report` 역할은 `NOCREATEDB`로 복구했다.
 
+#### 8단계에서 완료한 코드
+
+- `real_estate_finder/api_client.py` 신설. stdlib `urllib`로 `health`/`conditions`/`scans`/`digest` 4개 요청을 보낸다. 토큰은 `report-site/.env`의 `FINDER_API_TOKEN`을 그대로 읽어 양쪽이 어긋나지 않는다. 실패는 행동 가능한 문구로 바뀐다 — 연결 실패는 `run-site.bat`을, 401은 토큰 설정을 지목하고, 거부된 요청은 서버가 준 사유를 그대로 옮긴다. 스캔 POST는 카드 렌더링·카카오 전송을 포함하므로 타임아웃 600초, 읽기 요청은 20초다.
+- `cli.py`를 수집 전용으로 재작성했다. 명령은 `check-api`, `browser-login`, `scan-once`, `smoke-test`, `collect-favorites` 5개다. `scan-once`는 **브라우저를 열기 전에 서버 health를 먼저 확인**하고, 한 조건 안의 중복 매물을 제외한 뒤 POST한다(서버는 중복이 있으면 스캔 전체를 롤백한다). 실행 잠금(`data/run.lock`)은 `cli.py`의 작은 컨텍스트 매니저로 남겼다.
+- 삭제: `config.py`, `service.py`, `storage.py`, `report.py`, `card.py`, `notifier.py`, `publish.py`, `config/searches.yaml`.
+- `parsing.py`는 `parse_price_won`과 `normalize_type_name`만 남겼다. 수집한 텍스트를 숫자로 바꾸는 일은 수집의 일부지만, 층 규칙과 임계값은 판정이라 사라졌다.
+- `models.py`는 `SearchCondition`(API 응답용 `from_api()` 포함)과 원본 `Listing`, `iso_now()`만 남겼다. `Listing`에서 `floor`, `is_low_floor`, `effective_max_price_won`, `effective_urgent_price_won`을 제거했고 `collector.py`의 두 생성 지점도 함께 고쳤다.
+- `run-scan.ps1`은 4단계가 되었다. 1단계가 `check-api`이며 실패하면 브라우저를 띄우지 않고 `report-site
+un-site.bat`을 먼저 실행하라고 안내한다.
+- `send-report.ps1`은 `report-site`로 이동해 `manage.py send_digest`를 호출한다. 브라우저·로그인·웹 서버가 필요 없다.
+- **`scheduled-run` 명령을 제거했다.** 평일 digest 시각은 이제 `GlobalRule`에 있고, 이 명령을 부르는 Windows 작업 스케줄러 항목이 실제로 등록돼 있지 않음을 확인했다. 정기 발송이 다시 필요해지면 Django 쪽에서 되살린다.
+- 테스트: `tests/test_core.py`는 수집기 헬퍼와 가격·타입 정규화만 남기고, `tests/test_api_client.py`를 추가했다(토큰 누락, Bearer 헤더, JSON 본문, 연결 실패 문구, 400/401 처리, 중복 제거). 판정·리포트·카드·publish 테스트는 코드와 함께 report-site로 갔다.
+- 검증: finder 테스트 32개 통과. 실제 DB에 붙은 임시 서버(8010 포트)에 대해 `check-api`가 활성 조건 6개를 응답했고, 잘못된 본문 POST가 서버의 400 메시지(`observations는 배열이어야 합니다.`)로, 잘못된 토큰이 401로 돌아오는 것을 확인했다. 행을 쓰지 않는 요청만 보냈으므로 DB는 바뀌지 않았다. `manage.py check`와 `makemigrations --check` 통과.
+
 #### 다음에 할 일 (순서대로)
 
-1. 8단계: finder에 `api_client.py`를 추가하고 조건 조회·스캔 업로드·digest 요청을 Django API로 전환한다.
-2. finder에서 판정·상태·카드·카카오 책임을 제거하고 `run-scan.ps1`, `send-report.ps1`을 새 경로에 연결해 회귀 테스트한다.
-3. 9단계: 공통 아키텍처·런북·각 README와 에이전트 안내를 최종 구조에 맞게 갱신한다.
+1. **실제 브라우저 수집 1회 종단 확인.** 아직 한 번도 실행하지 않았다. `report-site
+un-site.bat`을 **재시작**한 뒤(현재 떠 있는 프로세스는 `api` 앱이 생기기 전에 시작돼 `/api/`가 404다) `run-scan.bat`을 실행해, `Observation`에 원본 전량이 쌓이고 `Listing`이 갱신되며 콘솔에 전송 여부와 사유가 찍히는지 본다. 실제 카카오 메시지가 나갈 수 있으므로 사용자 확인 후 실행한다.
+2. 9단계: `.agent/docs/ARCHITECTURE.md`, `.agent/docs/RUNBOOK.md`, `AGENTS.md`, `real-estate-finder/README.md`, `report-site/README.md`를 최종 구조에 맞게 갱신한다. finder README는 아직 `validate-config`, `scheduled-run`, `send-digest`, `preview-card`, `searches.yaml`, `state.json` 등 사라진 것들을 설명하고 있다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
@@ -230,12 +245,13 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 ## Known Issues
 
 - **`report-site/run-site.bat`이 실행 중이 아니면 공개 리포트 주소가 죽는다.** PC 종료·절전도 마찬가지다. 자동 시작을 등록하지 않기로 했으므로(Key Decisions 참고) 리포트를 외부에서 열어야 할 때 사용자가 직접 켜야 한다. 다행히 조용히 깨지지는 않는다 — 서버가 없으면 `is_live()`가 실패해 카카오 카드에서 버튼이 빠진다.
-- **전환이 끝나면 스캔 자체가 Django 서버 실행을 요구하게 된다.** 지금은 서버가 꺼져 있어도 스캔이 돌고 카드에서 버튼만 빠지지만, 이후에는 `run-scan.ps1`이 `/api/health/` 사전 확인에서 멈춘다. 자동 시작 등록 여부를 그때 다시 판단한다.
+- **이제 스캔 자체가 리포트 서버 실행을 요구한다.** `run-scan.ps1`의 1단계 `check-api`가 실패하면 브라우저를 열지 않고 멈춘다. 예전처럼 "서버가 꺼져 있어도 스캔은 된다"가 더 이상 성립하지 않는다. 자동 시작(작업 스케줄러 로그온 트리거) 등록 여부를 다시 판단할 시점이다.
 - **전환 후 Django admin이 공개 URL에 노출된다.** 토큰 경로 뒤에 두더라도 로그인 화면이 인터넷에 열린다. 강한 비밀번호가 필요하다.
 - 예전 Codex Sites 주소(`https://my-property-report-20260902.ssong7988.chatgpt.site`)는 더 이상 갱신되지 않는다. 루트 `.env`의 `KAKAO_REPORT_URL`을 지우면 이 오래된 주소로 폴백하므로 비우지 않는다.
 - 휴대전화에서 `127.0.0.1`/`localhost`는 서버 PC를 가리키지 않으며 카카오 웹 도메인으로도 부적합하다(Tailscale Funnel 주소를 써야 하는 이유).
 - 토큰 경로(`REPORT_PATH_TOKEN`)는 우발적 노출만 막는다. 주소가 유출되면 인증 없이 누구나 볼 수 있다.
-- **7단계와 8단계 사이의 임시 간격:** 리포트와 카카오 전송은 Django에 있지만 기존 `run-scan.bat`은 아직 finder의 파일 경로를 사용한다. 8단계 API 연결 전에는 기존 스캔 결과가 DB 리포트에 반영된다고 가정하지 않는다.
+- **현재 8000번 포트에 떠 있는 리포트 서버 프로세스는 오래됐다.** `api` 앱이 생기기 전에 시작돼 `/api/health/`가 404를 준다. `run-site.bat`을 재시작해야 스캔이 동작한다. 코드 변경 후 재시작을 잊는 실수가 이 구조에서는 조용히 넘어가지 않고 `check-api` 실패로 드러난다.
+- **실제 브라우저 수집을 새 구조로 아직 한 번도 돌리지 않았다.** API 계약·인증·오류 경로는 실제 DB에 대해 확인했지만, 네이버에서 긁은 진짜 데이터가 `POST /api/scans/`를 통과하는 것은 미확인이다.
 - 루트와 예전 UI(`property-report-site/site-app/`)가 중첩 Git 저장소로 남아 있다. 그 디렉터리를 다시 건드릴 일이 생기면 UI 커밋 누락이나 루트 포인터만 변경되는 실수에 유의한다.
 - 마지막 `npm audit` 결과는 취약점 11개(낮음 1, 보통 2, 높음 8)였다(예전 UI 저장소 기준, 더 이상 서빙 경로가 아니므로 우선순위 낮음).
 - 공개 리포트에는 매물 정보가 노출되므로 민감한 개인 데이터나 인증 정보를 포함하지 않아야 한다.
