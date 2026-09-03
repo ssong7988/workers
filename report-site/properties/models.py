@@ -208,6 +208,7 @@ class PropertyFields(models.Model):
 
     listing_id = models.CharField("매물 ID", max_length=100)
     complex_name = models.CharField("단지명", max_length=255)
+    building = models.CharField("동", max_length=50, blank=True)
     type_name = models.CharField("타입", max_length=100, blank=True)
     exclusive_area_m2 = models.DecimalField(
         "전용면적(㎡)", max_digits=7, decimal_places=3

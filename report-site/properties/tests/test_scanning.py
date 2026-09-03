@@ -60,6 +60,11 @@ class RecordScanTests(TestCase):
         self.assertEqual(decision.scan.matched_count, 1)
         self.assertEqual(decision.scan.excluded_count, 1)
 
+    def test_building_carries_from_observation_to_listing(self) -> None:
+        self.record([self.payload(building="101동")])
+        self.assertEqual(Observation.objects.get().building, "101동")
+        self.assertEqual(Listing.objects.get().building, "101동")
+
     def test_first_urgent_same_price_and_lower_price_alert_policy(self) -> None:
         first = self.record([self.payload()])
         self.assertEqual(len(first.alerts), 1)

@@ -58,6 +58,7 @@ class Listing:
     description: str
     url: str
     observed_at: str
+    building: str = ""
 
     @property
     def key(self) -> str:

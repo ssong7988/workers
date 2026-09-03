@@ -51,6 +51,7 @@ def _property_values(payload: Mapping[str, object]) -> dict[str, object]:
         raise ValueError("매물 ID가 비어 있습니다.")
     return {
         "complex_name": str(payload.get("complex_name", "")),
+        "building": str(payload.get("building", "")),
         "type_name": str(payload.get("type_name", "")),
         "exclusive_area_m2": area,
         "price_won": price,
@@ -190,6 +191,7 @@ def record_scan(
             key: getattr(observation, key)
             for key in (
                 "complex_name",
+                "building",
                 "type_name",
                 "exclusive_area_m2",
                 "price_won",

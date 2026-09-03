@@ -48,7 +48,7 @@ class ReportViewTests(TestCase):
         return Listing.objects.create(**values)
 
     def test_valid_token_renders_active_database_listings_only(self) -> None:
-        self.listing("1", 2_400_000_000)
+        self.listing("1", 2_400_000_000, building="101동")
         self.listing("2", 2_550_000_000)
         self.listing("3", 2_400_000_000, active=False)
 
@@ -60,6 +60,7 @@ class ReportViewTests(TestCase):
         self.assertEqual(response.context["total"], 2)
         self.assertEqual(len(response.context["urgent"]), 1)
         self.assertContains(response, "26억 이하 · 전용 83~86㎡")
+        self.assertContains(response, "101동 · 전용 84.9㎡")
         self.assertContains(response, "전용 84.9㎡")
         self.assertNotIn("fin.land.naver.com/articles/3", html)
 

@@ -76,6 +76,7 @@ class ObservationAdmin(admin.ModelAdmin):
     list_display = (
         "observed_at",
         "complex_name",
+        "building",
         "listing_id",
         "condition",
         "price_won",
@@ -99,6 +100,7 @@ class ObservationAdmin(admin.ModelAdmin):
 class ListingAdmin(admin.ModelAdmin):
     list_display = (
         "complex_name",
+        "building",
         "listing_id",
         "condition",
         "price_won",

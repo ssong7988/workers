@@ -204,6 +204,7 @@ class NaverBrowserCollector:
                             description=raw["description"],
                             url=raw["url"],
                             observed_at=raw["observed_at"],
+                            building=raw.get("building", ""),
                         )
                     )
         return results

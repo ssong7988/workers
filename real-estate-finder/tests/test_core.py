@@ -40,6 +40,7 @@ class PriceParsingTests(unittest.TestCase):
         self.assertEqual(parsed["type_name"], "84.94A")
         self.assertEqual(parsed["floor_text"], "2/25층")
         self.assertEqual(parsed["direction"], "남동향")
+        self.assertEqual(parsed["building"], "707동")
 
 
 class FavoriteCountTests(unittest.TestCase):
