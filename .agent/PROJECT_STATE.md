@@ -19,7 +19,7 @@
 - 외부 공개는 Tailscale Funnel로 `report-site/`의 8000번 포트를 노출해 고정 HTTPS 주소(`https://<pc>.<tailnet>.ts.net`)를 얻는 방식이다. 접근 제어는 추측 불가능한 경로 토큰(`REPORT_PATH_TOKEN`)이다.
 - `KAKAO_REPORT_URL`은 루트 `.env`(`load-env.ps1`이 `run-scan.ps1`/`send-report.ps1`/`report-site/run-site.ps1`에 공유)로 관리하고, `REPORT_PATH_TOKEN`은 `report-site/.env`로 관리한다. 둘 다 Git에서 제외한다.
 
-**주의: 위 구조는 아래 "In-Flight Migration"이 끝나면 크게 바뀐다. 작업 전에 반드시 그 절을 먼저 읽는다.**
+위 구조는 2026-09-03에 끝난 역할 분리 이관의 결과다. 그 배경과 단계별 이력은 아래 "Completed Migration" 절에 있다.
 
 ## Current State
 
@@ -39,11 +39,15 @@
 - finder용 `/api/health/`, `/api/conditions/`, `/api/scans/`, `/api/digest/` 경계와 Bearer 인증을 추가했다. 실제 DB에서 health 200, conditions 200, 활성 조건 6개 응답을 확인했다. 스캔 알림과 digest는 7단계에서 Django 동기 전송에 연결됐다.
 - 리포트 뷰를 PostgreSQL 기반으로 전환했다. 이관 전 파일 기반 payload와 DB 기반 payload 전체가 동일하며 단지 6개, 매물 41개, 급매 1개, 기준 시각 `2026-09-03T08:38:55+09:00`이 그대로임을 확인했다.
 - 실제 DB 활성 매물 41개로 Django `preview_card`를 실행해 1080×8168 PNG(약 617KB)를 생성하고 육안 확인했다. `check_report`도 DB 시각과 공개 리포트 시각이 같은 순간임을 확인해 통과했다. 실제 카카오 전송은 실행하지 않았다.
-- `real-estate-finder`를 수집 전용으로 축소했다. 판정·상태·표현·전송 모듈 7개와 `searches.yaml`을 삭제했고(약 2,000줄), `api_client.py`와 5개 명령만 남았다. finder 테스트 32개 통과. 실제 DB에 붙은 임시 서버로 `check-api`(활성 조건 6개), 잘못된 본문 400, 잘못된 토큰 401을 확인했다.
+- `real-estate-finder`를 수집 전용으로 축소했다. 판정·상태·표현·전송 모듈 7개와 `searches.yaml`을 삭제했고(약 2,000줄), `api_client.py`와 5개 명령만 남았다. finder 테스트 32개 통과.
+- **새 구조로 실제 네이버 수집을 1회 완주했다(2026-09-03 14:35~14:40 KST, 약 5분).** 6개 조건 전부 성공, 실패 0. 수집 120건 · 조건충족 42건 · 제외 78건(대부분 `가격 초과`)이 모두 DB에 기록됐다. `Scan` 27→28, `Observation` 1,304→1,424, `Listing` 62→74, 활성 41→42.
+- **급매 알림 중복 방지가 실제로 동작했다.** 활성 급매 1건이 있었지만 `import_state`가 옮겨 온 `last_urgent_alert_price_won` 때문에 재전송되지 않았다. 이관에서 가장 잃기 쉬웠던 이력이 실제로 보존됐음을 확인한 셈이다.
+- 이번 스캔은 카카오톡을 보내지 않았고 그 사유가 `Scan.notification`에 남았다 — "급매 1건은 이미 같은 가격 이하로 알림을 보냈습니다 / 신규 12건은 notify_new가 꺼진 조건이라 알리지 않습니다". 의도된 정책이며 조용한 종료가 아니다.
+- Django admin 접속 경로(`.../r/<REPORT_PATH_TOKEN>/admin/`)와 `admin` 슈퍼유저 로그인을 확인했다. `Observation`의 `exclusion_reason` 필터로 제외 사유를 조회할 수 있다.
 
-## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
+## Completed Migration: 수집기 / 애플리케이션 역할 분리 (2026-09-03)
 
-**상태: 코드와 문서 전 단계(0~9) 완료. 남은 것은 실제 브라우저 수집 1회 종단 확인뿐이며, 이는 외부 부작용이 있어 사용자 확인 후 실행한다.**
+**상태: 이관 완료. 0~9단계와 실제 브라우저 수집 종단 확인까지 모두 끝났다. 남은 결정은 `kakao-image-card` 브랜치를 `main`에 병합할지 여부뿐이다.**
 
 ### 왜
 
@@ -85,7 +89,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 코드와 문서 이관을 모두 마쳤다. 남은 것은 실제 수집 1회 종단 확인 하나다.
+브랜치 `kakao-image-card`. 코드·문서 이관과 실제 수집 종단 확인을 모두 마쳤다. 아래는 단계별 이력이다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -181,15 +185,23 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - `real-estate-finder/README.md`와 루트 `README.md`를 다시 썼다. 사라진 명령과 설정 파일 설명을 걷어내고 실행 순서를 명확히 했다.
 - 문서 전체에서 `state.json`, `searches.local.yaml`, `scheduled-run`, `validate-config`, `explain-filters`와 옛 CLI 명령 참조가 남아 있지 않음을 확인했다.
 
-#### 다음에 할 일
+#### 종단 확인 결과 (2026-09-03)
 
-**남은 것은 하나다: 실제 브라우저 수집 1회 종단 확인.** 아직 한 번도 실행하지 않았다.
+새 구조로 실제 수집을 완주했고 아래를 모두 확인했다.
 
-1. 리포트 서버를 **재시작**한다. 현재 8000번 포트에 떠 있는 프로세스는 `api` 앱이 생기기 전에 시작돼 `/api/`가 404다.
-2. `real-estate-finder`에서 `check-api`로 서버가 응답하는지 확인한다(읽기 전용).
-3. `run-scan.bat`을 실행한다. **실제 카카오 메시지가 나갈 수 있으므로 사용자 확인 후 실행한다.**
-4. 확인할 것: `Observation`에 원본 전량이 쌓였는가, `Listing`의 `last_seen_at`이 갱신되고 사라진 매물만 `active=False`가 됐는가, 콘솔에 전송 여부와 사유가 찍혔는가, 리포트 화면이 새 시각을 보여주는가.
-5. 이 확인이 끝나면 `kakao-image-card` 브랜치를 `main`에 병합할지 결정한다.
+| 확인 항목 | 결과 |
+|---|---|
+| 수집기가 새 API에 붙는가 | `check-api`가 활성 조건 6개 응답 |
+| 원본이 전량 저장되는가 | `Observation` +120건, 그중 제외 78건에 사유 기록 |
+| 조건 통과분이 갱신되는가 | `Listing` +12건, 활성 41→42 |
+| 실패 없이 완주하는가 | 6개 조건 전부 성공, `failed_conditions` 비어 있음 |
+| 미전송 사유가 남는가 | `Scan.notification`에 급매 재알림 억제와 `notify_new` 꺼짐이 기록됨 |
+| 급매 알림 이력이 보존됐는가 | 활성 급매 1건이 재전송되지 않음 |
+| admin에서 조회되는가 | 토큰 경로 admin 로그인과 `exclusion_reason` 필터 확인 |
+
+#### 남은 결정
+
+`kakao-image-card` 브랜치를 `main`에 병합할지 결정한다. 그 외에 계획된 작업은 없다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
@@ -240,6 +252,13 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 카카오 공개 링크에 `127.0.0.1`/`localhost`를 넣지 않는다.
 - `build_report_payload`는 숫자 `listing_id` + `/articles/` URL만 포함한다. 묶음 카드의 해시 id(`card-...`)가 리포트에서 빠지는 현재 동작을 그대로 보존한다.
 
+### Django admin 접속
+
+- 주소는 리포트와 같은 토큰 경로 아래다: `.../r/<REPORT_PATH_TOKEN>/admin/`. 실제 토큰은 `report-site/.env`에 있고 `run-site` 창이 `Local admin:` 줄로 출력한다. 여기에는 적지 않는다.
+- 슈퍼유저 `admin`이 생성돼 있다. 비밀번호는 문서에 기록하지 않았으며, 잊었다면 `manage.py changepassword admin`으로 재설정한다.
+- 조회에 쓰는 화면: `Observation`(제외 사유는 `exclusion_reason` 필터), `Listing`(`active` 필터), `Scan`(실행 이력과 미전송 사유), `Search condition`(가격·면적 조건 편집).
+- admin은 Tailscale Funnel 공개 주소로도 열린다. 로그인 화면이 인터넷에 노출돼 있으므로 비밀번호는 강해야 한다.
+
 ### 사용자 선행 작업
 
 - 현재 없음. admin 슈퍼유저 1개가 생성돼 있음을 DB에서 확인했다. 사용자명과 비밀번호는 문서에 기록하지 않았다.
@@ -261,8 +280,8 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 예전 Codex Sites 주소(`https://my-property-report-20260902.ssong7988.chatgpt.site`)는 더 이상 갱신되지 않는다. 루트 `.env`의 `KAKAO_REPORT_URL`을 지우면 이 오래된 주소로 폴백하므로 비우지 않는다.
 - 휴대전화에서 `127.0.0.1`/`localhost`는 서버 PC를 가리키지 않으며 카카오 웹 도메인으로도 부적합하다(Tailscale Funnel 주소를 써야 하는 이유).
 - 토큰 경로(`REPORT_PATH_TOKEN`)는 우발적 노출만 막는다. 주소가 유출되면 인증 없이 누구나 볼 수 있다.
-- **현재 8000번 포트에 떠 있는 리포트 서버 프로세스는 오래됐다.** `api` 앱이 생기기 전에 시작돼 `/api/health/`가 404를 준다. `run-site.bat`을 재시작해야 스캔이 동작한다. 코드 변경 후 재시작을 잊는 실수가 이 구조에서는 조용히 넘어가지 않고 `check-api` 실패로 드러난다.
-- **실제 브라우저 수집을 새 구조로 아직 한 번도 돌리지 않았다.** API 계약·인증·오류 경로는 실제 DB에 대해 확인했지만, 네이버에서 긁은 진짜 데이터가 `POST /api/scans/`를 통과하는 것은 미확인이다.
+- **코드를 바꿨으면 리포트 서버를 재시작해야 한다.** 실행 중인 프로세스는 옛 코드를 들고 있다. 이 구조에서는 재시작을 잊어도 조용히 넘어가지 않고 `check-api`가 404로 실패해 드러난다.
+- **급매가 아니면 대부분 카카오톡이 오지 않는다. 정상이다.** `notify_new`가 켜진 조건은 `gwanggyo-prugio-worldmark-84-85`(광교푸르지오월드마크) 하나뿐이라, 나머지 5개 과천 단지는 신규 매물이 나와도 알리지 않는다. 이미 같은 가격 이하로 알린 급매도 더 내려가지 않으면 다시 알리지 않는다. 사유는 항상 콘솔과 `Scan.notification`에 남으므로, 조용하다고 느껴지면 먼저 그것을 읽는다. 지금 전체를 받고 싶으면 `send-report.bat`이다.
 - 루트와 예전 UI(`property-report-site/site-app/`)가 중첩 Git 저장소로 남아 있다. 그 디렉터리를 다시 건드릴 일이 생기면 UI 커밋 누락이나 루트 포인터만 변경되는 실수에 유의한다.
 - 마지막 `npm audit` 결과는 취약점 11개(낮음 1, 보통 2, 높음 8)였다(예전 UI 저장소 기준, 더 이상 서빙 경로가 아니므로 우선순위 낮음).
 - 공개 리포트에는 매물 정보가 노출되므로 민감한 개인 데이터나 인증 정보를 포함하지 않아야 한다.

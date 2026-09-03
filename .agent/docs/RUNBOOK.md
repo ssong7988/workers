@@ -111,6 +111,41 @@ cd report-site
 
 Ctrl+C로 멈춘다. **이 서버가 꺼져 있으면 스캔도 되지 않는다.** 데이터베이스와 판정이 여기 있어서 `run-scan.bat`이 수집 결과를 넘길 곳이 없기 때문이다. 예전에는 스캔이 파일에 저장하고 끝나서 서버 없이도 돌았지만 지금은 그렇지 않다.
 
+## 수집한 데이터 보기: Django admin
+
+검색 조건을 고치거나 "이 매물이 왜 빠졌는지"를 확인하는 곳이다. 주소는 리포트와 같은 토큰 경로 아래에 있다.
+
+```text
+http://127.0.0.1:8000/r/<REPORT_PATH_TOKEN>/admin/
+```
+
+토큰을 따로 찾을 필요는 없다. `run-site` 창이 뜰 때 `Local admin:` 줄에 완성된 주소를 출력한다. 계정은 최초 설정에서 만든 슈퍼유저이며, 비밀번호를 잊었다면 재설정한다.
+
+```powershell
+cd report-site
+..\real-estate-finder\.venv\Scripts\python.exe manage.py changepassword admin
+```
+
+화면별 쓰임새:
+
+| 화면 | 무엇을 보는가 |
+|---|---|
+| Search condition | 단지, 가격 상한, 급매가, 전용면적, `notify_new`. 여기서 고치면 다음 스캔부터 적용된다 |
+| Observation | 수집한 원본 전량. `exclusion_reason` 필터로 조건에서 빠진 이유를 본다 |
+| Listing | 현재 매물 상태. `active` 필터, `first_seen_at`, `last_urgent_alert_price_won` |
+| Scan | 실행 이력과 카카오 미전송 사유 |
+
+admin은 Tailscale Funnel 공개 주소로도 열린다(같은 토큰 경로 + `/admin/`). 로그인 화면이 인터넷에 노출돼 있으므로 비밀번호는 강하게 둔다.
+
+## 카카오톡이 오지 않을 때
+
+대부분 정상이다. 전송 조건은 둘뿐이다.
+
+- **급매** — 유효 급매가 이하이고, 이전에 알린 적이 없거나 그때보다 더 내려간 경우
+- **신규** — `notify_new`가 켜진 조건에서 처음 보는 매물. 현재 이 설정이 켜진 조건은 광교푸르지오월드마크 하나뿐이라, 과천 단지들은 신규 매물이 나와도 알리지 않는다
+
+보내지 않은 이유는 항상 `run-scan` 창 마지막에 출력되고 admin의 `Scan.notification`에도 남는다. 조용히 끝나는 것과 실패를 구분할 수 있게 하려고 그렇게 만들었다. 급매가 아니어도 지금 전체를 받고 싶으면 `send-report.bat`을 실행한다.
+
 ## 외부에서 접속 가능하게 만들기: Tailscale Funnel (최초 1회)
 
 카카오톡 카드의 `전체 매물 보기` 버튼과 텍스트 링크는 휴대전화에서도 열리는 고정 HTTPS 주소가 있어야 한다. 도메인을 사지 않고 이를 얻는 방법이 Tailscale Funnel이다.
