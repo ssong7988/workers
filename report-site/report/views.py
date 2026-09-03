@@ -1,73 +1,60 @@
-"""Render the property report straight from `real_estate_finder`'s saved state.
-
-Every request re-reads `data/state.json` — the same file `send-digest` reads
-— so the page always reflects the last successful scan. There is no build or
-deploy step in between; a page refresh is enough.
-"""
+"""Render the current property report directly from PostgreSQL."""
 
 from __future__ import annotations
 
-import time
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.http import HttpResponse
 from django.shortcuts import render
+from django.utils import timezone
 
-from real_estate_finder.config import load_config
-from real_estate_finder.models import Listing
-from real_estate_finder.report import build_report_payload
-from real_estate_finder.storage import FileStore
-
-FINDER_DIR = Path(__file__).resolve().parent.parent.parent / "real-estate-finder"
-
-_store = FileStore(FINDER_DIR / "data")
-
-_local_config = FINDER_DIR / "config" / "searches.local.yaml"
-_config_path = _local_config if _local_config.exists() else FINDER_DIR / "config" / "searches.yaml"
-_config = load_config(_config_path)
+from properties.models import GlobalRule, Listing, Scan, SearchCondition
+from properties.report import build_report_payload
 
 
-def _load_state_with_retry(store: FileStore, attempts: int = 3, delay: float = 0.05) -> dict:
-    """`save_state()` swaps the file in with `os.replace`, which can briefly
-    race an open handle on Windows. Retry rather than 500 on a scan in
-    progress."""
-    last_error: OSError | None = None
-    for attempt in range(attempts):
-        try:
-            return store.load_state()
-        except OSError as exc:
-            last_error = exc
-            if attempt < attempts - 1:
-                time.sleep(delay)
-    assert last_error is not None
-    raise last_error
+def _local_iso(moment: datetime | None, timezone_name: str) -> str:
+    if moment is None:
+        return ""
+    return timezone.localtime(moment, ZoneInfo(timezone_name)).isoformat()
 
 
-def _display_time(observed_at: str | None) -> str:
-    if not observed_at:
+def _display_time(moment: datetime | None, timezone_name: str) -> str:
+    if moment is None:
         return "기록 없음"
-    try:
-        moment = datetime.fromisoformat(observed_at).astimezone(ZoneInfo("Asia/Seoul"))
-    except ValueError:
-        return observed_at
-    return moment.strftime("%Y.%m.%d %H:%M")
+    return timezone.localtime(moment, ZoneInfo(timezone_name)).strftime(
+        "%Y.%m.%d %H:%M"
+    )
 
 
 def index(request) -> HttpResponse:
-    state = _load_state_with_retry(_store)
-    listings = [
-        Listing.from_dict(payload)
-        for payload in state.get("listings", {}).values()
-        if payload.get("active")
-    ]
-    observed_at = (
-        max((listing.observed_at for listing in listings), default=None)
-        or state.get("last_successful_scan")
+    rule = GlobalRule.objects.filter(pk=1).first()
+    timezone_name = rule.timezone if rule else settings.TIME_ZONE
+    conditions = list(
+        SearchCondition.objects.filter(enabled=True).order_by("created_at", "id")
     )
+    listings = list(
+        Listing.objects.filter(active=True, condition__enabled=True).select_related(
+            "condition"
+        )
+    )
+    observed_moment = max(
+        (listing.observed_at for listing in listings),
+        default=None,
+    )
+    if observed_moment is None:
+        latest_scan = (
+            Scan.objects.exclude(successful_conditions=[])
+            .order_by("-started_at")
+            .only("started_at", "finished_at")
+            .first()
+        )
+        if latest_scan is not None:
+            observed_moment = latest_scan.finished_at or latest_scan.started_at
+    observed_at = _local_iso(observed_moment, timezone_name)
     complexes = (
-        build_report_payload(listings, _config, observed_at=observed_at or "")["complexes"]
+        build_report_payload(listings, conditions, observed_at=observed_at)["complexes"]
         if listings
         else []
     )
@@ -83,8 +70,8 @@ def index(request) -> HttpResponse:
         request,
         "report/index.html",
         {
-            "observed_at": observed_at or "",
-            "observed_at_display": _display_time(observed_at),
+            "observed_at": observed_at,
+            "observed_at_display": _display_time(observed_moment, timezone_name),
             "complexes": complexes,
             "total": total,
             "urgent": urgent,

@@ -7,7 +7,7 @@
 - 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.agent/docs/ARCHITECTURE.md`에 정리되어 있다.
 - `real-estate-finder/`가 네이버 부동산 매물을 수집하고 검색 조건, 급매 조건, 이전 상태를 기준으로 결과를 만든다.
 - `kakao-notifier/`가 카카오 인증 토큰을 관리하고 이미지형 카카오톡 카드를 전송한다.
-- `report-site/`(Django + waitress)가 `real-estate-finder/data/state.json`을 요청마다 읽어 전체 매물 웹 리포트를 렌더링한다. 빌드나 배포 단계가 없다 — 스캔이 끝나면 새로고침만으로 반영된다.
+- `report-site/`(Django + waitress)가 PostgreSQL의 활성 `Listing`을 요청마다 읽어 전체 매물 웹 리포트를 렌더링한다. 빌드나 배포 단계는 없다.
 - `property-report-site/site-app/`(예전 Next.js/Codex Sites UI)은 서빙 경로에서 은퇴했다. 루트와 별도 중첩 Git 저장소이며 삭제하지 않고 참고용으로만 남겼다.
 - 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
 - 급매가 아닌 전체 결과를 카카오톡으로 보내는 진입점은 `real-estate-finder/send-report.bat`이며 `send-digest`를 실행한다. 브라우저와 네이버 로그인이 필요 없다.
@@ -32,19 +32,20 @@
 - `send-report.ps1`로 실제 카카오톡 카드 1통(매물 41건)을 전송해 `전체 매물 보기` 버튼 동작까지 사용자가 휴대폰에서 확인했다.
 - 리포트 화면은 관심 단지 6개, 확인 매물 41건, 급매 1건을 정확히 렌더링한다.
 - 카카오 이미지는 카카오 이미지 업로드 API를 사용한다(변경 없음).
-- 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`)와 Django 테스트 37개 전부 통과, `manage.py check`, `makemigrations --check` 통과.
+- 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`)와 Django 테스트 39개 전부 통과, `manage.py check`, `makemigrations --check` 통과.
 - PostgreSQL 서비스 `postgresql-x64-18`이 자동 시작으로 등록돼 실행 중이며, `property_report` 역할/DB 생성과 Django 마이그레이션 적용을 완료했다.
 - `import_searches`와 `import_state`를 실행해 공통 규칙 1개, 검색조건 6개, 수집 실행 27개, 원본 관측 1,304개, 전체 매물 62개를 이관했다. 활성 매물 41개, 활성 급매 1개이며 `last_urgent_alert_price_won`이 있는 기존 매물 2개의 기록도 보존됐다.
 - 이관 명령은 두 번 실행해 중복이 생기지 않음을 확인했다. DB 기반 Django 테스트 16개와 `manage.py check`, `makemigrations --check`가 통과했다.
 - finder용 `/api/health/`, `/api/conditions/`, `/api/scans/`, `/api/digest/` 경계와 Bearer 인증을 추가했다. 실제 DB에서 health 200, conditions 200, 활성 조건 6개 응답을 확인했다. 카카오 이관 전 알림 이력 소모를 막기 위해 현재 알림 요청과 digest는 명시적으로 501을 반환한다.
+- 리포트 뷰를 PostgreSQL 기반으로 전환했다. 이관 전 파일 기반 payload와 DB 기반 payload 전체가 동일하며 단지 6개, 매물 41개, 급매 1개, 기준 시각 `2026-09-03T08:38:55+09:00`이 그대로임을 확인했다.
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 5단계까지 완료했다. Bearer 인증된 finder용 API가 열렸고 상태 저장 전용 스캔 요청을 처리할 수 있다. 다음 구현은 6단계 리포트 DB 전환이다.**
+**상태: 6단계까지 완료했다. 공개 리포트는 PostgreSQL만 읽고 finder 코드 의존성이 없다. 다음 구현은 7단계 카드·카카오 전송 이관이다.**
 
 ### 왜
 
-지금 `real-estate-finder`는 "조사"만 하는 게 아니라 애플리케이션 전체다. 수집(`collector.py`), 조건 필터(`parsing.py`), 급매·신규·알림 판정과 상태 diff(`service.py`), 파일 저장(`storage.py`), 표현 포맷(`report.py`), 카드 이미지(`card.py`), 카카오 전송(`notifier.py`)을 모두 소유한다. `report-site`는 DB조차 없고(`settings.py:68` `DATABASES = {}`), `sys.path`에 finder를 끼워넣어(`settings.py:23`) finder 코드를 직접 import하는 얇은 뷰 하나뿐이다.
+이관 시작 당시 `real-estate-finder`는 "조사"만 하는 게 아니라 애플리케이션 전체였다. 수집(`collector.py`), 조건 필터(`parsing.py`), 급매·신규·알림 판정과 상태 diff(`service.py`), 파일 저장(`storage.py`), 표현 포맷(`report.py`), 카드 이미지(`card.py`), 카카오 전송(`notifier.py`)을 모두 소유했다. `report-site`는 DB 없이 finder 코드를 직접 import하는 얇은 뷰 하나뿐이었다. 현재 완료 범위는 아래 단계별 진행 상황을 따른다.
 
 사용자 결정: **수집과 그 외 전부를 가른다.** 수집한 데이터는 전량 DB에 넣고, 그중 조건에 맞는 것만 필터해서 보여주며, 나머지 판단도 전부 Django가 한다.
 
@@ -73,7 +74,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - [x] 3. `import_searches` / `import_state` 관리 명령 작성, 기존 데이터 이관 실행
 - [x] 4. `parsing.py` → `properties/matching.py`, `service.scan()` 판정부 → `properties/scanning.py` + 테스트 이관
 - [x] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`). 알림 전송과 digest 본체는 7단계 이관 전까지 명시적 501
-- [ ] 6. `report` 뷰를 DB 기반으로 전환 (템플릿 무변경)
+- [x] 6. `report` 뷰를 DB 기반으로 전환 (템플릿 무변경)
 - [ ] 7. `card.py` / `notifier.py` / `publish.py` 이관 + `send_digest`·`preview_card`·`check_report` 관리 명령
 - [ ] 8. finder 축소 + `api_client.py` + `cli.py` 정리 + `run-scan.ps1` 사전 확인 + `send-report.ps1` 재연결
 - [ ] 9. `ARCHITECTURE.md`, `RUNBOOK.md`, `AGENTS.md`, 각 `README.md` 갱신
@@ -82,7 +83,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 5단계 finder용 API 경계까지 완료했다. 다음 코드는 6단계 `report` 뷰의 PostgreSQL 전환이다.
+브랜치 `kakao-image-card`. 6단계 리포트 PostgreSQL 전환까지 완료했다. 다음 코드는 7단계 카드·카카오 전송과 관련 관리 명령 이관이다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -96,7 +97,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
   - `FINDER_API_TOKEN`을 `REPORT_PATH_TOKEN`과 같이 필수로 요구한다(없으면 기동 실패).
   - `CSRF_TRUSTED_ORIGINS = ["https://*.ts.net"]`, `SECURE_PROXY_SSL_HEADER`. Funnel 뒤에서 admin 로그인 POST가 깨지지 않게 하기 위함.
   - `DATA_DIR = BASE_DIR / "data"` — 카드 이미지 출력 위치(7단계에서 사용).
-  - **`sys.path.insert(0, FINDER_DIR)`는 아직 남겨 뒀다.** `report/views.py`가 여전히 finder의 `FileStore`를 import하기 때문이다. 6단계에서 둘을 같이 제거한다.
+  - `sys.path.insert(0, FINDER_DIR)`는 당시 `report/views.py`의 `FileStore` import 때문에 유지했으며 **6단계에서 둘 다 제거했다.**
 - `report-site/report_site/urls.py`: admin을 `r/<REPORT_PATH_TOKEN>/admin/`에 마운트. `admin.site.site_header` 등 한글 라벨 설정.
 - `report-site/run-site.ps1`: `manage.py migrate --check` 실패 시 기동 거부, `collectstatic --noinput` 자동 실행, 배너에 admin 주소 출력.
 - `report-site/.env.example` 갱신(`FINDER_API_TOKEN`, `POSTGRES_*` 문서화).
@@ -139,10 +140,18 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 아직 카카오 전송 코드가 Django에 없으므로 `notify_urgent=true`, smoke 요청과 `digest`는 쓰기 없이 `notification_not_available` 501을 반환한다. 상태 저장만 필요한 `notify_urgent=false` 스캔은 201로 처리한다. 이 제한은 7단계에서 실제 동기 전송으로 교체한다.
 - 인증, 메서드 제한, DB health, 활성 조건 직렬화, 스캔 저장, JSON 오류, 상충 조건, CSRF 면제, 알림 미지원 경로 테스트를 추가했다. Django 테스트 37개가 통과했고 실제 DB 내부 요청에서 health 200, conditions 200, 활성 조건 6개를 확인했다.
 
+#### 6단계에서 완료한 코드
+
+- `properties/report.py`로 가격·면적 문구, 조건별 그룹핑, 가격/최신 매물번호 정렬, 숫자 매물 ID와 `/articles/` 직접 링크만 표시하는 규칙을 이관했다.
+- `report/views.py`는 PostgreSQL의 활성 조건·활성 `Listing`을 조회한다. 활성 매물이 없으면 성공 조건이 하나라도 있었던 최근 `Scan` 시각을 `data-observed-at`에 사용한다.
+- DB의 `Decimal` 고정 자릿수가 화면에 `84.930`처럼 보이지 않도록 기존과 같은 `84.93` 형식으로 정규화했다.
+- `report-site` 설정에서 finder 디렉터리 `sys.path` 삽입을 제거했다. Django 런타임의 finder import와 `FileStore` 의존성은 없다. 남은 `state.json` 참조는 일회성 `import_state`와 그 테스트뿐이다.
+- 템플릿은 수정하지 않았고 `data-observed-at` 계약도 유지했다. 실제 이관 데이터로 구형·신형 payload 전체 일치, 단지 6·매물 41·급매 1·기준 시각 일치를 확인했다. Django 테스트 39개와 finder 테스트 81개가 통과했다.
+
 #### 다음에 할 일 (순서대로)
 
-1. 6단계: `report` 뷰가 `state.json` 대신 PostgreSQL의 활성 `Listing`을 조회하게 한다.
-2. 기존 템플릿과 `data-observed-at` 계약을 유지하며 화면의 단지 6개·활성 41개·급매 1개가 동일한지 검증한다.
+1. 7단계: `card.py`, `notifier.py`, `publish.py`를 Django `properties` 앱으로 옮겨 스캔 API와 digest API의 501 제한을 실제 동기 전송으로 교체한다.
+2. `send_digest`, `preview_card`, `check_report` 관리 명령을 추가하고 이미지 실패 시 텍스트 폴백·텍스트 실패 기록을 검증한다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
@@ -214,7 +223,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 예전 Codex Sites 주소(`https://my-property-report-20260902.ssong7988.chatgpt.site`)는 더 이상 갱신되지 않는다. 루트 `.env`의 `KAKAO_REPORT_URL`을 지우면 이 오래된 주소로 폴백하므로 비우지 않는다.
 - 휴대전화에서 `127.0.0.1`/`localhost`는 서버 PC를 가리키지 않으며 카카오 웹 도메인으로도 부적합하다(Tailscale Funnel 주소를 써야 하는 이유).
 - 토큰 경로(`REPORT_PATH_TOKEN`)는 우발적 노출만 막는다. 주소가 유출되면 인증 없이 누구나 볼 수 있다.
-- `state.json` 기반이므로 PostgreSQL 전환은 아직 남은 과제다 — 위 In-Flight Migration이 이것을 해결한다.
+- **6단계와 8단계 사이의 임시 간격:** 리포트는 PostgreSQL을 읽지만 기존 `run-scan.bat`은 아직 `state.json`만 갱신한다. 서버를 재시작한 뒤 기존 스캔을 실행해도 DB 리포트는 갱신되지 않는다. 8단계 API 연결 전에는 기존 스캔 결과가 공개 리포트에 반영된다고 가정하지 않는다.
 - 루트와 예전 UI(`property-report-site/site-app/`)가 중첩 Git 저장소로 남아 있다. 그 디렉터리를 다시 건드릴 일이 생기면 UI 커밋 누락이나 루트 포인터만 변경되는 실수에 유의한다.
 - 마지막 `npm audit` 결과는 취약점 11개(낮음 1, 보통 2, 높음 8)였다(예전 UI 저장소 기준, 더 이상 서빙 경로가 아니므로 우선순위 낮음).
 - 공개 리포트에는 매물 정보가 노출되므로 민감한 개인 데이터나 인증 정보를 포함하지 않아야 한다.

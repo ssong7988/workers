@@ -14,23 +14,16 @@ real-estate-finder/run-scan.ps1
 python -m real_estate_finder <command>
               |
               v
-CLI -> 설정 -> 네이버 화면 수집 -> 필터/급매 판정 -> data/state.json (저장 먼저)
-                                      |              |
-                                      |              +-> 실행·관측 이력
-                                      v
-                                  카드 이미지
-                                      |
-                         +------------+-------------+
-                         |                          |
-                         v                          v
-                kakao-notifier              report-site (Django)
-                카카오 나에게 보내기          data/state.json을 요청마다 읽어 렌더링
-                                                     |
-                                                     v
-                                          tailscale funnel -> 공개 HTTPS 주소
+CLI -> 설정 -> 네이버 화면 수집 -> 필터/급매 판정 -> data/state.json -> 기존 카카오 전송
+
+report-site API (Bearer) -> PostgreSQL -> report-site 공개 리포트
+                                      -> admin
+                              |
+                              v
+                   tailscale funnel -> 공개 HTTPS 주소
 ```
 
-현재 시스템은 하나의 프로세스로 묶인 모놀리식 Python 애플리케이션에 가깝다. `real-estate-finder`가 수집, 판정, 상태 관리, 카드 생성을 조정하고, `kakao-notifier`와 `report-site`를 경계 밖 어댑터처럼 사용한다. `report-site`는 빌드·배포 단계 없이 `data/state.json`을 직접 읽으므로, 스캔과 리포트 사이에 별도의 "발행" 단계가 없다.
+현재는 역할 분리 이관 중간 단계다. `real-estate-finder`의 기존 실행 경로는 여전히 파일 상태와 기존 카카오 전송을 쓰지만, `report-site`에는 Bearer API, PostgreSQL 판정·상태 갱신, DB 기반 공개 리포트가 구현됐다. 아직 finder가 API를 호출하지 않으므로 서버 재시작 후 기존 스캔이 만든 `state.json` 변경은 DB 리포트에 반영되지 않는다.
 
 목표 구조는 다음과 같다.
 
@@ -38,7 +31,7 @@ CLI -> 설정 -> 네이버 화면 수집 -> 필터/급매 판정 -> data/state.j
 수집기 -> PostgreSQL -> Django 웹 애플리케이션 -> 고정 공개 URL -> 카카오톡
 ```
 
-서빙 계층(Django, 요청 시 렌더링, 고정 공개 URL)은 이미 이 목표대로 전환됐다. 아직 구현되지 않은 것은 저장 계층뿐이다 — 현재 `report-site`는 PostgreSQL이 아니라 `real-estate-finder/data/state.json`(파일)을 그대로 읽는다.
+서빙과 저장 계층은 목표 구조로 전환됐다. 남은 핵심은 카드·카카오 전송을 Django로 옮기고 finder를 API 클라이언트로 축소하는 작업이다.
 
 ## 2. 저장소 경계
 
@@ -165,7 +158,7 @@ FinderService.scan
 | `data/run.lock` | 중복 실행 방지용 배타 잠금 | 제외, 정상 종료 시 삭제 |
 | `data/cards/card.png` | 최근 생성 카드 이미지 | 제외 |
 
-`state.json`과 `favorites-latest.json`은 임시 파일을 만든 뒤 교체하여 기록한다. JSONL 파일은 append-only다. 현재 데이터 저장소는 PostgreSQL이 아니며, `FileStore`가 미래 저장 계층 전환의 경계다.
+`state.json`과 `favorites-latest.json`은 임시 파일을 만든 뒤 교체하여 기록한다. JSONL 파일은 append-only다. 이 파일 저장소는 아직 finder의 기존 실행 경로에서 쓰이지만 공개 리포트의 데이터 소스는 이미 PostgreSQL로 바뀌었다.
 
 ### 알림 판정
 
@@ -207,7 +200,7 @@ FinderService.scan
         -> kakao-notifier/kakao_notifier.py 동적 로딩
 ```
 
-`report-site`(Django)는 이 경로와 별개로, 요청이 올 때마다 `data/state.json`을 직접 읽어 `build_report_payload()`로 렌더링한다. 스캔이 쓰는 파일과 리포트 서버가 읽는 파일이 같으므로 중간 JSON 스냅샷이나 발행 단계가 없다.
+`report-site`(Django)는 요청마다 PostgreSQL의 활성 `Listing`을 읽어 `properties.report.build_report_payload()`로 렌더링한다. finder의 기존 스캔 경로는 아직 API에 연결되지 않았으므로 이관이 끝날 때까지 파일 상태와 DB 상태가 자동 동기화되지는 않는다.
 
 주의할 점:
 
@@ -248,18 +241,17 @@ Django 애플리케이션이며 데이터베이스, 세션, 로그인이 없다.
 | 파일/경로 | 책임 |
 |---|---|
 | `manage.py` | Django CLI 진입점 |
-| `report_site/settings.py` | 최소 설정. `real-estate-finder`를 `sys.path`에 추가하고, `REPORT_PATH_TOKEN`을 `.env`에서 읽는다(없으면 기동 실패) |
+| `report_site/settings.py` | PostgreSQL·앱·보안 설정과 `.env`의 `REPORT_PATH_TOKEN`, `FINDER_API_TOKEN`을 읽는다(없으면 기동 실패) |
 | `report_site/urls.py` | `r/<REPORT_PATH_TOKEN>/` 한 경로만 마운트. 그 외 모든 경로는 404 |
 | `report_site/wsgi.py` | waitress가 쓰는 WSGI 진입점 |
-| `report/views.py` | `data/state.json` 읽기(재시도 포함) → `real_estate_finder.report.build_report_payload()` 호출 → 템플릿 렌더. `Cache-Control: no-store` |
+| `report/views.py` | PostgreSQL의 활성 조건·매물 조회 → `properties.report.build_report_payload()` 호출 → 템플릿 렌더. `Cache-Control: no-store` |
+| `properties/report.py` | 웹 리포트와 향후 카카오 카드가 공유할 가격·면적 문구, 그룹핑과 정렬 |
 | `report/templates/report/index.html` | 화면 마크업 + 인라인 CSS/SVG. `data-observed-at` 속성을 유지해야 `publish.is_live()`가 동작한다 |
 | `.env` | `REPORT_PATH_TOKEN`(추측 불가 토큰). Git 제외 |
 | `.env.example` | 견본. 커밋됨 |
 | `run-site.ps1`, `run-site.bat` | waitress로 `127.0.0.1:8000`에서 실행하는 래퍼 |
 
-`report/views.py`가 `real_estate_finder.storage.FileStore`, `real_estate_finder.models.Listing`, `real_estate_finder.report.build_report_payload`를 그대로 가져다 쓴다. 표시 로직을 이중 구현하지 않기 위해서다.
-
-윈도우에서 `FileStore.save_state()`가 `os.replace()`로 파일을 교체하는 순간과 뷰의 읽기가 겹치면 `PermissionError`가 날 수 있다. 그래서 `save_state()`와 뷰의 읽기 양쪽에 짧은 재시도가 들어있다.
+`report/views.py`에는 finder import가 없다. 표시 로직은 `properties/report.py` 한 곳에 두며 7단계에서 카카오 카드도 이를 공유한다.
 
 외부 공개는 `report-site/` 코드가 아니라 Tailscale Funnel(`tailscale funnel --bg 8000`)이 담당한다. 절차는 `RUNBOOK.md`를 따른다.
 

@@ -1,111 +1,79 @@
-from __future__ import annotations
-
-import tempfile
-from pathlib import Path
-from unittest import mock
+from datetime import datetime, timedelta
+from decimal import Decimal
 
 from django.conf import settings
-from django.test import Client, SimpleTestCase
+from django.test import Client, TestCase
+from django.utils import timezone
 
-from real_estate_finder.models import AppConfig, LowFloorRule, SearchCondition
-from real_estate_finder.storage import FileStore
-
-from report import views
+from properties.models import GlobalRule, Listing, Scan, SearchCondition
 
 
-CONFIG = AppConfig(
-    trade_type="sale",
-    low_floor=LowFloorRule(),
-    searches=(
-        SearchCondition(
+class ReportViewTests(TestCase):
+    def setUp(self) -> None:
+        GlobalRule.objects.create(timezone="Asia/Seoul")
+        self.condition = SearchCondition.objects.create(
             id="cond-a",
             name="테스트단지",
-            complex_names=("테스트단지",),
-            search_url="",
-            exclusive_area_m2=84,
-            allowed_types=None,
+            complex_names=["테스트단지"],
+            exclusive_area_m2=Decimal("84"),
             max_price_won=2_600_000_000,
             urgent_price_won=2_500_000_000,
-        ),
-    ),
-)
-
-
-def _listing_payload(
-    listing_id: str,
-    price_won: int,
-    *,
-    urgent_price_won: int | None = 2_500_000_000,
-    active: bool = True,
-    observed_at: str = "2026-09-03T08:00:00+09:00",
-) -> dict:
-    return {
-        "condition_id": "cond-a",
-        "listing_id": listing_id,
-        "complex_name": "과천 테스트단지",
-        "type_name": "84A",
-        "exclusive_area_m2": 84.9,
-        "price_won": price_won,
-        "floor_text": "10/30층",
-        "floor": 10,
-        "direction": "남향",
-        "description": "",
-        "url": f"https://fin.land.naver.com/articles/{listing_id}",
-        "observed_at": observed_at,
-        "is_low_floor": False,
-        "effective_max_price_won": 2_600_000_000,
-        "effective_urgent_price_won": urgent_price_won,
-        "first_seen_at": observed_at,
-        "last_seen_at": observed_at,
-        "active": active,
-        "last_urgent_alert_price_won": None,
-    }
-
-
-class ReportViewTests(SimpleTestCase):
-    databases: set[str] = set()
-
-    def setUp(self) -> None:
-        self.tmp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp_dir.cleanup)
-        self.store = FileStore(Path(self.tmp_dir.name))
-
-        for patcher in (
-            mock.patch.object(views, "_store", self.store),
-            mock.patch.object(views, "_config", CONFIG),
-        ):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
+        )
         self.client = Client()
         self.url = f"/r/{settings.REPORT_PATH_TOKEN}/"
+        self.observed_at = timezone.make_aware(datetime(2026, 9, 3, 8, 0))
 
-    def _save(self, listings: list[dict], last_successful_scan: str | None = None) -> None:
-        self.store.save_state(
-            {
-                "listings": {f"cond-a:{p['listing_id']}": p for p in listings},
-                "last_successful_scan": last_successful_scan,
-            }
-        )
+    def listing(self, listing_id: str, price_won: int, **overrides) -> Listing:
+        values = {
+            "condition": self.condition,
+            "listing_id": listing_id,
+            "complex_name": "과천 테스트단지",
+            "type_name": "84A",
+            "exclusive_area_m2": Decimal("84.900"),
+            "price_won": price_won,
+            "floor_text": "10/30층",
+            "floor": 10,
+            "direction": "남향",
+            "description": "",
+            "url": f"https://fin.land.naver.com/articles/{listing_id}",
+            "observed_at": self.observed_at,
+            "is_low_floor": False,
+            "effective_max_price_won": 2_600_000_000,
+            "effective_urgent_price_won": 2_500_000_000,
+            "first_seen_at": self.observed_at,
+            "last_seen_at": self.observed_at,
+            "active": True,
+        }
+        values.update(overrides)
+        return Listing.objects.create(**values)
 
-    def test_valid_token_renders_active_listings_only(self) -> None:
-        self._save(
-            [
-                _listing_payload("1", 2_400_000_000),  # urgent
-                _listing_payload("2", 2_550_000_000),  # matched, not urgent
-                _listing_payload("3", 2_400_000_000, active=False),  # inactive, excluded
-            ]
-        )
+    def test_valid_token_renders_active_database_listings_only(self) -> None:
+        self.listing("1", 2_400_000_000)
+        self.listing("2", 2_550_000_000)
+        self.listing("3", 2_400_000_000, active=False)
+
         response = self.client.get(self.url)
+
         self.assertEqual(response.status_code, 200)
         html = response.content.decode("utf-8")
         self.assertIn('data-observed-at="2026-09-03T08:00:00+09:00"', html)
-        self.assertIn(">2</div>", html)  # 확인 매물 tile: 2 active, non-urgent one excluded from count? see below
-        self.assertIn("급매", html)
+        self.assertEqual(response.context["total"], 2)
+        self.assertEqual(len(response.context["urgent"]), 1)
+        self.assertContains(response, "26억 이하 · 전용 83~86㎡")
+        self.assertContains(response, "전용 84.9㎡")
         self.assertNotIn("fin.land.naver.com/articles/3", html)
 
+    def test_non_article_and_non_numeric_listings_stay_out_of_report(self) -> None:
+        self.listing("card-hash", 2_400_000_000)
+        self.listing(
+            "123", 2_400_000_000, url="https://new.land.naver.com/complexes/1"
+        )
+        response = self.client.get(self.url)
+        self.assertEqual(response.context["total"], 0)
+        self.assertContains(response, "활성 매물이 없습니다")
+
     def test_cache_control_is_no_store(self) -> None:
-        self._save([_listing_payload("1", 2_550_000_000)])
+        self.listing("1", 2_550_000_000)
         response = self.client.get(self.url)
         self.assertEqual(response["Cache-Control"], "no-store")
 
@@ -117,13 +85,36 @@ class ReportViewTests(SimpleTestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 404)
 
-    def test_missing_state_file_renders_empty_state_not_500(self) -> None:
+    def test_empty_database_renders_empty_state_not_500(self) -> None:
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
-        self.assertIn("활성 매물이 없습니다", response.content.decode("utf-8"))
+        self.assertContains(response, "활성 매물이 없습니다")
+        self.assertContains(response, 'data-observed-at=""', html=False)
 
-    def test_observed_at_falls_back_to_last_successful_scan_when_no_active_listings(self) -> None:
-        self._save([], last_successful_scan="2026-09-01T00:00:00+09:00")
+    def test_observed_at_falls_back_to_latest_successful_condition_scan(self) -> None:
+        earlier = self.observed_at - timedelta(days=1)
+        Scan.objects.create(
+            started_at=earlier,
+            finished_at=earlier + timedelta(minutes=1),
+            successful_conditions=[self.condition.pk],
+        )
+        failed = self.observed_at
+        Scan.objects.create(
+            started_at=failed,
+            finished_at=failed + timedelta(minutes=1),
+            successful_conditions=[],
+            failed_conditions={self.condition.pk: "수집 실패"},
+        )
         response = self.client.get(self.url)
-        html = response.content.decode("utf-8")
-        self.assertIn('data-observed-at="2026-09-01T00:00:00+09:00"', html)
+        self.assertContains(
+            response,
+            'data-observed-at="2026-09-02T08:01:00+09:00"',
+            html=False,
+        )
+
+    def test_disabled_condition_is_hidden_even_when_listing_is_active(self) -> None:
+        self.listing("1", 2_400_000_000)
+        self.condition.enabled = False
+        self.condition.save(update_fields=("enabled",))
+        response = self.client.get(self.url)
+        self.assertEqual(response.context["total"], 0)

@@ -21,18 +21,10 @@ See `.agent/docs/RUNBOOK.md` for how this is run and tunneled.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BASE_DIR.parent
-FINDER_DIR = ROOT_DIR / "real-estate-finder"
-
-# Still needed while `report/views.py` reads state.json through the finder's
-# FileStore. The migration to PostgreSQL removes both this and that import;
-# see `.agent/PROJECT_STATE.md` (In-Flight Migration, step 6).
-if str(FINDER_DIR) not in sys.path:
-    sys.path.insert(0, str(FINDER_DIR))
 
 
 def _load_env(path: Path) -> None:
