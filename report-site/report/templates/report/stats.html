@@ -50,8 +50,8 @@
   .wick { stroke: #94a3b8; stroke-width: 1.5; }
   .box { fill: #a7f3d0; stroke: #047857; stroke-width: 1; }
   .mean { stroke: #b91c1c; stroke-width: 1.5; }
-  .thin .box { fill: #e2e8f0; stroke: #94a3b8; }
-  .thin .wick, .thin .mean { opacity: .45; }
+  .cap { stroke: #94a3b8; stroke-width: 1.5; }
+  .thin .wick, .thin .mean, .thin .cap { opacity: .5; }
   .legend { margin-top: .75rem; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 12px; color: #64748b; }
   .swatch { display: inline-block; width: .8rem; height: .55rem; vertical-align: -1px; margin-right: .3rem; border-radius: 2px; }
   .swatch-box { background: #a7f3d0; border: 1px solid #047857; }
@@ -63,6 +63,7 @@
   th { background: #f8fafc; font-size: 12px; color: #475569; border-top: none; }
   th:first-child, td:first-child { text-align: left; }
   tr.thin td { color: #94a3b8; }
+  .none { color: #cbd5e1; }
   .empty { padding: 3rem 1rem; text-align: center; color: #64748b; }
   .footer { padding: 1.75rem .5rem; text-align: center; font-size: 12px; line-height: 1.5; color: #94a3b8; }
   .icon { display: inline-block; vertical-align: -3px; }
@@ -157,7 +158,12 @@
       <g{% if bar.thin %} class="thin"{% endif %}>
         <title>{{ bar.title }}</title>
         <line class="wick" x1="{{ bar.x }}" y1="{{ bar.wick_top }}" x2="{{ bar.x }}" y2="{{ bar.wick_bottom }}"/>
+        {% if bar.has_box %}
         <rect class="box" x="{{ bar.box_x }}" y="{{ bar.box_y }}" width="{{ bar.box_width }}" height="{{ bar.box_height }}" rx="1"/>
+        {% else %}
+        <line class="cap" x1="{{ bar.box_x }}" y1="{{ bar.wick_top }}" x2="{{ bar.box_right }}" y2="{{ bar.wick_top }}"/>
+        <line class="cap" x1="{{ bar.box_x }}" y1="{{ bar.wick_bottom }}" x2="{{ bar.box_right }}" y2="{{ bar.wick_bottom }}"/>
+        {% endif %}
         <line class="mean" x1="{{ bar.box_x }}" y1="{{ bar.mean_y }}" x2="{{ bar.box_right }}" y2="{{ bar.mean_y }}"/>
       </g>
       {% if bar.show_label %}
@@ -169,7 +175,7 @@
       <span><span class="swatch swatch-wick"></span>최저 ~ 최고</span>
       <span><span class="swatch swatch-box"></span>1분위 ~ 3분위</span>
       <span><span class="swatch swatch-mean"></span>평균</span>
-      <span>흐린 막대는 표본 5건 미만</span>
+      <span>표본 5건 미만인 날은 상자 없이 최저~최고만 표시</span>
     </div>
   </div>
 
@@ -184,9 +190,9 @@
           <td>{{ row.day|date:"Y.m.d (D)" }}</td>
           <td>{{ row.count }}</td>
           <td>{{ row.minimum }}</td>
-          <td>{{ row.q1 }}</td>
+          <td>{% if row.q1 %}{{ row.q1 }}{% else %}<span class="none" title="표본 5건 미만">&ndash;</span>{% endif %}</td>
           <td>{{ row.mean }}</td>
-          <td>{{ row.q3 }}</td>
+          <td>{% if row.q3 %}{{ row.q3 }}{% else %}<span class="none" title="표본 5건 미만">&ndash;</span>{% endif %}</td>
           <td>{{ row.maximum }}</td>
         </tr>
         {% endfor %}
@@ -198,7 +204,8 @@
   {% endif %}
 
   <p class="footer">
-    하루에 여러 번 조회하므로 매물마다 그날 마지막 호가 하나만 셉니다.<br>
+    하루에 여러 번 조회하므로 매물마다 그날 마지막 호가 하나만 셉니다.
+    표본이 5건 미만인 날은 1·3분위를 내지 않습니다 &mdash; 그 수는 관측값이 아니라 두 값 사이를 채운 숫자가 되기 때문입니다.<br>
     면적과 타입이 조건에 맞는 매물이면 조사 상한가를 넘겨도 분포에 포함합니다. 실제 거래가가 아니라 네이버 부동산 호가입니다.
   </p>
 </div>

@@ -36,26 +36,32 @@ DEFAULT_RANGE_LABEL = "최근 1개월"
 # price alone. See the module docstring.
 POPULATION_CODES = ("", "price")
 
-# Below this many listings a day's quartiles say more about the sample than the
-# market, so the chart draws it faintly.
-THIN_SAMPLE = 5
+# Below this many listings there are no quartiles, only a low and a high.
+#
+# `method="inclusive"` puts the first quartile at position (n-1)*0.25, so it
+# lands exactly on an observed price for the first time at five listings (the
+# second one). At four or fewer it is interpolated between neighbours - with two
+# listings it is just a point 25% of the way from the cheaper to the dearer,
+# which looks like market data and is not. Those days get a low-to-high range
+# and nothing else.
+QUARTILE_MINIMUM = 5
 
 
 @dataclass(frozen=True)
 class DaySummary:
-    """One day's price distribution, in won."""
+    """One day's price distribution, in won. Quartiles are None on a thin day."""
 
     day: date
     count: int
     minimum: int
-    q1: int
+    q1: int | None
     mean: int
-    q3: int
+    q3: int | None
     maximum: int
 
     @property
     def thin(self) -> bool:
-        return self.count < THIN_SAMPLE
+        return self.count < QUARTILE_MINIMUM
 
 
 @dataclass(frozen=True)
@@ -81,18 +87,19 @@ def _day_bounds(
 
 def _summarize(day: date, prices: list[int]) -> DaySummary:
     ordered = sorted(prices)
-    if len(ordered) >= 2:
+    if len(ordered) >= QUARTILE_MINIMUM:
         q1, _median, q3 = statistics.quantiles(ordered, n=4, method="inclusive")
+        quartiles = (round(q1), round(q3))
     else:
-        # A single listing is its own quartiles; the chart draws a flat mark.
-        q1 = q3 = float(ordered[0])
+        # Too few listings to quarter without inventing the boundaries.
+        quartiles = (None, None)
     return DaySummary(
         day=day,
         count=len(ordered),
         minimum=ordered[0],
-        q1=round(q1),
+        q1=quartiles[0],
         mean=round(statistics.fmean(ordered)),
-        q3=round(q3),
+        q3=quartiles[1],
         maximum=ordered[-1],
     )
 
@@ -172,8 +179,11 @@ class Bar:
     box_x: float
     box_right: float
     box_width: float
-    box_y: float
-    box_height: float
+    # None on a day with too few listings to quarter: the wick and the mean are
+    # drawn, the box is not.
+    box_y: float | None
+    box_height: float | None
+    has_box: bool
     wick_top: float
     wick_bottom: float
     mean_y: float
@@ -220,8 +230,14 @@ def _tick_bounds(low: int, high: int) -> tuple[int, int, int]:
 
 
 def _tooltip(day: DaySummary) -> str:
+    head = f"{day.day:%Y.%m.%d} · {day.count}건"
+    if day.q1 is None or day.q3 is None:
+        return (
+            f"{head}\n최고 {eok_text(day.maximum)} / 평균 {eok_text(day.mean)} / "
+            f"최저 {eok_text(day.minimum)}\n표본이 적어 분위수는 내지 않습니다"
+        )
     return (
-        f"{day.day:%Y.%m.%d} · {day.count}건\n"
+        f"{head}\n"
         f"최고 {eok_text(day.maximum)} / 3분위 {eok_text(day.q3)} / "
         f"평균 {eok_text(day.mean)} / 1분위 {eok_text(day.q1)} / "
         f"최저 {eok_text(day.minimum)}"
@@ -250,7 +266,12 @@ def build_chart(series: list[DaySummary]) -> Chart | None:
     bars = []
     for index, day in enumerate(series):
         center = round(plot_left + slot * (index + 0.5), 1)
-        box_top, box_bottom = y_of(day.q3), y_of(day.q1)
+        if day.q1 is None or day.q3 is None:
+            box_top = box_height = None
+        else:
+            box_top, box_bottom = y_of(day.q3), y_of(day.q1)
+            # A day where Q1 == Q3 would otherwise render as nothing.
+            box_height = round(max(box_bottom - box_top, 1.5), 1)
         bars.append(
             Bar(
                 x=center,
@@ -258,8 +279,8 @@ def build_chart(series: list[DaySummary]) -> Chart | None:
                 box_right=round(center + box_width / 2, 1),
                 box_width=box_width,
                 box_y=box_top,
-                # A day where Q1 == Q3 would otherwise render as nothing.
-                box_height=round(max(box_bottom - box_top, 1.5), 1),
+                box_height=box_height,
+                has_box=box_top is not None,
                 wick_top=y_of(day.maximum),
                 wick_bottom=y_of(day.minimum),
                 mean_y=y_of(day.mean),
@@ -295,9 +316,9 @@ def table_rows(series: list[DaySummary]) -> list[dict]:
             "day": day.day,
             "count": day.count,
             "minimum": price_text(day.minimum),
-            "q1": price_text(day.q1),
+            "q1": price_text(day.q1) if day.q1 is not None else "",
             "mean": price_text(day.mean),
-            "q3": price_text(day.q3),
+            "q3": price_text(day.q3) if day.q3 is not None else "",
             "maximum": price_text(day.maximum),
             "thin": day.thin,
         }

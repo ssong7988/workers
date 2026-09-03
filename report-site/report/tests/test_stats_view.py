@@ -175,15 +175,29 @@ class StatsViewTests(TestCase):
 
     def test_chart_and_table_agree(self) -> None:
         today = datetime.now(KST).date()
-        for index, eok in enumerate([21, 22, 23, 24]):
+        for index, eok in enumerate([21, 22, 23, 24, 25, 26]):
             self.observe(today, eok * 100_000_000, listing_id=str(index))
         response = self.get()
         (row,) = response.context["rows"]
-        self.assertEqual(row["count"], 4)
+        self.assertEqual(row["count"], 6)
         self.assertEqual(row["minimum"], "21억")
-        self.assertEqual(row["maximum"], "24억")
-        self.assertEqual(len(response.context["chart"].bars), 1)
+        self.assertEqual(row["maximum"], "26억")
+        (bar,) = response.context["chart"].bars
+        self.assertTrue(bar.has_box)
         self.assertContains(response, "1분위")
+
+    def test_a_thin_day_shows_a_dash_instead_of_an_invented_quartile(self) -> None:
+        today = datetime.now(KST).date()
+        self.observe(today, 1_520_000_000, listing_id="a")
+        self.observe(today, 1_600_000_000, listing_id="b")
+        response = self.get()
+        (row,) = response.context["rows"]
+        self.assertEqual(row["q1"], "")
+        self.assertEqual(row["q3"], "")
+        self.assertEqual(row["minimum"], "15억 2,000")
+        (bar,) = response.context["chart"].bars
+        self.assertFalse(bar.has_box)
+        self.assertContains(response, "표본 5건 미만")
 
     def test_report_links_to_the_statistics_screen(self) -> None:
         response = self.client.get(reverse("report-index"), HTTP_HOST="127.0.0.1")

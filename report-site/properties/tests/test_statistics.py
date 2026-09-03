@@ -83,6 +83,7 @@ class StatisticsTests(TestCase):
         self.assertEqual(day.mean, 2_425_000_000)
 
     def test_quartiles_and_mean(self) -> None:
+        # Eight listings: comfortably past the point where quartiles are real.
         for index, eok in enumerate([21, 22, 23, 24, 25, 26, 27, 28]):
             self.observe(kst(2026, 9, 2), eok * 100_000_000, listing_id=str(index))
 
@@ -94,14 +95,48 @@ class StatisticsTests(TestCase):
         self.assertEqual(day.q3, 2_625_000_000)
         self.assertEqual(day.maximum, 2_800_000_000)
 
-    def test_single_listing_flattens_to_one_price(self) -> None:
+    def test_too_few_listings_have_no_quartiles(self) -> None:
+        """Two listings do not have a first quartile. Interpolating one puts a
+        number a quarter of the way between the pair on screen as if it were
+        observed, which is what the market data is supposed to be."""
+        self.observe(kst(2026, 9, 2), 1_520_000_000, listing_id="a")
+        self.observe(kst(2026, 9, 2), 1_600_000_000, listing_id="b")
+
+        (day,) = self.series()
+        self.assertIsNone(day.q1)
+        self.assertIsNone(day.q3)
+        self.assertTrue(day.thin)
+        # The honest numbers survive.
+        self.assertEqual(day.minimum, 1_520_000_000)
+        self.assertEqual(day.maximum, 1_600_000_000)
+        self.assertEqual(day.mean, 1_560_000_000)
+
+    def test_quartiles_appear_once_they_land_on_real_prices(self) -> None:
+        """With five listings the inclusive method puts Q1 and Q3 exactly on the
+        second and fourth prices, so nothing is invented. Four is still
+        interpolation, so four gets nothing."""
+        prices = [21, 22, 23, 24, 25]
+        for index, eok in enumerate(prices[:4]):
+            self.observe(kst(2026, 9, 2), eok * 100_000_000, listing_id=str(index))
+        self.assertIsNone(self.series()[0].q1)
+
+        self.observe(kst(2026, 9, 3), prices[4] * 100_000_000, listing_id="4")
+        for index, eok in enumerate(prices[:4]):
+            self.observe(kst(2026, 9, 3), eok * 100_000_000, listing_id=str(index))
+        day = self.series()[1]
+        self.assertEqual(day.count, 5)
+        self.assertEqual(day.q1, 2_200_000_000)
+        self.assertEqual(day.q3, 2_400_000_000)
+        self.assertFalse(day.thin)
+
+    def test_single_listing_reports_only_its_own_price(self) -> None:
         self.observe(kst(2026, 9, 2), 2_400_000_000)
         (day,) = self.series()
         self.assertEqual(
-            (day.minimum, day.q1, day.mean, day.q3, day.maximum),
-            (2_400_000_000,) * 5,
+            (day.minimum, day.mean, day.maximum), (2_400_000_000,) * 3
         )
-        self.assertTrue(day.thin)
+        self.assertIsNone(day.q1)
+        self.assertIsNone(day.q3)
 
     def test_days_without_observations_are_omitted(self) -> None:
         self.observe(kst(2026, 9, 2), 2_400_000_000)
@@ -198,8 +233,9 @@ class ChartTests(TestCase):
         chart = build_chart(self.make(3))
         self.assertEqual(len(chart.bars), 3)
         for bar in chart.bars:
+            self.assertFalse(bar.has_box)  # four listings a day: no quartiles
+            self.assertIsNone(bar.box_y)
             self.assertLess(bar.wick_top, bar.wick_bottom)
-            self.assertLessEqual(bar.box_y, bar.mean_y)
             self.assertGreaterEqual(bar.wick_top, chart.plot_top)
             self.assertLessEqual(bar.wick_bottom, chart.plot_bottom)
             self.assertGreaterEqual(bar.box_x, chart.plot_left)
