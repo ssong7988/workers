@@ -43,7 +43,7 @@
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 8단계까지 완료했다. `real-estate-finder`는 수집 전용이 되었고 판정·표현·전송 코드는 전부 사라졌다. 남은 것은 9단계 문서 갱신과 실제 브라우저 수집 1회 종단 확인이다.**
+**상태: 코드와 문서 전 단계(0~9) 완료. 남은 것은 실제 브라우저 수집 1회 종단 확인뿐이며, 이는 외부 부작용이 있어 사용자 확인 후 실행한다.**
 
 ### 왜
 
@@ -79,13 +79,13 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - [x] 6. `report` 뷰를 DB 기반으로 전환 (템플릿 무변경)
 - [x] 7. `card.py` / `notifier.py` / `publish.py` 이관 + `send_digest`·`preview_card`·`check_report` 관리 명령
 - [x] 8. finder 축소 + `api_client.py` + `cli.py` 정리 + `run-scan.ps1` 사전 확인 + `send-report.ps1` 재연결
-- [ ] 9. `ARCHITECTURE.md`, `RUNBOOK.md`, `AGENTS.md`, 각 `README.md` 갱신
+- [x] 9. `ARCHITECTURE.md`, `RUNBOOK.md`, `AGENTS.md`, 각 `README.md` 갱신
 
 각 단계 끝에서 테스트가 통과하는 상태를 유지하고, 단계를 끝낼 때마다 위 체크박스와 이 문서를 갱신한다. 삭제 범위가 크므로 단계별로 커밋을 나눈다.
 
 ### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 8단계 finder 축소까지 구현·검증했다. 다음은 9단계 문서 갱신이며, 그 전후로 실제 브라우저 수집 1회 종단 확인이 필요하다.
+브랜치 `kakao-image-card`. 코드와 문서 이관을 모두 마쳤다. 남은 것은 실제 수집 1회 종단 확인 하나다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -167,18 +167,29 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 삭제: `config.py`, `service.py`, `storage.py`, `report.py`, `card.py`, `notifier.py`, `publish.py`, `config/searches.yaml`.
 - `parsing.py`는 `parse_price_won`과 `normalize_type_name`만 남겼다. 수집한 텍스트를 숫자로 바꾸는 일은 수집의 일부지만, 층 규칙과 임계값은 판정이라 사라졌다.
 - `models.py`는 `SearchCondition`(API 응답용 `from_api()` 포함)과 원본 `Listing`, `iso_now()`만 남겼다. `Listing`에서 `floor`, `is_low_floor`, `effective_max_price_won`, `effective_urgent_price_won`을 제거했고 `collector.py`의 두 생성 지점도 함께 고쳤다.
-- `run-scan.ps1`은 4단계가 되었다. 1단계가 `check-api`이며 실패하면 브라우저를 띄우지 않고 `report-site
-un-site.bat`을 먼저 실행하라고 안내한다.
+- `run-scan.ps1`은 4단계가 되었다. 1단계가 `check-api`이며 실패하면 브라우저를 띄우지 않고 `report-site\run-site.bat`을 먼저 실행하라고 안내한다.
 - `send-report.ps1`은 `report-site`로 이동해 `manage.py send_digest`를 호출한다. 브라우저·로그인·웹 서버가 필요 없다.
 - **`scheduled-run` 명령을 제거했다.** 평일 digest 시각은 이제 `GlobalRule`에 있고, 이 명령을 부르는 Windows 작업 스케줄러 항목이 실제로 등록돼 있지 않음을 확인했다. 정기 발송이 다시 필요해지면 Django 쪽에서 되살린다.
 - 테스트: `tests/test_core.py`는 수집기 헬퍼와 가격·타입 정규화만 남기고, `tests/test_api_client.py`를 추가했다(토큰 누락, Bearer 헤더, JSON 본문, 연결 실패 문구, 400/401 처리, 중복 제거). 판정·리포트·카드·publish 테스트는 코드와 함께 report-site로 갔다.
 - 검증: finder 테스트 32개 통과. 실제 DB에 붙은 임시 서버(8010 포트)에 대해 `check-api`가 활성 조건 6개를 응답했고, 잘못된 본문 POST가 서버의 400 메시지(`observations는 배열이어야 합니다.`)로, 잘못된 토큰이 401로 돌아오는 것을 확인했다. 행을 쓰지 않는 요청만 보냈으므로 DB는 바뀌지 않았다. `manage.py check`와 `makemigrations --check` 통과.
 
-#### 다음에 할 일 (순서대로)
+#### 9단계에서 완료한 문서
 
-1. **실제 브라우저 수집 1회 종단 확인.** 아직 한 번도 실행하지 않았다. `report-site
-un-site.bat`을 **재시작**한 뒤(현재 떠 있는 프로세스는 `api` 앱이 생기기 전에 시작돼 `/api/`가 404다) `run-scan.bat`을 실행해, `Observation`에 원본 전량이 쌓이고 `Listing`이 갱신되며 콘솔에 전송 여부와 사유가 찍히는지 본다. 실제 카카오 메시지가 나갈 수 있으므로 사용자 확인 후 실행한다.
-2. 9단계: `.agent/docs/ARCHITECTURE.md`, `.agent/docs/RUNBOOK.md`, `AGENTS.md`, `real-estate-finder/README.md`, `report-site/README.md`를 최종 구조에 맞게 갱신한다. finder README는 아직 `validate-config`, `scheduled-run`, `send-digest`, `preview-card`, `searches.yaml`, `state.json` 등 사라진 것들을 설명하고 있다.
+- `.agent/docs/ARCHITECTURE.md`를 역할 경계 중심으로 다시 썼다(350 → 273줄). 수집기 절과 애플리케이션 절을 나누고, "이 작업에는 어떤 파일을 읽는가" 표를 `properties/`·`api/`·`report/` 기준으로 다시 매핑했다. 에이전트가 걸려 넘어질 결과 세 가지를 명시했다 — 스캔이 서버를 요구한다, 코드 변경 후 서버 재시작이 필요하다, 테스트에는 DB 생성 권한이 필요하다.
+- `.agent/docs/RUNBOOK.md`: 진입점이 셋이 되었고 리포트 서버를 먼저 켠다. PostgreSQL 준비와 `import_searches`를 최초 설정에 넣었고, digest·카드 미리보기·리포트 확인을 Django 관리 명령으로 바꿨다. "서버가 꺼져 있어도 스캔은 된다"는 설명을 반대로 고쳤다.
+- `AGENTS.md`: 역할 경계를 규칙으로 못박았다(판정·표현·전송 코드를 수집기로 되돌려 놓지 않는다). 검증 명령과 비밀 키 목록도 갱신했다.
+- `real-estate-finder/README.md`와 루트 `README.md`를 다시 썼다. 사라진 명령과 설정 파일 설명을 걷어내고 실행 순서를 명확히 했다.
+- 문서 전체에서 `state.json`, `searches.local.yaml`, `scheduled-run`, `validate-config`, `explain-filters`와 옛 CLI 명령 참조가 남아 있지 않음을 확인했다.
+
+#### 다음에 할 일
+
+**남은 것은 하나다: 실제 브라우저 수집 1회 종단 확인.** 아직 한 번도 실행하지 않았다.
+
+1. 리포트 서버를 **재시작**한다. 현재 8000번 포트에 떠 있는 프로세스는 `api` 앱이 생기기 전에 시작돼 `/api/`가 404다.
+2. `real-estate-finder`에서 `check-api`로 서버가 응답하는지 확인한다(읽기 전용).
+3. `run-scan.bat`을 실행한다. **실제 카카오 메시지가 나갈 수 있으므로 사용자 확인 후 실행한다.**
+4. 확인할 것: `Observation`에 원본 전량이 쌓였는가, `Listing`의 `last_seen_at`이 갱신되고 사라진 매물만 `active=False`가 됐는가, 콘솔에 전송 여부와 사유가 찍혔는가, 리포트 화면이 새 시각을 보여주는가.
+5. 이 확인이 끝나면 `kakao-image-card` 브랜치를 `main`에 병합할지 결정한다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
