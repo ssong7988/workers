@@ -10,6 +10,7 @@ from django.db import DatabaseError, connection
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
+from properties.delivery import DeliveryError, DeliveryService
 from properties.models import GlobalRule, SearchCondition
 from properties.scanning import ScanDecision, record_scan
 
@@ -160,24 +161,27 @@ def scans(request: HttpRequest) -> JsonResponse:
             )
         if not isinstance(notify_urgent, bool) or not isinstance(smoke, bool):
             raise ValueError("notify_urgent와 smoke는 boolean이어야 합니다.")
-        if notify_urgent or smoke:
-            return _error(
-                "카카오 전송은 아직 Django에 연결되지 않았습니다. "
-                "현재는 notify_urgent=false인 일반 스캔 기록만 지원합니다.",
-                "notification_not_available",
-                501,
-            )
         decision = record_scan(
             started_at=payload.get("started_at"),
             finished_at=payload.get("finished_at"),
             observations=observations,
             successful_conditions=successful,
             failed_conditions=failures,
-            notify_urgent=False,
-            smoke=False,
+            notify_urgent=notify_urgent,
+            smoke=smoke,
         )
+        delivery = DeliveryService()
+        if smoke:
+            delivery.send_smoke(decision)
+        elif decision.alerts:
+            delivery.send_scan_alerts(decision)
     except ValueError as exc:
         return _error(str(exc), "invalid_request", 400)
+    except DeliveryError as exc:
+        response_data = {"error": str(exc), "code": "notification_failed"}
+        if "decision" in locals():
+            response_data["scan"] = _scan_payload(decision)["scan"]
+        return JsonResponse(response_data, status=502)
     except DatabaseError:
         return _error("스캔을 저장할 수 없습니다.", "database_error", 503)
     return JsonResponse(_scan_payload(decision), status=201)
@@ -188,8 +192,8 @@ def scans(request: HttpRequest) -> JsonResponse:
 def digest(request: HttpRequest) -> JsonResponse:
     if request.method != "POST":
         return _method_not_allowed("POST")
-    return _error(
-        "카카오 전체 보고는 아직 Django에 연결되지 않았습니다.",
-        "notification_not_available",
-        501,
-    )
+    try:
+        notification = DeliveryService().send_digest()
+    except DeliveryError as exc:
+        return _error(str(exc), "notification_failed", 502)
+    return JsonResponse({"notification": notification})

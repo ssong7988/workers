@@ -6,7 +6,7 @@
 
 - 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.agent/docs/ARCHITECTURE.md`에 정리되어 있다.
 - `real-estate-finder/`가 네이버 부동산 매물을 수집하고 검색 조건, 급매 조건, 이전 상태를 기준으로 결과를 만든다.
-- `kakao-notifier/`가 카카오 인증 토큰을 관리하고 이미지형 카카오톡 카드를 전송한다.
+- `report-site/properties/`가 카드 생성·전송 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. 기존 finder 쪽 카드·전송 코드는 8단계 정리 전까지 중복으로 남아 있다.
 - `report-site/`(Django + waitress)가 PostgreSQL의 활성 `Listing`을 요청마다 읽어 전체 매물 웹 리포트를 렌더링한다. 빌드나 배포 단계는 없다.
 - `property-report-site/site-app/`(예전 Next.js/Codex Sites UI)은 서빙 경로에서 은퇴했다. 루트와 별도 중첩 Git 저장소이며 삭제하지 않고 참고용으로만 남겼다.
 - 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
@@ -32,16 +32,17 @@
 - `send-report.ps1`로 실제 카카오톡 카드 1통(매물 41건)을 전송해 `전체 매물 보기` 버튼 동작까지 사용자가 휴대폰에서 확인했다.
 - 리포트 화면은 관심 단지 6개, 확인 매물 41건, 급매 1건을 정확히 렌더링한다.
 - 카카오 이미지는 카카오 이미지 업로드 API를 사용한다(변경 없음).
-- 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`)와 Django 테스트 39개 전부 통과, `manage.py check`, `makemigrations --check` 통과.
+- 마지막 확인 시 Python 단위 테스트 81개(`real-estate-finder/tests`)와 Django 테스트 49개 전부 통과, `manage.py check`, `makemigrations --check` 통과.
 - PostgreSQL 서비스 `postgresql-x64-18`이 자동 시작으로 등록돼 실행 중이며, `property_report` 역할/DB 생성과 Django 마이그레이션 적용을 완료했다.
 - `import_searches`와 `import_state`를 실행해 공통 규칙 1개, 검색조건 6개, 수집 실행 27개, 원본 관측 1,304개, 전체 매물 62개를 이관했다. 활성 매물 41개, 활성 급매 1개이며 `last_urgent_alert_price_won`이 있는 기존 매물 2개의 기록도 보존됐다.
 - 이관 명령은 두 번 실행해 중복이 생기지 않음을 확인했다. DB 기반 Django 테스트 16개와 `manage.py check`, `makemigrations --check`가 통과했다.
-- finder용 `/api/health/`, `/api/conditions/`, `/api/scans/`, `/api/digest/` 경계와 Bearer 인증을 추가했다. 실제 DB에서 health 200, conditions 200, 활성 조건 6개 응답을 확인했다. 카카오 이관 전 알림 이력 소모를 막기 위해 현재 알림 요청과 digest는 명시적으로 501을 반환한다.
+- finder용 `/api/health/`, `/api/conditions/`, `/api/scans/`, `/api/digest/` 경계와 Bearer 인증을 추가했다. 실제 DB에서 health 200, conditions 200, 활성 조건 6개 응답을 확인했다. 스캔 알림과 digest는 7단계에서 Django 동기 전송에 연결됐다.
 - 리포트 뷰를 PostgreSQL 기반으로 전환했다. 이관 전 파일 기반 payload와 DB 기반 payload 전체가 동일하며 단지 6개, 매물 41개, 급매 1개, 기준 시각 `2026-09-03T08:38:55+09:00`이 그대로임을 확인했다.
+- 실제 DB 활성 매물 41개로 Django `preview_card`를 실행해 1080×8168 PNG(약 617KB)를 생성하고 육안 확인했다. `check_report`도 DB 시각과 공개 리포트 시각이 같은 순간임을 확인해 통과했다. 실제 카카오 전송은 실행하지 않았다.
 
 ## In-Flight Migration: 수집기 / 애플리케이션 역할 분리
 
-**상태: 6단계까지 완료했다. 공개 리포트는 PostgreSQL만 읽고 finder 코드 의존성이 없다. 다음 구현은 7단계 카드·카카오 전송 이관이다.**
+**상태: 7단계까지 완료했다. Django가 DB 상태 커밋 뒤 카드·카카오 동기 전송과 폴백·실패 기록을 담당한다. 다음 구현은 8단계 finder API 클라이언트 전환이다.**
 
 ### 왜
 
@@ -75,7 +76,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - [x] 4. `parsing.py` → `properties/matching.py`, `service.scan()` 판정부 → `properties/scanning.py` + 테스트 이관
 - [x] 5. `api` 앱 + Bearer 인증 + 엔드포인트 4개(`health`, `conditions`, `scans`, `digest`). 알림 전송과 digest 본체는 7단계 이관 전까지 명시적 501
 - [x] 6. `report` 뷰를 DB 기반으로 전환 (템플릿 무변경)
-- [ ] 7. `card.py` / `notifier.py` / `publish.py` 이관 + `send_digest`·`preview_card`·`check_report` 관리 명령
+- [x] 7. `card.py` / `notifier.py` / `publish.py` 이관 + `send_digest`·`preview_card`·`check_report` 관리 명령
 - [ ] 8. finder 축소 + `api_client.py` + `cli.py` 정리 + `run-scan.ps1` 사전 확인 + `send-report.ps1` 재연결
 - [ ] 9. `ARCHITECTURE.md`, `RUNBOOK.md`, `AGENTS.md`, 각 `README.md` 갱신
 
@@ -83,7 +84,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### 이어받는 지점 (2026-09-03 갱신)
 
-브랜치 `kakao-image-card`. 6단계 리포트 PostgreSQL 전환까지 완료했다. 다음 코드는 7단계 카드·카카오 전송과 관련 관리 명령 이관이다.
+브랜치 `kakao-image-card`. 7단계 카드·카카오 전송 이관까지 구현·검증했다. 다음 코드는 8단계 finder 축소와 API 클라이언트 연결이다.
 
 #### 1단계에서 실제로 끝난 것
 
@@ -148,10 +149,21 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - `report-site` 설정에서 finder 디렉터리 `sys.path` 삽입을 제거했다. Django 런타임의 finder import와 `FileStore` 의존성은 없다. 남은 `state.json` 참조는 일회성 `import_state`와 그 테스트뿐이다.
 - 템플릿은 수정하지 않았고 `data-observed-at` 계약도 유지했다. 실제 이관 데이터로 구형·신형 payload 전체 일치, 단지 6·매물 41·급매 1·기준 시각 일치를 확인했다. Django 테스트 39개와 finder 테스트 81개가 통과했다.
 
+#### 7단계에서 완료한 코드
+
+- `properties/card.py`, `notifier.py`, `publish.py`를 Django 모델과 설정 기반으로 이관하고 `delivery.py`에 전송 조정을 모았다.
+- `POST /api/scans/`는 `record_scan()` 트랜잭션이 끝난 뒤 급매·신규가 있으면 동기로 카드를 전송한다. smoke 요청도 전체 카드를 전송하며 급매 알림 이력은 소모하지 않는다.
+- `POST /api/digest/`는 PostgreSQL의 활성 매물 전체를 전송한다. 이전의 `notification_not_available` 501 제한은 제거했다.
+- 카드 렌더링 또는 이미지 전송이 실패하면 알림 대상 중심의 200자 이하 텍스트로 폴백한다. 텍스트까지 실패하면 `NotificationFailure`에 메시지·링크·오류를 기록하고 API는 502를 반환한다.
+- 공개 리포트가 카드와 같은 관측 시각을 서빙할 때만 `전체 매물 보기` 링크를 붙인다. 빈 URL, HTTP, localhost와 loopback 주소는 공개 링크로 인정하지 않는다.
+- `send_digest`, `preview_card`, `check_report` Django 관리 명령을 추가했다. 실제 DB 41개 매물로 `preview_card`가 1080×8168 PNG(616,559바이트)를 만들었고 육안 레이아웃을 확인했다. `check_report`는 DB의 UTC 시각과 공개 리포트의 +09:00 시각이 같은 순간임을 확인해 통과했다.
+- 실제 카카오 메시지는 보내지 않았다. 모든 전송 테스트는 대체 sender로 수행했고 Django 테스트 49개, `manage.py check`, `makemigrations --check`가 통과했다. 테스트 후 `property_report` 역할은 `NOCREATEDB`로 복구했다.
+
 #### 다음에 할 일 (순서대로)
 
-1. 7단계: `card.py`, `notifier.py`, `publish.py`를 Django `properties` 앱으로 옮겨 스캔 API와 digest API의 501 제한을 실제 동기 전송으로 교체한다.
-2. `send_digest`, `preview_card`, `check_report` 관리 명령을 추가하고 이미지 실패 시 텍스트 폴백·텍스트 실패 기록을 검증한다.
+1. 8단계: finder에 `api_client.py`를 추가하고 조건 조회·스캔 업로드·digest 요청을 Django API로 전환한다.
+2. finder에서 판정·상태·카드·카카오 책임을 제거하고 `run-scan.ps1`, `send-report.ps1`을 새 경로에 연결해 회귀 테스트한다.
+3. 9단계: 공통 아키텍처·런북·각 README와 에이전트 안내를 최종 구조에 맞게 갱신한다.
 
 ### PostgreSQL 현재 상태 (2026-09-03 확인)
 
@@ -223,7 +235,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 예전 Codex Sites 주소(`https://my-property-report-20260902.ssong7988.chatgpt.site`)는 더 이상 갱신되지 않는다. 루트 `.env`의 `KAKAO_REPORT_URL`을 지우면 이 오래된 주소로 폴백하므로 비우지 않는다.
 - 휴대전화에서 `127.0.0.1`/`localhost`는 서버 PC를 가리키지 않으며 카카오 웹 도메인으로도 부적합하다(Tailscale Funnel 주소를 써야 하는 이유).
 - 토큰 경로(`REPORT_PATH_TOKEN`)는 우발적 노출만 막는다. 주소가 유출되면 인증 없이 누구나 볼 수 있다.
-- **6단계와 8단계 사이의 임시 간격:** 리포트는 PostgreSQL을 읽지만 기존 `run-scan.bat`은 아직 `state.json`만 갱신한다. 서버를 재시작한 뒤 기존 스캔을 실행해도 DB 리포트는 갱신되지 않는다. 8단계 API 연결 전에는 기존 스캔 결과가 공개 리포트에 반영된다고 가정하지 않는다.
+- **7단계와 8단계 사이의 임시 간격:** 리포트와 카카오 전송은 Django에 있지만 기존 `run-scan.bat`은 아직 finder의 파일 경로를 사용한다. 8단계 API 연결 전에는 기존 스캔 결과가 DB 리포트에 반영된다고 가정하지 않는다.
 - 루트와 예전 UI(`property-report-site/site-app/`)가 중첩 Git 저장소로 남아 있다. 그 디렉터리를 다시 건드릴 일이 생기면 UI 커밋 누락이나 루트 포인터만 변경되는 실수에 유의한다.
 - 마지막 `npm audit` 결과는 취약점 11개(낮음 1, 보통 2, 높음 8)였다(예전 UI 저장소 기준, 더 이상 서빙 경로가 아니므로 우선순위 낮음).
 - 공개 리포트에는 매물 정보가 노출되므로 민감한 개인 데이터나 인증 정보를 포함하지 않아야 한다.

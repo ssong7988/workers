@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from unittest import mock
 
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
@@ -119,22 +120,30 @@ class ApiTests(TestCase):
         self.assertIn("겹칠 수 없습니다", response.json()["error"])
         self.assertEqual(Scan.objects.count(), 0)
 
-    def test_scan_rejects_notification_until_delivery_is_migrated(self) -> None:
+    @mock.patch("api.views.DeliveryService")
+    def test_scan_sends_urgent_after_state_is_committed(self, delivery_class) -> None:
         payload = self.scan_payload()
         payload["notify_urgent"] = True
         response = self.client.post(
             "/api/scans/", payload, content_type="application/json", **self.auth
         )
-        self.assertEqual(response.status_code, 501)
-        self.assertEqual(response.json()["code"], "notification_not_available")
-        self.assertEqual(Scan.objects.count(), 0)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(len(response.json()["alerts"]), 1)
+        decision = delivery_class.return_value.send_scan_alerts.call_args.args[0]
+        self.assertIsNotNone(decision.scan.pk)
+        self.assertEqual(Observation.objects.count(), 1)
+        self.assertEqual(Listing.objects.get().last_urgent_alert_price_won, 2_500_000_000)
 
-    def test_digest_is_explicitly_unavailable_until_delivery_is_migrated(self) -> None:
+    @mock.patch("api.views.DeliveryService")
+    def test_digest_sends_database_report(self, delivery_class) -> None:
+        delivery_class.return_value.send_digest.return_value = (
+            "카카오 전송 완료(카드 이미지): 매물 1건"
+        )
         response = self.client.post(
             "/api/digest/", {}, content_type="application/json", **self.auth
         )
-        self.assertEqual(response.status_code, 501)
-        self.assertEqual(response.json()["code"], "notification_not_available")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("전송 완료", response.json()["notification"])
 
     def test_wrong_method_returns_json_405(self) -> None:
         response = self.client.get("/api/scans/", **self.auth)
