@@ -97,6 +97,8 @@ API 클라이언트는 루트 `.env`를 읽은 다음 `report-site/.env`를 읽�
 
 ## 대표 장애 진단
 
+`run-scan.ps1`·`send-report.ps1`의 전체 콘솔 출력은 `.logs/real-estate-finder/<날짜>.log`에도 남는다(두 스크립트가 같은 폴더를 쓴다). 창을 이미 닫았다면 여기서 다시 본다.
+
 ### `리포트 서버가 응답하지 않습니다`
 
 `report-site/run-site.bat`을 먼저 켠다. 이미 켰다면 다음을 확인한다.

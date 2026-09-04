@@ -15,6 +15,12 @@ Set-Location $Root
 # Share KAKAO_REPORT_URL (the report-site's public URL) with the digest.
 . (Join-Path $Root '..\load-env.ps1')
 
+# Same log folder as run-scan.ps1 (both are real-estate-finder) - if the two
+# happen to run at the same moment, Start-AppLog degrades gracefully instead
+# of failing the send.
+. (Join-Path $Root '..\start-logging.ps1')
+Start-AppLog -App 'real-estate-finder'
+
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 $SiteDir = Join-Path $Root '..\report-site'
 

@@ -35,15 +35,18 @@ report-site                   애플리케이션 (Django + PostgreSQL)
 outputs/
 ├── .agent/
 │   └── PROJECT_STATE.md       # 최신 운영 상태와 주요 결정
-├── .docs/                     # 장기 보존 상세 문서
+├── .docs/                     # 장기 보존 상세 문서 (구성요소별 하위 디렉터리 포함)
 │   ├── ARCHITECTURE.md        # 이 문서: 구조와 코드 탐색 지도
 │   ├── README.md              # 문서 색인
 │   └── RUNBOOK.md             # 사람이 실행하는 운영 절차
+├── .logs/                     # 앱별 날짜 로그 (Git 제외, 30일 보관). RUNBOOK "로그 보기" 참고
 ├── real-estate-finder/        # 수집기 (Python, Playwright/Edge CDP)
 ├── report-site/               # 애플리케이션 (Django + PostgreSQL)
+├── dagster_project/           # 스캔 스케줄 실행기. run 이력은 PostgreSQL의 dagster schema에 저장
 ├── kakao-notifier/            # 독립 실행 가능한 카카오 API 모듈
 ├── .env                        # KAKAO_REPORT_URL (공유, Git 제외)
 ├── load-env.ps1                # 위 .env를 여러 PS 스크립트가 공유하는 헬퍼
+├── start-logging.ps1            # 앱별 .logs/ 기록을 시작하는 헬퍼 (load-env.ps1과 같은 방식으로 dot-source)
 ├── AGENTS.md                   # 모든 코딩 에이전트의 공통 규칙
 └── README.md                   # 사용자용 짧은 소개
 ```

@@ -19,6 +19,7 @@ Thumbs.db
 # Runtime data
 **/logs/
 **/*.log
+.logs/
 real-estate-finder/data/
 real-estate-finder/config/searches.local.yaml
 

@@ -19,6 +19,9 @@ Set-Location $Root
 # Share the repo-root .env (KAKAO_REPORT_URL, and FINDER_API_BASE if set).
 . (Join-Path $Root '..\load-env.ps1')
 
+. (Join-Path $Root '..\start-logging.ps1')
+Start-AppLog -App 'real-estate-finder'
+
 $Port = 9222
 $Endpoint = "http://127.0.0.1:$Port"
 # Modern Edge ignores --remote-debugging-port for the default profile.

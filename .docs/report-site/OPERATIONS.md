@@ -76,6 +76,11 @@ migration이 누락되면 안전하게 멈추고 적용 명령을 안내한다. 
 데이터는 요청마다 DB에서 읽으므로 스캔 후 서버 재시작은 필요 없다. 코드를
 바꿨다면 waitress 프로세스를 재시작해야 한다.
 
+이 콘솔 출력(1~6번 전부, `ensure-site.ps1`이 숨겨서 띄운 경우 포함)은
+`.logs/report-site/<날짜>.log`에도 남는다. Django 500 트레이스백도 여기 찍힌다
+(`report_site/settings.py`의 `LOGGING`). 자세한 캡처 시점은 `.docs/RUNBOOK.md`의
+"로그 보기" 참고.
+
 ## 스케줄러용 `ensure-site.ps1`
 
 `run-site.ps1`은 마지막에 waitress를 계속 실행하므로 스케줄러 단계로 직접
@@ -225,3 +230,4 @@ cd report-site
 | 새 데이터가 화면에 없음 | scope 필터, Listing active, 실행 중 서버가 새 코드인지 |
 | 통계 표본이 리포트보다 많음 | 정상 정책: 가격만 초과한 Observation도 포함 |
 | 통계가 옛 조건 기준 | 필요성 확인 후 `reclassify_observations --dry-run` |
+| 숨겨서 띄운 서버가 응답 없음 | `.logs/report-site/<날짜>.log`에서 시작 실패 이유 확인 |

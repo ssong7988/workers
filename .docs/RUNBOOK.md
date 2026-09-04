@@ -58,6 +58,15 @@ Copy-Item .env.example .env    # FINDER_API_TOKEN, POSTGRES_PASSWORD를 채운�
 
 검색 조건은 이후 Django admin(`.../admin/`, 토큰 사용 시 `.../<TOKEN>/admin/`)에서 고친다. `properties/seed/searches.yaml`은 첫 시드일 뿐이다.
 
+Dagster의 실행 이력도 같은 PostgreSQL DB에 들어가지만 Django 테이블과 섞이지 않도록 전용 schema를 쓴다. `property_report`가 그 DB의 소유자라 별도 권한 없이 한 번만 만들면 된다.
+
+```powershell
+& 'C:\Program Files\PostgreSQL\18\bin\psql.exe' -h 127.0.0.1 -U property_report -d property_report `
+  -c "CREATE SCHEMA IF NOT EXISTS dagster AUTHORIZATION property_report;"
+```
+
+`dagster_project/run-dagster.ps1`이 이 schema를 가리키는 `data/dagster.yaml`을 매번 다시 쓴다(손으로 고쳐도 다음 실행에서 덮어써진다). 비밀번호는 `report-site/.env`의 `POSTGRES_PASSWORD`를 그대로 읽어 쓰므로 따로 설정할 것이 없다.
+
 카카오톡 전송에는 `kakao-notifier/.env`와 `kakao-notifier/data/kakao-token.json`이 필요하다. 아직 없다면 `kakao-notifier/README.md`의 앱 등록과 최초 인증 절차를 먼저 수행한다. 인증·토큰 갱신·장애 대응의 상세 설명은 `kakao-notifier/README.md`에서 연결되는 `.docs/kakao-notifier/` 문서를 본다. 비밀키와 토큰은 Git에 커밋하지 않는다.
 
 ## 자주 쓰는 개별 명령
@@ -182,6 +191,26 @@ cd report-site
 - **일반 신규** — `notify_new`가 켜진 조건에서 처음 보는 매물. 현재 이 설정이 켜진 조건은 광교 4개이며, 과천·판교 단지는 일반 신규만으로는 알리지 않는다
 
 보내지 않은 이유는 항상 `run-scan` 창 마지막에 출력되고 admin의 `Scan.notification`에도 남는다. 조용히 끝나는 것과 실패를 구분할 수 있게 하려고 그렇게 만들었다. 급매가 아니어도 지금 전체를 받고 싶으면 `send-report.bat`을 실행한다.
+
+## 로그 보기
+
+네 진입점 모두 `start-logging.ps1`(저장소 루트)을 통해 그날 콘솔 출력 전체를 `.logs/<앱>/<yyyy-MM-dd>.log`에 남긴다. 창을 닫아도, `ensure-site.ps1`이 서버를 숨겨서 띄웠어도 사라지지 않는다.
+
+```text
+.logs/report-site/        run-site.ps1 (숨겨서 띄운 경우 포함)
+.logs/real-estate-finder/ run-scan.ps1, send-report.ps1 (같은 폴더 공유)
+.logs/dagster_project/    run-dagster.ps1
+```
+
+```powershell
+Get-Content .logs\report-site\2026-09-04.log -Tail 50
+```
+
+**정확히 무엇이 남는지 알아야 한다.** PowerShell 자신이 찍는 줄(`Write-Host`, 배너, `throw` 메시지)은 항상 실시간으로 남는다. 파이썬 같은 네이티브 프로세스의 표준출력·표준에러는 **그 프로세스가 끝나는 시점에** 통째로 기록된다 — 정상 종료든 크래시든 Ctrl+C든 마찬가지다. 즉 waitress나 Dagster가 몇 주째 멀쩡히 떠 있는 동안의 요청 로그를 실시간으로 tail할 수는 없지만, **서버가 기동 직후 죽는 실패**(설정 검사 실패, 마이그레이션 미적용, 포트 충돌 등)는 프로세스가 곧바로 종료되므로 전부 잡힌다 — `ensure-site.ps1`이 숨겨서 띄운 서버가 실패해도 이유가 로그 파일에 남는다.
+
+Django 500 에러도 여기 포함된다. 트레이스백이 `report-site` 로그에 타임스탬프와 함께 찍힌다(`report_site/settings.py`의 `LOGGING`).
+
+파일은 앱이 시작될 때마다 30일이 지난 것을 자동으로 지운다. Git에는 올라가지 않는다(`.gitignore`의 `.logs/`).
 
 ## 외부에서 접속 가능하게 만들기: Tailscale Funnel (최초 1회)
 

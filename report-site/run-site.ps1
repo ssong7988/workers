@@ -20,6 +20,10 @@ Set-Location $Root
 # cards use.
 . (Join-Path $Root '..\load-env.ps1')
 
+# So a hidden/detached start (ensure-site.ps1) still leaves a readable record.
+. (Join-Path $Root '..\start-logging.ps1')
+Start-AppLog -App 'report-site'
+
 $Python = Join-Path $Root '..\real-estate-finder\.venv\Scripts\python.exe'
 if (-not (Test-Path $Python)) {
     throw "Python virtual environment not found: $Python`nComplete the installation steps in real-estate-finder/README.md first."

@@ -119,6 +119,39 @@ ALLOWED_HOSTS = ["127.0.0.1", "localhost", ".ts.net"]
 CSRF_TRUSTED_ORIGINS = ["https://*.ts.net"]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# DEBUG=False mutes Django's default console handler for the `django` logger
+# (see require_debug_true) and routes 5xx to AdminEmailHandler, which is a
+# silent no-op with no email backend configured - so without this, an
+# unhandled view exception leaves no trace anywhere. Send it to stdout
+# instead: every run-*.ps1 already wraps stdout in Start-Transcript
+# (start-logging.ps1), so this lands in .logs/report-site/<date>.log with no
+# separate file handler needed here. A file handler here would collide with
+# manage.py commands (send_digest, scan_status, ...) that load these same
+# settings as short-lived separate processes and would fight over one file.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "timestamped": {
+            "format": "{asctime} {levelname} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "timestamped",
+        },
+    },
+    "loggers": {
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
+}
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
