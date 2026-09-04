@@ -96,6 +96,14 @@ class ScopeTests(TestCase):
         scope = resolve_scope({}, [self.gwanggyo])
         self.assertEqual(scope.region, "")
 
+    def test_default_region_can_be_disabled_to_show_everything(self) -> None:
+        scope = resolve_scope({}, self.conditions, default_region="")
+        self.assertEqual((scope.region, scope.condition_id, scope.label), ("", "", "전체 지역"))
+
+    def test_explicit_region_still_wins_when_default_region_is_disabled(self) -> None:
+        scope = resolve_scope({"region": "광교"}, self.conditions, default_region="")
+        self.assertEqual(scope.region, "광교")
+
 
 class StatsViewTests(TestCase):
     def setUp(self) -> None:

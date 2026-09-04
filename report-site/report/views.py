@@ -49,11 +49,22 @@ def index(request) -> HttpResponse:
     conditions = list(
         SearchCondition.objects.filter(enabled=True).order_by("created_at", "id")
     )
-    listings = list(
-        Listing.objects.filter(active=True, condition__enabled=True).select_related(
-            "condition"
-        )
-    )
+
+    scope = resolve_scope(request.GET, conditions, default_region="")
+    if scope.condition_id:
+        conditions = [c for c in conditions if c.pk == scope.condition_id]
+    elif scope.region:
+        conditions = [c for c in conditions if c.region == scope.region]
+
+    listings_qs = Listing.objects.filter(
+        active=True, condition__enabled=True
+    ).select_related("condition")
+    if scope.condition_id:
+        listings_qs = listings_qs.filter(condition_id=scope.condition_id)
+    elif scope.region:
+        listings_qs = listings_qs.filter(condition__region=scope.region)
+    listings = list(listings_qs)
+
     observed_moment = max(
         (listing.observed_at for listing in listings),
         default=None,
@@ -81,6 +92,19 @@ def index(request) -> HttpResponse:
         if listing["urgent"]
     ]
 
+    all_conditions = list(
+        SearchCondition.objects.filter(enabled=True).order_by("region", "name")
+    )
+    regions = [
+        region for region in dict.fromkeys(c.region for c in all_conditions) if region
+    ]
+    grouped = [
+        (region, [c for c in all_conditions if c.region == region]) for region in regions
+    ]
+    unassigned = [c for c in all_conditions if not c.region]
+    if unassigned:
+        grouped.append(("지역 미지정", unassigned))
+
     response = render(
         request,
         "report/index.html",
@@ -90,6 +114,10 @@ def index(request) -> HttpResponse:
             "complexes": complexes,
             "total": total,
             "urgent": urgent,
+            "scope": scope,
+            "selected_region": scope.region or "all",
+            "regions": regions,
+            "grouped_conditions": grouped,
         },
     )
     response["Cache-Control"] = "no-store"

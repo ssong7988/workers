@@ -102,7 +102,7 @@
     <div class="field-row">
       <div class="field">
         <label for="region">지역</label>
-        <select id="region" name="region">
+        <select id="region" name="region" onchange="document.getElementById('condition').value=''; this.form.submit();">
           <option value="all"{% if selected_region == "all" %} selected{% endif %}>전체 지역</option>
           {% for region in regions %}
           <option value="{{ region }}"{% if selected_region == region %} selected{% endif %}>{{ region }}</option>
@@ -111,7 +111,7 @@
       </div>
       <div class="field">
         <label for="condition">단지 (선택하면 지역보다 우선)</label>
-        <select id="condition" name="condition">
+        <select id="condition" name="condition" onchange="this.form.submit();">
           <option value="">지역 전체</option>
           {% for region, items in grouped_conditions %}
           <optgroup label="{{ region }}">

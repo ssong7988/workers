@@ -119,3 +119,49 @@ class ReportViewTests(TestCase):
         self.condition.save(update_fields=("enabled",))
         response = self.client.get(self.url)
         self.assertEqual(response.context["total"], 0)
+
+    def _create_gwanggyo_condition(self) -> SearchCondition:
+        return SearchCondition.objects.create(
+            id="cond-b",
+            name="다른단지",
+            complex_names=["다른단지"],
+            region="광교",
+            exclusive_area_m2=Decimal("84"),
+            max_price_won=2_600_000_000,
+            urgent_price_won=2_500_000_000,
+        )
+
+    def test_no_query_params_still_shows_every_region(self) -> None:
+        other = self._create_gwanggyo_condition()
+        self.listing("1", 2_400_000_000)
+        self.listing("2", 2_400_000_000, condition=other, complex_name="광교 다른단지")
+
+        response = self.client.get(self.url)
+        self.assertEqual(response.context["total"], 2)
+
+    def test_region_filter_narrows_to_matching_condition(self) -> None:
+        other = self._create_gwanggyo_condition()
+        self.listing("1", 2_400_000_000)
+        self.listing("2", 2_400_000_000, condition=other, complex_name="광교 다른단지")
+
+        response = self.client.get(self.url + "?region=광교")
+        self.assertEqual(response.context["total"], 1)
+        self.assertContains(response, "다른단지")
+
+    def test_condition_filter_narrows_to_one_complex(self) -> None:
+        other = self._create_gwanggyo_condition()
+        self.listing("1", 2_400_000_000)
+        self.listing("2", 2_400_000_000, condition=other, complex_name="광교 다른단지")
+
+        response = self.client.get(self.url + "?condition=cond-b")
+        self.assertEqual(response.context["total"], 1)
+        self.assertEqual(len(response.context["complexes"]), 1)
+
+    def test_urgent_section_respects_region_filter(self) -> None:
+        other = self._create_gwanggyo_condition()
+        self.listing("1", 2_550_000_000)
+        self.listing("2", 2_550_000_000, condition=other, complex_name="광교 다른단지")
+
+        response = self.client.get(self.url + "?region=광교")
+        self.assertEqual(len(response.context["urgent"]), 1)
+        self.assertEqual(response.context["urgent"][0]["complex"], "광교 다른단지")

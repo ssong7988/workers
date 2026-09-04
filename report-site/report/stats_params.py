@@ -80,11 +80,14 @@ def resolve_range(params, today: date) -> DateRange:
     return DateRange(start=month_before(today), end=today, month="", notice="")
 
 
-def resolve_scope(params, conditions: list[SearchCondition]) -> Scope:
-    """Pick the complex or region to chart, defaulting to Gwacheon.
+def resolve_scope(
+    params, conditions: list[SearchCondition], *, default_region: str = DEFAULT_REGION
+) -> Scope:
+    """Pick the complex or region to chart, defaulting to `default_region`.
 
     A chosen complex also decides the region shown in the first select, so the
-    two controls can never contradict each other.
+    two controls can never contradict each other. Pass `default_region=""` to
+    mean "show everything" instead of falling back to a single region.
     """
     by_id = {condition.pk: condition for condition in conditions}
     condition_id = params.get("condition", "").strip()
@@ -100,8 +103,8 @@ def resolve_scope(params, conditions: list[SearchCondition]) -> Scope:
         return Scope(region="", condition_id="", label="전체 지역")
     if requested in regions:
         return Scope(region=requested, condition_id="", label=f"{requested} 전체")
-    if not requested and DEFAULT_REGION in regions:
+    if not requested and default_region and default_region in regions:
         return Scope(
-            region=DEFAULT_REGION, condition_id="", label=f"{DEFAULT_REGION} 전체"
+            region=default_region, condition_id="", label=f"{default_region} 전체"
         )
     return Scope(region="", condition_id="", label="전체 지역")
