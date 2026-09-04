@@ -3,8 +3,8 @@
 이 디렉터리는 Dagster를 처음 보는 사람이 현재 스케줄러가 무엇을 실행하고,
 어떻게 웹 화면에 연결되며, 어디를 고쳐야 하는지 이해하기 위한 문서다.
 
-- [`CONSOLE.md`](CONSOLE.md): `/dagster/` 요약 화면과
-  `/dagster/console/` 네이티브 UI가 연결되는 원리
+- [`CONSOLE.md`](CONSOLE.md): `/common/dagster/` 요약 화면과
+  `/common/dagster/console/` 네이티브 UI가 연결되는 원리
 - [`OPERATIONS.md`](OPERATIONS.md): 스케줄, 수동 실행 설정, 재시도,
   시작·점검·장애 확인
 
@@ -107,7 +107,7 @@ asset인 것이 아니다.
   Dagster webserver (127.0.0.1:3000)
        ^                         ^
        | GraphQL                 | Tailscale Funnel
-  Django 요약 화면              | /dagster/console
+  Django 공통 요약 화면          | /common/dagster/console
   (127.0.0.1:8000)              | 외부 브라우저
 ```
 
@@ -126,7 +126,7 @@ Dagster는 수집·판정·전송 로직을 새로 구현하지 않는다. 이�
 | `report-site/ensure-site.ps1` | Django API를 확인하고 죽어 있으면 서버를 숨김 창으로 기동 |
 | `report-site/properties/management/commands/scan_status.py` | PostgreSQL에서 지정 시각 이후 성공한 수집이 있는지 종료 코드로 응답 |
 | `report-site/report/dagster_client.py` | Django가 Dagster GraphQL에서 최근 run을 읽는 읽기 전용 클라이언트 |
-| `report-site/report/views.py` | 로그인 보호된 `/dagster/` 요약 화면 렌더링 |
+| `report-site/report/views.py` | 로그인 보호된 `/common/dagster/` 요약 화면 렌더링 |
 | `report-site/report_site/settings.py` | Django·Dagster가 공유할 URL prefix와 GraphQL 주소 계산 |
 
 ## 하나의 DB, 두 schema
@@ -164,8 +164,8 @@ dagster_project\run-dagster.bat
 
 1. `dagster_project/data`를 `DAGSTER_HOME`으로 지정한다. (compute log와 `dagster.yaml`만 여기 남는다 — run/schedule 이력은 아래 4번의 PostgreSQL에 있다)
 2. `report-site/.env`에서 선택값 `REPORT_PATH_TOKEN`을 읽는다.
-3. `DAGSTER_WEBSERVER_PATH_PREFIX`를 `/dagster/console` 또는
-   `/<TOKEN>/dagster/console`로 설정한다.
+3. `DAGSTER_WEBSERVER_PATH_PREFIX`를 `/common/dagster/console` 또는
+   `/<TOKEN>/common/dagster/console`로 설정한다.
 4. `report-site/.env`의 `POSTGRES_PASSWORD`를 읽어 `run/event-log/schedule storage`가 `property_report`의 `dagster` schema를 가리키는 `data/dagster.yaml`을 **매번 다시 쓴다.** 손으로 고쳐도 다음 실행에서 덮어써진다 — 바꾸고 싶으면 이 스크립트의 템플릿을 고친다.
 5. `127.0.0.1:3000`에서 `dagster dev`를 실행한다. 이 명령이 개발용
    webserver와 schedule daemon을 함께 띄운다.

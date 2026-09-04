@@ -72,10 +72,10 @@ if ($Token.Contains('/') -or $Token.Contains('\')) {
 
 Write-Host ""
 $RoutePrefix = if ([string]::IsNullOrWhiteSpace($Token)) { '' } else { "$Token/" }
-Write-Host "Local report:  http://127.0.0.1:8000/${RoutePrefix}report/" -ForegroundColor Green
-Write-Host "Local stats:   http://127.0.0.1:8000/${RoutePrefix}statistics/" -ForegroundColor Green
-Write-Host "Local Dagster: http://127.0.0.1:8000/${RoutePrefix}dagster/" -ForegroundColor Green
-Write-Host "Local admin:   http://127.0.0.1:8000/${RoutePrefix}admin/" -ForegroundColor Green
+Write-Host "Local report:  http://127.0.0.1:8000/${RoutePrefix}property/report/" -ForegroundColor Green
+Write-Host "Local stats:   http://127.0.0.1:8000/${RoutePrefix}property/statistics/" -ForegroundColor Green
+Write-Host "Local Dagster: http://127.0.0.1:8000/${RoutePrefix}common/dagster/" -ForegroundColor Green
+Write-Host "Local admin:   http://127.0.0.1:8000/${RoutePrefix}property/admin/" -ForegroundColor Green
 if ($env:KAKAO_REPORT_URL) {
     Write-Host "Public report: $env:KAKAO_REPORT_URL" -ForegroundColor Green
 } else {

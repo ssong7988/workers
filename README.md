@@ -15,13 +15,13 @@ outputs/
 
 역할이 둘로 갈려 있습니다. `real-estate-finder`는 **수집만** 합니다. 어떤 매물이 조건에 맞는지, 급매인지, 신규인지, 카카오톡을 보낼지, 화면에 어떻게 보일지는 전부 `report-site`(Django + PostgreSQL)가 결정합니다.
 
-화면은 셋입니다. **매물 리포트**(`/report/`)는 지금 조건에 맞는 매물을, **가격 통계**(`/statistics/`)는 그동안 수집한 원본으로 만든 날짜별 호가 분포를, **Dagster 운영 요약**(`/dagster/`)은 스캔 스케줄 실행 현황을 보여줍니다.
+화면은 셋입니다. **매물 리포트**(`/property/report/`)는 지금 조건에 맞는 매물을, **가격 통계**(`/property/statistics/`)는 그동안 수집한 원본으로 만든 날짜별 호가 분포를, **공통 Dagster 운영 요약**(`/common/dagster/`)은 스캔 스케줄 실행 현황을 보여줍니다.
 
 각 앱의 설치 및 실행 방법은 해당 폴더의 README에서 관리합니다.
 
 ## 운영 실행
 
-정기 실행과 수동 job 실행은 Dagster UI(`/dagster/console/`)가 기본입니다.
+정기 실행과 수동 job 실행은 공통 Dagster UI(`/common/dagster/console/`)가 기본입니다.
 `scan_job`은 매물 수집, `morning_report_job`은 최신 수집 확인 후 전체 리포트
 전송을 수행합니다. 서버 코드 재시작도 `restart_report_site_job`으로 실행합니다.
 

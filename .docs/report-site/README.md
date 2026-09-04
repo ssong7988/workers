@@ -112,12 +112,12 @@ DB 커밋이 먼저여야 공개 리포트가 방금 수집한 시각을 보여 
 | 경로 | 처리자 | 접근 |
 |---|---|---|
 | `/api/health/`, `/api/conditions/`, `/api/scans/`, `/api/digest/` | Django API | Bearer 토큰 |
-| `/report/` | Django | 공개 |
-| `/statistics/` | Django | 공개 |
-| `/airflow/` | Django | staff 로그인, 현재 전환 계획 보류 상태의 요약 |
-| `/dagster/` | Django | staff 로그인 |
-| `/dagster/console/` | Dagster 직접 프록시 | 현재 Django 인증 없음 |
-| `/admin/` | Django admin | staff 로그인 |
+| `/property/report/` | Django | 공개 |
+| `/property/statistics/` | Django | 공개 |
+| `/property/airflow/` | Django | staff 로그인, 현재 전환 계획 보류 상태의 요약 |
+| `/common/dagster/` | Django | staff 로그인 |
+| `/common/dagster/console/` | Dagster 직접 프록시 | 현재 Django 인증 없음 |
+| `/property/admin/` | Django admin | staff 로그인 |
 
 토큰을 채우면 비-API 경로에만 `/<TOKEN>`이 붙는다. `/api/`는 URL이 바뀌지
 않고 계속 Bearer 토큰으로 보호된다. 실제 토큰은 문서나 Git에 남기지 않는다.

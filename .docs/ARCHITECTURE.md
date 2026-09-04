@@ -143,7 +143,7 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 | 파일/경로 | 책임 |
 |---|---|
 | `report_site/settings.py` | PostgreSQL, admin 배선, whitenoise, 필수 API 토큰과 선택 경로 토큰, 루트 `.env`까지 로드 |
-| `report_site/urls.py` | `/report/` 리포트, `/statistics/` 가격 통계, `/dagster/` 운영 요약, `/admin/` admin. `REPORT_PATH_TOKEN`을 채우면 모두 `/<TOKEN>/` 아래로 이동. `api/` 수집기 API는 별도 |
+| `report_site/urls.py` | `/property/report/` 리포트, `/property/statistics/` 가격 통계, `/property/admin/` admin, `/common/dagster/` 공통 운영 요약. `REPORT_PATH_TOKEN`을 채우면 namespace 앞에 `/<TOKEN>/`이 붙는다. `api/` 수집기 API는 별도 |
 | `run-site.ps1`, `run-site.bat` | `check` → `migrate --check` → `collectstatic` → waitress `127.0.0.1:8000` |
 
 ### properties — 도메인 (b/e)

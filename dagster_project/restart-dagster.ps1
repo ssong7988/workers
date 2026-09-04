@@ -34,9 +34,9 @@ if ([string]::IsNullOrWhiteSpace($ReportPathToken)) {
 }
 $ReportPathToken = ([string]$ReportPathToken).Trim().Trim('/')
 $DagsterPathPrefix = if ([string]::IsNullOrWhiteSpace($ReportPathToken)) {
-    '/dagster/console'
+    '/common/dagster/console'
 } else {
-    "/$ReportPathToken/dagster/console"
+    "/$ReportPathToken/common/dagster/console"
 }
 $GraphqlUrl = "http://127.0.0.1:3000$DagsterPathPrefix/graphql"
 

@@ -28,7 +28,7 @@
 | `DAGSTER_GRAPHQL_URL` | 선택 | 기본 로컬 3000의 현재 prefix GraphQL |
 | `DAGSTER_TIMEOUT_SECONDS` | 선택 | 기본 5초 |
 
-루트 `.env`의 `KAKAO_REPORT_URL`은 공개 리포트의 완성된 `/report/` URL이다.
+루트 `.env`의 `KAKAO_REPORT_URL`은 공개 리포트의 완성된 `/property/report/` URL이다.
 두 `.env`는 Git에서 제외된다. `settings.py`는 site `.env`를 먼저, 루트 `.env`를
 다음에 읽되 이미 존재하는 프로세스 환경변수는 덮어쓰지 않는다.
 
@@ -97,8 +97,8 @@ migration이 누락되면 안전하게 멈추고 적용 명령을 안내한다. 
 
 ## Django admin
 
-기본 주소는 `http://127.0.0.1:8000/admin/`이며 선택 토큰을 쓰면
-`/<TOKEN>/admin/`으로 이동한다. `run-site`가 현재 완성 주소를 출력한다.
+기본 주소는 `http://127.0.0.1:8000/property/admin/`이며 선택 토큰을 쓰면
+`/<TOKEN>/property/admin/`으로 이동한다. `run-site`가 현재 완성 주소를 출력한다.
 
 | 화면 | 운영 용도 |
 |---|---|
@@ -139,7 +139,7 @@ Funnel 사용 시 admin 로그인 화면도 공개 호스트에 노출되므로 
 
 ### 매물 리포트
 
-기본 `/report/`. 활성 매물을 전체로 보여 주며 지역 또는 개별 단지로 좁힐 수
+기본 `/property/report/`. 활성 매물을 전체로 보여 주며 지역 또는 개별 단지로 좁힐 수
 있다. 기본 범위는 전체다. 급매 섹션과 조건별 매물을 같은 DB 조회에서 만든다.
 
 응답은 `Cache-Control: no-store`다. 최신성 검사의 기준인
@@ -147,7 +147,7 @@ Funnel 사용 시 admin 로그인 화면도 공개 호스트에 노출되므로 
 
 ### 가격 통계
 
-기본 `/statistics/`. 기간은 `month=YYYY-MM` 또는 `from`, `to`를 사용하고,
+기본 `/property/statistics/`. 기간은 `month=YYYY-MM` 또는 `from`, `to`를 사용하고,
 월이 우선한다. 아무 값이 없으면 최근 1개월이다. 잘못된 문자열은 500을 내지
 않고 기본값으로 돌아가며 화면에 이유를 표시한다.
 
@@ -157,9 +157,9 @@ inline SVG이고 JavaScript 의존성이 없다.
 
 ### Dagster 요약
 
-기본 `/dagster/`. staff 로그인이 필요하고 로컬 Dagster GraphQL을 읽어 최근
+기본 `/common/dagster/`. staff 로그인이 필요하고 로컬 Dagster GraphQL을 읽어 최근
 run을 요약한다. Dagster가 꺼져도 500 대신 연결 실패 상태를 보여 준다. 실제
-네이티브 UI `/dagster/console/`은 Funnel이 3000 포트로 직접 보내므로 Django
+네이티브 UI `/common/dagster/console/`은 Funnel이 3000 포트로 직접 보내므로 Django
 로그인 보호를 받지 않는다. 자세한 내용은 `../dagster_project/CONSOLE.md`를 본다.
 
 ## 선택 경로 토큰 변경

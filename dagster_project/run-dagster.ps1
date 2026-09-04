@@ -5,7 +5,7 @@
 # .agent/PROJECT_STATE.md, "Active Work: Dagster로 스케줄 구동".
 #
 # Binds to 127.0.0.1 only. Tailscale Funnel exposes it through the report
-# site's HTTPS origin below the same optional token as the Django pages;
+# site's HTTPS origin below the common namespace and the same optional token;
 # the prefix must therefore be present in Dagster's generated asset and
 # GraphQL URLs as well as in Funnel routing.
 #
@@ -40,7 +40,8 @@ if (-not (Test-Path $DataDir)) {
 $env:DAGSTER_HOME = $DataDir
 
 # Reuse Django's optional path token instead of duplicating configuration.
-# Empty means /dagster/console; a value means /<TOKEN>/dagster/console.
+# Empty means /common/dagster/console; a value means
+# /<TOKEN>/common/dagster/console.
 $ReportPathToken = $env:REPORT_PATH_TOKEN
 if ([string]::IsNullOrWhiteSpace($ReportPathToken)) {
     $ReportEnv = Join-Path $Root '..\report-site\.env'
@@ -58,9 +59,9 @@ if ($ReportPathToken.Contains('/') -or $ReportPathToken.Contains('\')) {
     throw 'REPORT_PATH_TOKEN cannot contain path separators.'
 }
 $DagsterPathPrefix = if ([string]::IsNullOrWhiteSpace($ReportPathToken)) {
-    '/dagster/console'
+    '/common/dagster/console'
 } else {
-    "/$ReportPathToken/dagster/console"
+    "/$ReportPathToken/common/dagster/console"
 }
 $env:DAGSTER_WEBSERVER_PATH_PREFIX = $DagsterPathPrefix
 

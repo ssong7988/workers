@@ -8,9 +8,8 @@ posts what it scraped to the API here.
 
 Configuration comes from `report-site/.env` and is never committed:
 
-* `REPORT_PATH_TOKEN` - optional leading path segment. Empty keeps the explicit
-  top-level routes (`/report/`, `/statistics/`, `/dagster/`); a value prepends
-  `/<TOKEN>` to every non-API route.
+* `REPORT_PATH_TOKEN` - optional leading path segment. Empty uses the explicit
+  namespaces `/property/` and `/common/`; a value prepends `/<TOKEN>` to both.
 * `FINDER_API_TOKEN` - the bearer token `real-estate-finder` sends. The site is
   published to the internet through Tailscale Funnel, so `/api/` is reachable
   from outside and must not be open.
@@ -58,9 +57,11 @@ REPORT_PATH_TOKEN = os.environ.get("REPORT_PATH_TOKEN", "").strip().strip("/")
 if "/" in REPORT_PATH_TOKEN or "\\" in REPORT_PATH_TOKEN:
     raise RuntimeError("REPORT_PATH_TOKEN에는 경로 구분자를 사용할 수 없습니다.")
 ROUTE_PREFIX = f"{REPORT_PATH_TOKEN}/" if REPORT_PATH_TOKEN else ""
-REPORT_URL_PATH = f"/{ROUTE_PREFIX}report"
-STATISTICS_URL_PATH = f"/{ROUTE_PREFIX}statistics"
-DAGSTER_SUMMARY_PATH = f"/{ROUTE_PREFIX}dagster"
+PROPERTY_ROUTE_PREFIX = f"{ROUTE_PREFIX}property/"
+COMMON_ROUTE_PREFIX = f"{ROUTE_PREFIX}common/"
+REPORT_URL_PATH = f"/{PROPERTY_ROUTE_PREFIX}report"
+STATISTICS_URL_PATH = f"/{PROPERTY_ROUTE_PREFIX}statistics"
+DAGSTER_SUMMARY_PATH = f"/{COMMON_ROUTE_PREFIX}dagster"
 DAGSTER_PATH_PREFIX = f"{DAGSTER_SUMMARY_PATH}/console"
 # The scanner authenticates with `Authorization: Bearer <FINDER_API_TOKEN>`.
 FINDER_API_TOKEN = _required("FINDER_API_TOKEN", "<추측 불가 문자열>")
@@ -69,7 +70,7 @@ FINDER_API_TOKEN = _required("FINDER_API_TOKEN", "<추측 불가 문자열>")
 # misconfigured setup fails visibly rather than sending a broken link; the
 # card's live check refuses to attach a loopback URL anyway.
 REPORT_PUBLIC_URL = os.environ.get("KAKAO_REPORT_URL", "").strip()
-# The statistics screen is a sibling of `/report/`, not a child of it. Reuse
+# The statistics screen is a sibling of `/property/report/`, not a child of it. Reuse
 # the configured public origin and replace only the path so host changes stay
 # in one environment variable.
 if REPORT_PUBLIC_URL:

@@ -221,7 +221,7 @@ def dagster(request) -> HttpResponse:
     Read-only, and it never 500s on Dagster's account: when the scheduler is
     down the point of this page is to say so, which a stack trace does not.
     Dagster drives the schedule for now; Airflow's equivalent screen at
-    r[/<TOKEN>]/airflow/ stays in place but parked (see PROJECT_STATE.md).
+    r[/<TOKEN>]/property/airflow/ stays in place but parked (see PROJECT_STATE.md).
     """
     status = fetch_dagster_status()
     timezone_name = _timezone_name()

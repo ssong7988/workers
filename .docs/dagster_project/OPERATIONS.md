@@ -93,7 +93,7 @@ finder venv의 Python으로 `manage.py send_digest`를 직접 실행해 PostgreS
 
 ### 방법 1 — Catalog에서 asset을 직접 머티리얼라이즈 (권장)
 
-1. `/dagster/console/`에서 `Catalog`를 연다(의존 그래프를 보려면 `Lineage`).
+1. `/common/dagster/console/`에서 `Catalog`를 연다(의존 그래프를 보려면 `Lineage`).
 2. 실행할 asset을 고르고 `Materialize`를 누른다. 상류까지 함께 돌리려면
    상류를 포함해 선택한다.
 
@@ -105,7 +105,7 @@ true`로 표현하던 조합이다. 이 방식은 데이터가 최신인지 검�
 
 ### 방법 2 — Launchpad에서 job 실행
 
-1. `/dagster/console/`을 연다.
+1. `/common/dagster/console/`을 연다.
 2. `Jobs`에서 목적에 맞는 job을 선택한다.
 3. `Launchpad`를 열고 `Launch Run`을 누른다.
 
@@ -200,8 +200,8 @@ with connection.cursor() as c:
 
 | 증상 | 우선 확인할 것 |
 |---|---|
-| `/dagster/console/`이 열리지 않음 | `run-dagster.bat`, 3000 포트, Funnel status, prefix 세 값 일치 |
-| `/dagster/`에 연결 실패 표시 | `DAGSTER_GRAPHQL_URL`, Dagster 프로세스, `/dagster/console/graphql` |
+| `/common/dagster/console/`이 열리지 않음 | `run-dagster.bat`, 3000 포트, Funnel status, prefix 세 값 일치 |
+| `/common/dagster/`에 연결 실패 표시 | `DAGSTER_GRAPHQL_URL`, Dagster 프로세스, `/common/dagster/console/graphql` |
 | 스케줄이 자동 실행되지 않음 | `run-dagster.bat` 창이 계속 떠 있는지, schedule이 RUNNING인지 |
 | `ensure_site_op` 실패 | report-site 로그, `check-api`, `FINDER_API_TOKEN`, PostgreSQL 서비스 |
 | scan이 로그인 만료로 실패 | Edge를 로그인된 상태로 열고 최소화하지 않았는지 |

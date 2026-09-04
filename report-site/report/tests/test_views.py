@@ -2,10 +2,27 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.conf import settings
-from django.test import Client, TestCase
+from django.test import Client, SimpleTestCase, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from properties.models import GlobalRule, Listing, Scan, SearchCondition
+
+
+class RouteNamespaceTests(SimpleTestCase):
+    databases = set()
+
+    def test_property_routes_share_the_property_namespace(self) -> None:
+        self.assertEqual(reverse("report-index"), "/property/report/")
+        self.assertEqual(reverse("report-stats"), "/property/statistics/")
+        self.assertEqual(reverse("admin:index"), "/property/admin/")
+        self.assertEqual(reverse("report-airflow"), "/property/airflow/")
+
+    def test_dagster_uses_the_common_namespace(self) -> None:
+        self.assertEqual(reverse("report-dagster"), "/common/dagster/")
+        self.assertEqual(
+            settings.DAGSTER_PATH_PREFIX, "/common/dagster/console"
+        )
 
 
 class ReportViewTests(TestCase):
@@ -79,7 +96,7 @@ class ReportViewTests(TestCase):
         self.assertEqual(response["Cache-Control"], "no-store")
 
     def test_wrong_token_is_404(self) -> None:
-        response = self.client.get("/not-the-real-token/report/")
+        response = self.client.get("/not-the-real-token/property/report/")
         self.assertEqual(response.status_code, 404)
 
     def test_root_path_is_404(self) -> None:

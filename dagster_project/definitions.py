@@ -320,7 +320,7 @@ def restart_report_site_job() -> None:
     """report-site 코드를 바꾼 뒤 수동으로 실행하는 재시작 전용 job.
 
     init 목적의 단발성 작업이라 스케줄에는 올리지 않는다 - Dagster UI
-    (`/dagster/console/`)에서 필요할 때 Launch Run으로 실행한다.
+    (`/common/dagster/console/`)에서 필요할 때 Launch Run으로 실행한다.
     """
     restart_report_site()
 

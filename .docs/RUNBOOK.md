@@ -2,7 +2,7 @@
 
 ## 기본 운영 경로
 
-정기 작업과 즉시 실행은 Dagster UI(`/dagster/console/`)를 사용한다. PC 시작 후
+정기 작업과 즉시 실행은 Dagster UI(`/common/dagster/console/`)를 사용한다. PC 시작 후
 `report-site\run-site.bat`과 `dagster_project\run-dagster.bat`을 켜 두고,
 즉시 수집은 `scan_job`, 최신 수집 확인 후 전체 발송은 `morning_report_job`을
 Launch Run 한다. report-site 코드 변경 뒤에는 `restart_report_site_job`을 쓴다.
@@ -68,7 +68,7 @@ Copy-Item .env.example .env    # FINDER_API_TOKEN, POSTGRES_PASSWORD를 채운�
 ..\real-estate-finder\.venv\Scripts\python.exe manage.py import_searches
 ```
 
-검색 조건은 이후 Django admin(`.../admin/`, 토큰 사용 시 `.../<TOKEN>/admin/`)에서 고친다. `properties/seed/searches.yaml`은 첫 시드일 뿐이다.
+검색 조건은 이후 Django admin(`.../property/admin/`, 토큰 사용 시 `.../<TOKEN>/property/admin/`)에서 고친다. `properties/seed/searches.yaml`은 첫 시드일 뿐이다.
 
 Dagster의 실행 이력도 같은 PostgreSQL DB에 들어가지만 Django 테이블과 섞이지 않도록 전용 schema를 쓴다. `property_report`가 그 DB의 소유자라 별도 권한 없이 한 번만 만들면 된다.
 
@@ -125,7 +125,7 @@ cd ..\report-site
 
 ## 웹 리포트 서버 실행
 
-`report-site/`(Django)가 PostgreSQL을 요청마다 읽어 렌더링한다. 빌드나 배포 단계가 없다 — 매물을 새로 조회하면 서버를 새로고침하는 것만으로 리포트가 갱신된다. 다만 코드를 바꿨다면 이 서버를 재시작해야 한다. 기존 프로세스를 직접 찾아 끄고 `run-site.bat`을 다시 켜도 되고, Dagster UI(`/dagster/console/`)에서 `restart_report_site_job`을 Launch Run 해도 된다 — 8000번 포트를 쓰는 프로세스를 종료하고 `run-site.ps1`을 새로 띄운다. 스케줄에는 없으니 코드를 바꿀 때마다 수동으로 실행한다.
+`report-site/`(Django)가 PostgreSQL을 요청마다 읽어 렌더링한다. 빌드나 배포 단계가 없다 — 매물을 새로 조회하면 서버를 새로고침하는 것만으로 리포트가 갱신된다. 다만 코드를 바꿨다면 이 서버를 재시작해야 한다. 기존 프로세스를 직접 찾아 끄고 `run-site.bat`을 다시 켜도 되고, Dagster UI(`/common/dagster/console/`)에서 `restart_report_site_job`을 Launch Run 해도 된다 — 8000번 포트를 쓰는 프로세스를 종료하고 `run-site.ps1`을 새로 띄운다. 스케줄에는 없으니 코드를 바꿀 때마다 수동으로 실행한다.
 
 최초 한 번, `report-site/.env`가 없다면 만든다.
 
@@ -144,7 +144,7 @@ cd report-site
 .\run-site.ps1
 ```
 
-더블클릭하려면 `run-site.bat`을 쓴다. 실행하면 콘솔에 로컬 주소를 함께 출력한다. 기본 경로는 매물 리포트 `/report/`, 가격 통계 `/statistics/`, Dagster 요약 `/dagster/`, admin `/admin/`이다. `REPORT_PATH_TOKEN`을 채우면 네 경로 앞에 모두 `/<TOKEN>`이 붙는다. 이 로컬 주소는 같은 PC에서만 열린다 — 카카오톡의 공개 링크로는 쓸 수 없다(아래 Tailscale Funnel 절차 필요).
+더블클릭하려면 `run-site.bat`을 쓴다. 실행하면 콘솔에 로컬 주소를 함께 출력한다. 부동산 경로는 `/property/report/`, `/property/statistics/`, `/property/admin/`이고 공통 운영 요약은 `/common/dagster/`다. `REPORT_PATH_TOKEN`을 채우면 두 namespace 앞에 `/<TOKEN>`이 붙는다. 이 로컬 주소는 같은 PC에서만 열린다 — 카카오톡의 공개 링크로는 쓸 수 없다(아래 Tailscale Funnel 절차 필요).
 
 Ctrl+C로 멈춘다. **이 서버가 꺼져 있으면 스캔도 되지 않는다.** 데이터베이스와 판정이 여기 있어서 `run-scan.bat`이 수집 결과를 넘길 곳이 없기 때문이다. 예전에는 스캔이 파일에 저장하고 끝나서 서버 없이도 돌았지만 지금은 그렇지 않다.
 
@@ -153,10 +153,10 @@ Ctrl+C로 멈춘다. **이 서버가 꺼져 있으면 스캔도 되지 않는다
 검색 조건을 고치거나 "이 매물이 왜 빠졌는지"를 확인하는 곳이다.
 
 ```text
-http://127.0.0.1:8000/admin/
+http://127.0.0.1:8000/property/admin/
 ```
 
-`REPORT_PATH_TOKEN`을 나중에 채우면 주소는 `/<TOKEN>/admin/`으로 바뀐다. `run-site` 창의 `Local admin:` 줄에 항상 현재 완성 주소가 출력된다. 계정은 최초 설정에서 만든 슈퍼유저이며, 비밀번호를 잊었다면 재설정한다.
+`REPORT_PATH_TOKEN`을 나중에 채우면 주소는 `/<TOKEN>/property/admin/`으로 바뀐다. `run-site` 창의 `Local admin:` 줄에 항상 현재 완성 주소가 출력된다. 계정은 최초 설정에서 만든 슈퍼유저이며, 비밀번호를 잊었다면 재설정한다.
 
 ```powershell
 cd report-site
@@ -172,11 +172,11 @@ cd report-site
 | Listing | 현재 매물 상태. `active` 필터, `first_seen_at`, `last_urgent_alert_price_won` |
 | Scan | 실행 이력과 카카오 미전송 사유 |
 
-admin은 Tailscale Funnel 공개 주소로도 열린다(현재 `/admin/`). 로그인 화면이 인터넷에 노출돼 있으므로 비밀번호는 강하게 둔다.
+admin은 Tailscale Funnel 공개 주소로도 열린다(현재 `/property/admin/`). 로그인 화면이 인터넷에 노출돼 있으므로 비밀번호는 강하게 둔다.
 
 ## 가격 통계 보기
 
-주소는 명시적인 `/statistics/`다. 리포트 헤더의 `가격 통계` 링크가 같은 곳으로 간다. 토큰을 채우면 `/<TOKEN>/statistics/`가 된다.
+주소는 명시적인 `/property/statistics/`다. 리포트 헤더의 `가격 통계` 링크가 같은 곳으로 간다. 토큰을 채우면 `/<TOKEN>/property/statistics/`가 된다.
 
 기간은 두 방법 중 하나로 고른다. **월**을 고르면 그 달 전체를 보고, **시작일/종료일**을 채우면 그 구간을 본다. 월이 우선한다. 아무것도 고르지 않으면 **최근 1개월**이다. 범위는 지역(전체/과천/광교/판교) 또는 개별 단지로 좁히며, 기본값은 과천 전체다. 단지를 고르면 지역 선택보다 우선한다.
 
@@ -240,17 +240,17 @@ Django 500 에러도 여기 포함된다. 트레이스백이 `report-site` 로�
 
    `https://<이 PC 이름>.<tailnet 이름>.ts.net` 형태의 주소가 출력된다. 이 주소는 PC를 재부팅해도 바뀌지 않는다. 상태 확인은 `tailscale funnel status`.
 
-   `/dagster/`는 Django가 제공하는 간결한 운영 요약이다. Dagster가 직접 제공하는
-   전체 UI는 의미가 분명한 `/dagster/console/`에 연결한다. `run-dagster.bat`은
+   `/common/dagster/`는 Django가 제공하는 간결한 공통 운영 요약이다. Dagster가 직접 제공하는
+   전체 UI는 `/common/dagster/console/`에 연결한다. `run-dagster.bat`은
    `report-site/.env`에서 선택 토큰을 읽으므로, 토큰을 채우면
-   `/<TOKEN>/dagster/console/`로 함께 바뀐다. Dagster를 실행한 뒤 Funnel을 설정한다.
+   `/<TOKEN>/common/dagster/console/`로 함께 바뀐다. Dagster를 실행한 뒤 Funnel을 설정한다.
 
    ```powershell
-   tailscale funnel --https=443 --set-path=/dagster/console --bg http://127.0.0.1:3000/dagster/console
+   tailscale funnel --https=443 --set-path=/common/dagster/console --bg http://127.0.0.1:3000/common/dagster/console
    ```
 
-   이후 요약은 `https://<이 PC 이름>.<tailnet 이름>.ts.net/dagster/`, 전체 UI는
-   `https://<이 PC 이름>.<tailnet 이름>.ts.net/dagster/console/runs`에서
+   이후 요약은 `https://<이 PC 이름>.<tailnet 이름>.ts.net/common/dagster/`, 전체 UI는
+   `https://<이 PC 이름>.<tailnet 이름>.ts.net/common/dagster/console/runs`에서
    실행 내역을 볼 수 있다. 예전에 8443 포트 전체를 Dagster에 연결했다면 다음으로
    그 설정을 제거한다.
 
@@ -262,7 +262,7 @@ Django 500 에러도 여기 포함된다. 트레이스백이 `report-site` 로�
 5. 루트 `.env`(`.env.example`을 복사해 만든다)에 다음을 채운다.
 
    ```text
-   KAKAO_REPORT_URL=https://<이 PC 이름>.<tailnet 이름>.ts.net/report/
+   KAKAO_REPORT_URL=https://<이 PC 이름>.<tailnet 이름>.ts.net/property/report/
    ```
 
    `run-scan.ps1`, `send-report.ps1`, `report-site/run-site.ps1`이 `load-env.ps1`을 통해 이 값을 공유한다.
@@ -272,7 +272,7 @@ Django 500 에러도 여기 포함된다. 트레이스백이 `report-site` 로�
 - Tailscale Funnel은 공개 443/8443/10000 포트만 지원한다. `--bg 8000`은 공개 443의 `/`를 로컬 8000으로, Dagster console mount는 같은 443의 해당 경로를 로컬 3000으로 프록시한다. 대상 URL에도 같은 prefix를 쓴다.
 - **`run-site.bat`이 실행 중이고 PC가 절전에 들어가지 않아야** 공개 주소가 응답한다. 자동 시작은 일부러 등록하지 않았으므로, 리포트를 외부에서 열어야 할 때 직접 켠다. 서버가 꺼져 있으면 카카오 메시지는 두 버튼을 조용히 빼고 텍스트만 보내므로 깨진 링크가 나가지는 않는다.
 - 나중에 상시 공개로 바꾸고 싶으면 Windows 작업 스케줄러에 "로그온할 때" 트리거로 `report-site/run-site.ps1`을 등록하면 된다. Tailscale 서비스(`tailscaled`)는 별도 등록 없이 자동으로 뜨고, `funnel --bg` 설정도 재부팅 후 알아서 복구된다.
-- 지금처럼 `REPORT_PATH_TOKEN`을 비우면 `/report/`, `/statistics/`, `/dagster/`를 쓴다. 나중에 값을 채우면 모든 비-API 경로 앞에 `/<TOKEN>`이 붙는다. 우발적 노출은 줄지만 토큰 주소가 유출되면 인증 없이 리포트를 볼 수 있다는 한계는 같다. 변경할 때는 `KAKAO_REPORT_URL`과 Funnel의 Dagster mount도 함께 바꾸고 두 서버를 재시작한다.
+- 지금처럼 `REPORT_PATH_TOKEN`을 비우면 부동산은 `/property/`, 공통 운영은 `/common/` namespace를 쓴다. 나중에 값을 채우면 두 namespace 앞에 `/<TOKEN>`이 붙는다. 우발적 노출은 줄지만 토큰 주소가 유출되면 인증 없이 리포트를 볼 수 있다는 한계는 같다. 변경할 때는 `KAKAO_REPORT_URL`과 Funnel의 Dagster mount도 함께 바꾸고 두 서버를 재시작한다.
 
 ## 리포트가 최신인지 확인하기
 
@@ -287,4 +287,4 @@ cd report-site
 
 - `run-site.bat`이 꺼져 있거나 PC가 절전/종료 상태면 공개 리포트 주소가 응답하지 않는다. 이 구조의 본질적 제약이다.
 - 루트 `.env`의 `KAKAO_REPORT_URL`을 비우면 카카오 메시지가 이전에 쓰던 Codex Sites 주소로 폴백한다. 그 주소는 더 이상 갱신되지 않으므로 비우지 않는다.
-- Django admin은 같은 공개 호스트의 `/admin/`에 있다. 로그인 화면이 인터넷에 열려 있는 셈이므로 관리자 비밀번호는 강해야 한다.
+- Django admin은 같은 공개 호스트의 `/property/admin/`에 있다. 로그인 화면이 인터넷에 열려 있는 셈이므로 관리자 비밀번호는 강해야 한다.

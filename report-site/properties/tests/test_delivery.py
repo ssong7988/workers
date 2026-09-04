@@ -19,8 +19,8 @@ from properties.scanning import AlertDecision, ScanDecision
 
 
 @override_settings(
-    REPORT_PUBLIC_URL="https://example.com/token/report/",
-    REPORT_STATS_URL="https://example.com/token/statistics/",
+    REPORT_PUBLIC_URL="https://example.com/token/property/report/",
+    REPORT_STATS_URL="https://example.com/token/property/statistics/",
 )
 class DeliveryTests(TestCase):
     def setUp(self) -> None:
@@ -74,8 +74,8 @@ class DeliveryTests(TestCase):
         self.assertEqual(
             buttons,
             [
-                ("통계 보기", "https://example.com/token/statistics/"),
-                ("전체 매물 보기", "https://example.com/token/report/"),
+                ("통계 보기", "https://example.com/token/property/statistics/"),
+                ("전체 매물 보기", "https://example.com/token/property/report/"),
             ],
         )
         self.assertIn("급매1", message)
@@ -144,7 +144,9 @@ class DeliveryTests(TestCase):
             )
         failure = NotificationFailure.objects.get()
         self.assertIn("send", failure.error)
-        self.assertEqual(failure.link_url, "https://example.com/token/report/")
+        self.assertEqual(
+            failure.link_url, "https://example.com/token/property/report/"
+        )
 
     @mock.patch("properties.delivery.is_live", return_value=True)
     def test_digest_sends_the_active_listings(self, _live) -> None:
