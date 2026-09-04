@@ -59,10 +59,10 @@ foreach ($processId in $processIds) {
     $proc = Get-Process -Id $processId -ErrorAction SilentlyContinue
     if ($null -eq $proc) { continue }
     if ($proc.ProcessName -notmatch '^python') {
-        Write-Host "3000번 포트를 쓰는 프로세스($($proc.ProcessName), PID $processId)가 python이 아니라 건너뜁니다. 직접 확인하세요." -ForegroundColor Yellow
+        Write-Host "Process on port 3000 ($($proc.ProcessName), PID $processId) is not python - skipping. Check it manually." -ForegroundColor Yellow
         continue
     }
-    Write-Host "기존 Dagster(PID $processId)를 종료합니다..." -ForegroundColor Yellow
+    Write-Host "Stopping existing Dagster (PID $processId)..." -ForegroundColor Yellow
     Stop-Process -Id $processId -Force
 }
 
@@ -74,7 +74,7 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep -Milliseconds 500
 }
 
-Write-Host "run-dagster.ps1을 새로 띄웁니다..." -ForegroundColor Cyan
+Write-Host "Starting run-dagster.ps1..." -ForegroundColor Cyan
 # run-dagster.bat, not run-dagster.ps1, is what a person double-clicks, and
 # .bat ends in `pause >nul` - started unattended that would leave a hidden
 # process waiting forever for a keypress nobody will send. Launch
@@ -88,10 +88,10 @@ $deadline = (Get-Date).AddSeconds(60)
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 3
     if (Test-Dagster) {
-        Write-Host "Dagster가 새 코드로 다시 떴습니다." -ForegroundColor Green
+        Write-Host "Dagster is back up with the new code." -ForegroundColor Green
         exit 0
     }
 }
 
-Write-Host "60초 안에 Dagster가 다시 뜨지 않았습니다." -ForegroundColor Red
+Write-Host "Dagster did not come back within 60 seconds." -ForegroundColor Red
 exit 1
