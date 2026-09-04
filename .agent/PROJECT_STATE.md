@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (**앱별 날짜 로그(`.logs/`)를 추가하고 Dagster 저장소를 SQLite에서 PostgreSQL의 `dagster` schema로 옮겼다.** 그 전에는 상세 문서를 `.docs/`로 분리하고 `kakao-notifier` 문서를 추가했으며, 사용하지 않는 예전 `property-report-site/` UI를 제거했다. 공개 경로는 `/report/`, `/statistics/`, `/dagster/`이고 네이티브 Dagster UI는 `/dagster/console/`이다.)
+마지막 갱신: 2026-09-04 (**개발 브랜치를 `kakao-image-card`에서 `dev`로 옮기고, 저장소 루트 `VERSION` 파일(`devX.Y.Z`, `dev` 푸시마다 마지막 숫자 +1, 현재 `dev1.1.1`)로 버전을 관리하기 시작했다. report-site 재시작을 손으로 하지 않도록 Dagster에 `restart_report_site_job`을 추가했다(스케줄 없음, 코드를 바꾼 뒤 Dagster UI에서 수동 트리거).** 그 전에는 앱별 날짜 로그(`.logs/`)를 추가하고 Dagster 저장소를 SQLite에서 PostgreSQL의 `dagster` schema로 옮겼다. 공개 경로는 `/report/`, `/statistics/`, `/dagster/`이고 네이티브 Dagster UI는 `/dagster/console/`이다.)
 
 ## Current Architecture
 
@@ -97,12 +97,13 @@ Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Djan
 
 `dagster_project/definitions.py` 하나에 전부 있다.
 
-등록 잡은 `property_pipeline_job` 하나이며 그래프는 항상 `ensure_site → scan_step → report_step` 순서다. 세 스케줄은 같은 잡에 모드만 다르게 넣는다.
+등록 잡은 두 개다. `property_pipeline_job`은 그래프가 항상 `ensure_site → scan_step → report_step` 순서이고 세 스케줄이 같은 잡에 모드만 다르게 넣는다. `restart_report_site_job`(2026-09-04 추가)은 `restart_report_site` 단일 op만 실행하는 스케줄 없는 잡으로, report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
 
 1. `server_only_schedule` — 7·8·12·17시를 제외한 매시 정각. 서버 확인만 하고 뒤 두 단계는 명시적으로 생략한다.
 2. `scan_schedule` — `0 7,12,17 * * *`. 서버 확인 후 실제 스캔, 리포트는 생략한다. 신규 급매 또는 `notify_new` 일반 신규의 카카오는 `record_scan()`이 처리한다.
 3. `morning_report_schedule` — `0 8 * * *`. 서버 확인 후 DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다.
-4. `alert_on_failure` — 통합 잡에 한 번만 걸려 있고 재시도(`RetryPolicy(max_retries=1, delay=300)`)를 다 쓴 뒤 `manage.py send_alert`를 부른다.
+4. `alert_on_failure` — 두 잡 모두에 걸려 있고 재시도(`RetryPolicy(max_retries=1, delay=300)`)를 다 쓴 뒤 `manage.py send_alert`를 부른다.
+5. `restart_report_site_job` — `report-site/restart-site.ps1`을 실행한다. 8000번 포트를 듣는 `python` 프로세스를 찾아 종료(다른 이름의 프로세스면 건너뛰고 경고만 남긴다)하고, 포트가 풀릴 때까지 최대 20초 기다린 뒤 `run-site.ps1`을 hidden으로 새로 띄우고 `check-api`로 최대 60초 재확인한다. `real-estate-finder`는 스캔·리포트 전송이 매번 새 subprocess로 돌기 때문에 이런 재시작 잡이 필요 없다.
 
 ### Dagster 웹 UI — 요약 `/dagster/`, 네이티브 `/dagster/console/`
 

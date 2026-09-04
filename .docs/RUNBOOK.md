@@ -111,7 +111,7 @@ cd ..\report-site
 
 ## 웹 리포트 서버 실행
 
-`report-site/`(Django)가 PostgreSQL을 요청마다 읽어 렌더링한다. 빌드나 배포 단계가 없다 — 매물을 새로 조회하면 서버를 새로고침하는 것만으로 리포트가 갱신된다. 다만 코드를 바꿨다면 이 서버를 재시작해야 한다.
+`report-site/`(Django)가 PostgreSQL을 요청마다 읽어 렌더링한다. 빌드나 배포 단계가 없다 — 매물을 새로 조회하면 서버를 새로고침하는 것만으로 리포트가 갱신된다. 다만 코드를 바꿨다면 이 서버를 재시작해야 한다. 기존 프로세스를 직접 찾아 끄고 `run-site.bat`을 다시 켜도 되고, Dagster UI(`/dagster/console/`)에서 `restart_report_site_job`을 Launch Run 해도 된다 — 8000번 포트를 쓰는 프로세스를 종료하고 `run-site.ps1`을 새로 띄운다. 스케줄에는 없으니 코드를 바꿀 때마다 수동으로 실행한다.
 
 최초 한 번, `report-site/.env`가 없다면 만든다.
 

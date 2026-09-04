@@ -121,6 +121,18 @@ def report_step(context) -> None:
     _run_powershell(REAL_ESTATE_FINDER / "send-report.ps1", timeout=180)
 
 
+@dg.op(retry_policy=RETRY_POLICY)
+def restart_report_site() -> None:
+    """report-site 프로세스를 종료하고 새로 띄운다.
+
+    report-site(Django, f/e·b/e 구분 없이 waitress 한 프로세스) 코드를
+    바꾼 뒤 수동으로 실행하는 용도다. real-estate-finder는 스캔·리포트
+    전송이 매번 새 subprocess로 도니 재시작이 필요 없다(파일 맨 위 설명
+    참고).
+    """
+    _run_powershell(REPORT_SITE / "restart-site.ps1", timeout=150)
+
+
 @dg.failure_hook
 def alert_on_failure(context: dg.HookContext) -> None:
     """실패를 요약해 카카오톡으로 보낸다. 재시도를 다 쓴 뒤에만 호출된다.
@@ -142,6 +154,16 @@ def alert_on_failure(context: dg.HookContext) -> None:
 def property_pipeline_job() -> None:
     """서버 확인 → 필요 시 수집 → 필요 시 리포트의 단일 실행 그래프."""
     report_step(start=scan_step(start=ensure_site()))
+
+
+@dg.job(hooks={alert_on_failure})
+def restart_report_site_job() -> None:
+    """report-site 코드를 바꾼 뒤 수동으로 실행하는 재시작 전용 job.
+
+    init 목적의 단발성 작업이라 스케줄에는 올리지 않는다 - Dagster UI
+    (`/dagster/console/`)에서 필요할 때 Launch Run으로 실행한다.
+    """
+    restart_report_site()
 
 
 server_only_schedule = dg.ScheduleDefinition(
@@ -186,6 +208,6 @@ morning_report_schedule = dg.ScheduleDefinition(
 )
 
 defs = dg.Definitions(
-    jobs=[property_pipeline_job],
+    jobs=[property_pipeline_job, restart_report_site_job],
     schedules=[server_only_schedule, scan_schedule, morning_report_schedule],
 )
