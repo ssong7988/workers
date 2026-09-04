@@ -1,13 +1,13 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (**Dagster 웹 UI를 별도 `:8443` 대신 공개 리포트와 같은 HTTPS 호스트의 `/url/dagster/` 경로로 프록시하도록 전환**. Dagster로 스케줄 구동 전환은 WSL 없이 이 PC에서 네이티브로 실제 설치·실행·검증까지 완료. Airflow/WSL 계획은 VT-x 블로커로 계속 보류, 매물 리포트에서 면적 표시를 지우고 타입 표시로 교체, 통계·리포트 화면에 지역/단지 필터 추가, 매물에 동(building) 필드 추가, 스캔 진단 로그 추가, 백그라운드 Edge 탭 로그인 오탐 완화)
+마지막 갱신: 2026-09-04 (**공개 경로를 `/report/`, `/statistics/`, `/dagster/`로 명시하고, 네이티브 Dagster UI는 `/dagster/console/`로 분리**. `REPORT_PATH_TOKEN`을 채우면 나중에 모든 비-API 경로 앞에 `/<TOKEN>`이 붙는다. Dagster는 `property_pipeline_job` 하나이며 급매 카카오는 신규 급매에만 보낸다.)
 
 ## Current Architecture
 
 - 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.agent/docs/ARCHITECTURE.md`에 정리되어 있다.
 - `real-estate-finder/`는 네이버 부동산 매물을 수집해 `report-site` API로 넘기기만 한다. 조건 판정·상태·표현·전송 코드는 없다.
 - `report-site/properties/`가 카카오 메시지 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. finder 쪽 중복 코드는 8단계에서 삭제했다.
-- `report-site/`(Django + waitress)가 PostgreSQL을 요청마다 읽어 화면 둘을 렌더링한다. `r/<TOKEN>/`은 활성 `Listing`으로 매물 리포트를, `r/<TOKEN>/stats/`는 `Observation` 이력으로 날짜별 호가 분포를 그린다. 빌드나 배포 단계는 없다.
+- `report-site/`(Django + waitress)가 PostgreSQL을 요청마다 읽어 화면을 렌더링한다. `/report/`는 활성 `Listing`으로 매물 리포트를, `/statistics/`는 `Observation` 이력으로 날짜별 호가 분포를, `/dagster/`는 운영 요약을 그린다. `REPORT_PATH_TOKEN`을 채우면 모두 `/<TOKEN>/` 아래로 이동한다. 빌드나 배포 단계는 없다.
 - `property-report-site/site-app/`(예전 Next.js/Codex Sites UI)은 서빙 경로에서 은퇴했다. 루트와 별도 중첩 Git 저장소이며 삭제하지 않고 참고용으로만 남겼다.
 - 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
 - 급매가 아닌 전체 결과를 카카오톡으로 보내는 진입점은 `real-estate-finder/send-report.bat`이며 `report-site`의 `manage.py send_digest`를 실행한다. 브라우저·로그인·웹 서버가 필요 없고 DB만 있으면 된다.
@@ -16,8 +16,8 @@
 - 검색 설정은 PostgreSQL의 `SearchCondition`이며 Django admin에서 고친다. `report-site/properties/seed/searches.yaml`은 초기 시드일 뿐이다.
 - `record_scan()`의 트랜잭션이 알림 전송보다 먼저 커밋된다. 그래야 `is_live()`로 확인하는 시점에 이미 이번 조회 결과가 서빙되고 있다.
 - `is_live()`(`report-site/properties/publish.py`)는 리포트 서버(그리고 Tailscale Funnel)가 살아있고 이번 조회를 서빙 중인지만 확인한다.
-- 외부 공개는 Tailscale Funnel로 `report-site/`의 8000번 포트를 노출해 고정 HTTPS 주소(`https://<pc>.<tailnet>.ts.net`)를 얻는 방식이다. 접근 제어는 추측 불가능한 경로 토큰(`REPORT_PATH_TOKEN`)이다.
-- `KAKAO_REPORT_URL`은 루트 `.env`(`load-env.ps1`이 `run-scan.ps1`/`send-report.ps1`/`report-site/run-site.ps1`에 공유)로 관리하고, `REPORT_PATH_TOKEN`은 `report-site/.env`로 관리한다. 둘 다 Git에서 제외한다.
+- 외부 공개는 Tailscale Funnel로 `report-site/`의 8000번 포트를 노출해 고정 HTTPS 주소(`https://<pc>.<tailnet>.ts.net`)를 얻는 방식이다. 현재 경로 토큰은 비워 두었다.
+- `KAKAO_REPORT_URL`은 루트 `.env`에, 선택 경로 토큰 `REPORT_PATH_TOKEN`은 `report-site/.env`에 둔다. 토큰을 비우면 명시적인 최상위 경로를 쓰고, 채우면 모든 비-API 경로 앞에 `/<TOKEN>`이 붙는다. 둘 다 Git에서 제외한다.
 
 위 구조는 2026-09-03에 끝난 역할 분리 이관의 결과다. 그 배경과 단계별 이력은 아래 "Completed Migration" 절에 있다.
 
@@ -25,10 +25,10 @@
 
 - 검색 조건은 과천 6개·광교 4개·판교 4개, 총 14개가 활성 상태다. 새 8개 조건은 DB까지 반영됐지만 아직 첫 실제 스캔 전이라 새 단지의 `Observation`·`Listing`은 없다.
 - **Tailscale Funnel 전환은 완료됐고 종단 확인까지 끝났다.** 공개 리포트는 Funnel 주소로 서빙되며, 실제 카카오톡 카드에 `전체 매물 보기` 버튼이 새 주소로 포함되는 것까지 확인했다.
-- 공개 리포트 호스트: `https://desktop-477.tailf8d9d1.ts.net` (Tailscale Funnel → 로컬 `127.0.0.1:8000` 프록시). 전체 경로는 `REPORT_PATH_TOKEN`을 포함하므로 문서에 적지 않는다 — 루트 `.env`의 `KAKAO_REPORT_URL`에 있다.
+- 공개 리포트: `https://desktop-477.tailf8d9d1.ts.net/report/` (Tailscale Funnel → 로컬 `127.0.0.1:8000` 프록시). 가격 통계는 `/statistics/`, Dagster 요약은 `/dagster/`, 네이티브 UI는 `/dagster/console/`다.
 - Tailscale 설치·로그인·Funnel 활성화 완료(`tailscale funnel --bg 8000`). `tailscaled`는 Windows 서비스라 재부팅 후 Funnel 설정이 자동 복구된다.
 - 카카오 개발자 콘솔의 `앱 > 제품 링크 관리 > 웹 도메인`에 위 호스트를 등록 완료. (`플랫폼 키` 메뉴가 아니다 — `kakao-notifier/README.md:31` 참고.)
-- `report-site/.env`의 `REPORT_PATH_TOKEN`과 루트 `.env`의 `KAKAO_REPORT_URL` 모두 실제 값으로 채워져 있다(Git 제외).
+- `report-site/.env`의 `REPORT_PATH_TOKEN`은 현재 빈 값이고, 루트 `.env`의 `KAKAO_REPORT_URL`은 `/report/` 주소를 쓴다(둘 다 Git 제외).
 - `check-report`로 공개 주소가 `data/state.json`의 기준 시각(`2026-09-03T08:38:55+09:00`, 활성 매물 41건)과 일치함을 확인했다.
 - `send-report.ps1`로 실제 카카오톡 카드 1통(매물 41건)을 전송해 `전체 매물 보기` 버튼 동작까지 사용자가 휴대폰에서 확인했다.
 - 리포트 화면은 관심 단지 6개, 확인 매물 41건, 급매 1건을 정확히 렌더링한다.
@@ -44,11 +44,11 @@
 - **새 구조로 실제 네이버 수집을 1회 완주했다(2026-09-03 14:35~14:40 KST, 약 5분).** 6개 조건 전부 성공, 실패 0. 수집 120건 · 조건충족 42건 · 제외 78건(대부분 `가격 초과`)이 모두 DB에 기록됐다. `Scan` 27→28, `Observation` 1,304→1,424, `Listing` 62→74, 활성 41→42.
 - **급매 알림 중복 방지가 실제로 동작했다.** 활성 급매 1건이 있었지만 `import_state`가 옮겨 온 `last_urgent_alert_price_won` 때문에 재전송되지 않았다. 이관에서 가장 잃기 쉬웠던 이력이 실제로 보존됐음을 확인한 셈이다.
 - 이번 스캔은 카카오톡을 보내지 않았고 그 사유가 `Scan.notification`에 남았다 — "급매 1건은 이미 같은 가격 이하로 알림을 보냈습니다 / 신규 12건은 notify_new가 꺼진 조건이라 알리지 않습니다". 의도된 정책이며 조용한 종료가 아니다.
-- Django admin 접속 경로(`.../r/<REPORT_PATH_TOKEN>/admin/`)와 `admin` 슈퍼유저 로그인을 확인했다. `Observation`의 `exclusion_code` 필터로 제외 사유를 구분해 조회할 수 있다.
+- Django admin은 현재 `.../admin/`이며 `admin` 슈퍼유저 로그인을 확인했다. 토큰을 켜면 `.../<TOKEN>/admin/`으로 이동한다. `Observation`의 `exclusion_code` 필터로 제외 사유를 구분해 조회할 수 있다.
 
 ### 가격 통계 기능 (2026-09-03 추가)
 
-- `r/<TOKEN>/stats/`가 날짜별 호가 분포를 캔들(최저~최고 심지와 위아래 가로 끝선, 1분위~3분위 상자, 평균 가로선)로 보여준다. 서버가 좌표까지 계산하는 inline SVG이며 JS 의존성이 없다.
+- 현재 `/statistics/`가 날짜별 호가 분포를 캔들(최저~최고 심지와 위아래 가로 끝선, 1분위~3분위 상자, 평균 가로선)로 보여준다. 토큰을 켜면 `/<TOKEN>/statistics/`로 바뀐다. 서버가 좌표까지 계산하는 inline SVG이며 JS 의존성이 없다.
 - 기간은 월 선택 또는 시작일/종료일이고 기본값은 최근 1개월, 범위는 전체/지역/단지이고 기본값은 과천 전체다. 잘못된 질의 문자열은 예외 대신 기본값으로 되돌리고 화면에 사유를 적는다.
 - **모집단은 리포트보다 넓다.** `exclusion_code in ("", "price")` — 면적·타입은 통과했고 가격 상한에서만 잘린 매물까지 포함한다. 상한가에서 자르면 최고가와 3분위가 시세가 아니라 사용자의 예산을 나타내게 되기 때문이다.
 - **하루에 스캔이 여러 번 도므로 `(조건, 매물, 로컬 날짜)`당 마지막 관측 하나만 센다.** 이것을 빠뜨리면 자주 조회된 매물이 분위수를 지배한다.
@@ -74,11 +74,11 @@ Airflow 작업 때는 WSL이 없어 전부 문서 조사만으로 코드를 짰�
 - `definitions.py`를 실제로 `python -c "import definitions"`로 로드해 잡·스케줄 구성에 오류가 없음을 확인했다.
 - `dagster dev -f definitions.py --host 127.0.0.1 --port 3000`을 실제로 띄워 **gRPC 크래시 없이** 정상 기동함을 확인했다(검색 당시 Windows에서 `cygrpc` 관련 크래시 리포트가 있었던 부분이라 특히 이걸 확인해야 했다).
 - `runsOrError` GraphQL 쿼리를 curl로 실제 호출해 응답 형태를 확인했다. **`status` 필드는 대문자(`"SUCCESS"`, `"FAILURE"`)이고 `startTime`/`endTime`은 ISO 문자열이 아니라 float epoch seconds다** — 둘 다 추측이 아니라 실측이다.
-- `dagster job execute -f definitions.py -j site_watchdog_job`으로 **`site_watchdog_job`을 실제로 한 번 실행**했다(안전한 잡이다 — 리포트 서버가 이미 떠 있어서 `ensure-site.ps1`이 그냥 "이미 실행 중입니다"를 출력하고 끝난다). `RUN_SUCCESS`, `ensure_site` 옵의 `Nothing` 의존성 배선, `HOOK_SKIPPED`(실패가 아니므로 훅이 건너뜀)까지 로그로 확인했다.
+- 과거 `site_watchdog_job` 수동 실행 검증에 더해, 통합 후에는 `property_pipeline_job`의 네 가지 모드(서버만, 서버→스캔, 최신 스캔 있음→리포트, 최신 스캔 없음→재스캔→리포트)를 외부 호출 스텁으로 `execute_in_process()` 실행해 순서와 성공을 확인했다. 실제 스캔·카카오 전송은 이 검증에서 호출하지 않았다.
 - **`alert_on_failure` 훅이 실제로 실패 시 발동하는지**는 별도 스텁 스크립트로 검증했다 — `_run_manage`를 가짜 함수로 바꿔치기하고 일부러 실패하는 옵을 하나 만들어 `execute_in_process()`로 돌린 뒤, 훅이 정확히 `"doomed_job/doomed_op 실패: boom - deliberate test failure"` 형태로 `send_alert`를 호출했음을 어서션으로 확인했다. **실제 카카오 메시지는 보내지 않았다** — `_run_manage`를 스텁으로 바꿨기 때문에 진짜 `manage.py send_alert`가 호출되지 않았다.
 - `run-dagster.ps1`도 실제로 실행해 `data/dagster.yaml`이 생성되고(telemetry 끔) 서버가 뜨는 것까지 확인했다.
 - `report/dagster_client.py`의 `fetch_status()`를 report-site venv에서 **실제 Django 설정과 실제로 뜬 Dagster 웹서버**를 상대로 호출해 `reachable=True`가 나오는 것까지 확인했다(모킹이 아니라 진짜 HTTP 왕복).
-- **실행하지 않은 것(의도적으로):** `scan_job`과 `morning_digest_job`은 네이버 스캔·카카오 전송이라는 실제 부작용이 있어 smoke test로 돌리지 않았다. 이 두 잡의 옵 자체(`run-scan.ps1`/`send-report.ps1` 호출)는 이미 각 스크립트가 독립적으로 검증돼 있으므로(run-scan.ps1은 실제 스캔 종단 확인 완료 — 위 "종단 확인 결과" 절 참고) 여기선 Dagster 쪽 배선만 구조적으로 확인했다.
+- **실행하지 않은 것(의도적으로):** 통합 잡에서 실제 `run-scan.ps1`과 `send-report.ps1`을 연달아 호출하는 종단 실행은 네이버 스캔·카카오 전송이라는 부작용이 있어 하지 않았다. 두 스크립트 자체는 독립적으로 검증돼 있고, 이번에는 Dagster 배선을 스텁으로 검증했다.
 - 스모크 테스트에 쓴 프로세스는 전부 PID로 찾아 종료했고, `.dagster_home`/로그 파일도 지웠다. 커밋에는 소스 파일 4개(`definitions.py`, `requirements.txt`, `run-dagster.ps1`, `run-dagster.bat`)만 들어간다 — `.venv`와 `data/`는 `.gitignore`에 있다.
 
 ### 아키텍처 — Airflow 버전과의 결정적 차이
@@ -90,29 +90,32 @@ Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Djan
 
 이 단순함이 Dagster를 고른 실질적인 이유다 — WSL이 없어도 된다는 것뿐 아니라, 있었어도 코드가 훨씬 단순했을 것이다.
 
-### 요청 4가지 매핑 (Airflow 설계와 동일한 대응, 구현만 다름)
+### 통합 잡과 시간대별 실행
 
 `dagster_project/definitions.py` 하나에 전부 있다.
 
-1. `site_watchdog_job` — `0 * * * *`, `ensure_site` 옵 하나. `ensure-site.ps1` 호출.
-2. `scan_job` — `0 7,12,17 * * *`, `ensure_site` → `run_scan`(`Nothing` 타입으로 순서만 강제, 데이터는 안 넘긴다). 급매 카톡은 Airflow 설계 때와 같은 이유로 Dagster가 할 일이 없다 — `record_scan()`이 트랜잭션 안에서 알아서 보낸다.
-3. `morning_digest_job` — `0 8 * * *`, `ensure_fresh_scan`(`manage.py scan_status --since=07:00`이 실패하면 그 자리에서 `run-scan.ps1` 재실행) → `send_digest`.
-4. `alert_on_failure` — `@dg.failure_hook`, 세 잡 모두에 `hooks={alert_on_failure}`로 걸려 있다. 재시도(`RetryPolicy(max_retries=1, delay=300)`)를 다 쓴 뒤에만 발동해 `manage.py send_alert`를 부른다.
+등록 잡은 `property_pipeline_job` 하나이며 그래프는 항상 `ensure_site → scan_step → report_step` 순서다. 세 스케줄은 같은 잡에 모드만 다르게 넣는다.
 
-### Django에서 Dagster 보기 — `r/<TOKEN>/dagster/`
+1. `server_only_schedule` — 7·8·12·17시를 제외한 매시 정각. 서버 확인만 하고 뒤 두 단계는 명시적으로 생략한다.
+2. `scan_schedule` — `0 7,12,17 * * *`. 서버 확인 후 실제 스캔, 리포트는 생략한다. 신규 급매 또는 `notify_new` 일반 신규의 카카오는 `record_scan()`이 처리한다.
+3. `morning_report_schedule` — `0 8 * * *`. 서버 확인 후 DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다.
+4. `alert_on_failure` — 통합 잡에 한 번만 걸려 있고 재시도(`RetryPolicy(max_retries=1, delay=300)`)를 다 쓴 뒤 `manage.py send_alert`를 부른다.
 
-Airflow 화면(`r/<TOKEN>/airflow/`)과 나란히 새로 추가했다. **Airflow 화면은 지우지 않고 그대로 뒀다** — `AIRFLOW_API_URL`이 비어 있으면 여전히 "설정되지 않았습니다"를 보여줄 뿐 죽지 않는다.
+### Dagster 웹 UI — 요약 `/dagster/`, 네이티브 `/dagster/console/`
 
-- `report/dagster_client.py` — `runsOrError` GraphQL 쿼리 하나만 쓴다(위에서 실측 확인). **작업/스케줄 목록은 GraphQL로 조회하지 않는다** — Dagster 공식 문서가 스케줄 관련 스키마를 "여전히 변하는 중이고 주로 웹서버 내부용"이라고 명시하고 있어, 그 부분만큼은 `airflow_client.py`의 DAG 목록처럼 실시간 조회를 시도하는 대신 `definitions.py`와 손으로 맞추는 짧은 정적 목록(`JOBS` 상수)으로 대체했다 — 얕은 확신으로 깨지기 쉬운 쿼리를 짜느니 정직하게 정적 목록을 쓰는 쪽을 택했다.
-- `report/views.py`의 `dagster()` 뷰, `report_site/urls.py`의 라우팅, `report_site/settings.py`의 `DAGSTER_GRAPHQL_URL`/`DAGSTER_TIMEOUT_SECONDS`(둘 다 기본값이 있어 `.env` 설정 없이도 동작 — `run-dagster.ps1`이 항상 `127.0.0.1:3000`에 뜨기 때문). `@staff_member_required`로 admin 로그인을 추가로 요구하는 것도 Airflow 화면과 동일.
-- 화면 아래의 실제 Dagster 웹 UI 링크는 `/url/dagster/runs`다. `run-dagster.ps1`이 Dagster에 같은 path prefix를 설정하고, Tailscale Funnel이 공개 443의 그 경로를 로컬 `127.0.0.1:3000/url/dagster`로 전달한다. Tailscale 1.102.3이 mount prefix를 제거하므로 프록시 대상에도 prefix를 붙여야 한다. 로컬 UI·GraphQL과 공개 UI를 실제 HTTP 200으로 확인했고 기존 `:8443` Funnel은 제거했다.
-- 새 테스트 15개(`test_dagster_client.py` 6개, `test_dagster_view.py` 5개, 기존 `test_airflow_view.py`는 import 리네임에 맞춰 패치 대상만 수정) 전부 통과. 전체 Django 테스트 122개 중 121개 통과 — 나머지 1개는 이 작업 전부터 있던 무관한 실패(`test_urgent_section_respects_region_filter`). `manage.py check`, `makemigrations --check --dry-run` 통과.
+Airflow 화면(현재 `/airflow/`, 토큰 사용 시 `/<TOKEN>/airflow/`)과 나란히 유지한다. **Airflow 화면은 지우지 않았다** — `AIRFLOW_API_URL`이 비어 있으면 여전히 "설정되지 않았습니다"를 보여줄 뿐 죽지 않는다.
+
+- `report/dagster_client.py` — `runsOrError` GraphQL 쿼리 하나만 쓴다(위에서 실측 확인). **작업/스케줄 목록은 GraphQL로 조회하지 않는다** — 깨지기 쉬운 내부 쿼리 대신 `definitions.py`와 손으로 맞추는 잡 이름과 짧은 스케줄 요약(`JOB_NAME`, `SCHEDULES`)을 쓴다.
+- Django 요약 화면은 `/dagster/`에 있고 `@staff_member_required`를 유지한다. 실제 Dagster 웹 UI는 충돌하지 않는 `/dagster/console/`, 실행 목록은 `/dagster/console/runs`다. `raw`보다 화면의 용도를 설명하는 `console`을 사용하기로 했다.
+- `run-dagster.ps1`이 `report-site/.env`의 선택적 `REPORT_PATH_TOKEN`을 읽어 path prefix를 만들며, 값이 생기면 `/<TOKEN>/dagster/console/`로 바뀐다. Tailscale Funnel mount도 경로 변경 때 함께 갱신해야 한다.
+- 실행 중인 report-site와 Dagster를 새 코드로 재시작하고 Funnel mount를 `/dagster/console`로 옮겼다. 공개 `/report/`, `/statistics/`, `/dagster/console/runs`는 HTTP 200이고 `/dagster/`는 의도대로 admin 로그인으로 302, GraphQL은 200이다. 이전 `/r/`와 `/r/dagster/runs`는 404다. `check_report`, finder `check-api`가 통과했고 `dagster schedule list`에서 세 스케줄 모두 `RUNNING`이다.
+- 선택 경로 계산은 별도 프로세스에서 빈 값→`/report`·`/statistics`·`/dagster`·`/dagster/console`, 값 있음→`/<TOKEN>/report`·`/<TOKEN>/statistics`·`/<TOKEN>/dagster`·`/<TOKEN>/dagster/console` 양쪽을 확인했다. 관련 테스트 76개 중 기존 Known Issue `test_urgent_section_respects_region_filter` 1개만 실패하고 75개가 통과했으며, `manage.py check`, `makemigrations --check --dry-run`, PowerShell 문법 검사도 통과했다. 운영 PostgreSQL 계정에는 `CREATEDB`가 없어 테스트는 운영 DB와 분리한 메모리 SQLite에서 실행했다.
 
 ### 아직 검증하지 못한 것 (다음에 확인할 목록)
 
 - **무인 상태로 며칠 돌려본 적이 없다.** 오늘 한 것은 수동 실행과 짧은 smoke test뿐이다. Windows gRPC 이슈 리포트들이 언급한 크래시가 장시간 실행에서는 나타날 수도 있다 — 실제 스케줄을 붙이고 최소 하루 이상 지켜봐야 한다.
-- **스케줄러 데몬이 실제로 정시에 잡을 틱하는지는 안 봤다** — `SchedulerDaemon`이 떠 있는 것만 로그로 확인했지, 한 시간을 기다려 `site_watchdog_job`이 저절로 실행되는 것까지는 보지 못했다.
-- `scan_job`/`morning_digest_job`은 위에서 적었듯 실제로 실행해 보지 않았다 — 특히 `run-scan.ps1`이 Dagster의 서브프로세스 격리 환경(멀티프로세스 executor가 각 옵을 별도 프로세스로 띄운다)에서도 Edge CDP·데스크톱 세션에 정상적으로 접근하는지는 실제 스캔으로 한 번 더 확인해야 한다.
+- **스케줄러 데몬이 실제로 정시에 잡을 틱하는지는 안 봤다** — 통합 잡과 스케줄 정의 로드는 확인했지만 정각까지 기다린 검증은 하지 않았다.
+- 통합 잡의 실제 스캔·리포트 모드는 위에서 적었듯 종단 실행하지 않았다 — 특히 Dagster 서브프로세스에서도 Edge CDP·데스크톱 세션에 정상 접근하는지는 실제 스캔으로 한 번 더 확인해야 한다.
 - **컴퓨트 로그가 기본적으로 꺼져 있다** — 시작 로그에 `PYTHONLEGACYWINDOWSSTDIO`를 설정해야 옵의 stdout/stderr가 Dagster UI에 잡힌다는 경고가 떴다. 지금은 콘솔에만 보인다. 필요해지면 `run-dagster.ps1`에 그 환경변수를 추가한다.
 - **부팅 시 자동 시작이 없다.** 지금은 `run-dagster.bat`을 사람이 띄워야 한다 — Windows 작업 스케줄러에 등록하는 문제는 아직 다루지 않았다(Airflow 계획의 "Airflow 자신이 죽으면 아무도 깨우지 않는다" 위험과 동일하게 적용된다).
 
@@ -122,7 +125,7 @@ Airflow 화면(`r/<TOKEN>/airflow/`)과 나란히 새로 추가했다. **Airflow
 
 ### 이번에 실제로 끝난 것 (2026-09-04)
 
-- `report/airflow_client.py` + `report/templates/report/airflow.html` + `report/views.py`의 `airflow()` 뷰 + `report_site/urls.py`의 `r/<TOKEN>/airflow/` 라우팅. `@staff_member_required`로 admin 로그인을 추가로 요구한다. Airflow가 꺼져 있거나 설정이 없으면 사유를 적은 화면을 돌려준다(테스트로 확인).
+- `report/airflow_client.py` + `report/templates/report/airflow.html` + `report/views.py`의 `airflow()` 뷰 + `report_site/urls.py`의 선택 경로 라우팅. `@staff_member_required`로 admin 로그인을 추가로 요구한다. Airflow가 꺼져 있거나 설정이 없으면 사유를 적은 화면을 돌려준다(테스트로 확인).
 - `report_site/settings.py`에 `AIRFLOW_API_URL`/`AIRFLOW_USERNAME`/`AIRFLOW_PASSWORD`/`AIRFLOW_API_TOKEN`/`AIRFLOW_TIMEOUT_SECONDS` 추가, 전부 선택값. `.env.example`에 문서화.
 - `properties/delivery.py`에 `DeliveryService.send_alert(text)` 추가 — `⚠️ ` 접두사를 붙이고 200자로 자른 뒤 기존 `_send_text` 경로로 보낸다. 새 관리 명령 `send_alert`(`properties/management/commands/send_alert.py`)가 이것을 감싼다.
 - 새 관리 명령 `scan_status`(`properties/management/commands/scan_status.py`) — `--since HH:MM` 이후 성공한 `Scan`이 있으면 종료 코드 0, 없으면 1(과 `CommandError`). Airflow가 아니라 **DB의 `Scan` 테이블을 진실의 원천으로 삼는다**는 설계 결정을 그대로 구현했다.
@@ -257,7 +260,7 @@ Windows 10에는 WSL2 미러 네트워킹이 없다(Windows 11 22H2+ 기능). �
 
 ### Django에서 Airflow 보기 (작업 중)
 
-운영 화면을 `r/<TOKEN>/airflow/`에 붙인다. **공개 리포트와 같은 토큰 경로 아래지만 `@staff_member_required`를 걸어 admin 로그인을 추가로 요구한다** — 스케줄 상태는 이 PC가 언제 비어 있는지와 무엇이 실패했는지를 알려주므로 카카오 링크를 받은 사람에게까지 보일 내용이 아니다.
+운영 화면은 현재 `/airflow/`이며 토큰을 켜면 `/<TOKEN>/airflow/`로 이동한다. **`@staff_member_required`를 걸어 admin 로그인을 추가로 요구한다** — 스케줄 상태는 이 PC가 언제 비어 있는지와 무엇이 실패했는지를 알려주므로 일반 리포트 방문자에게까지 보일 내용이 아니다.
 
 - `report/airflow_client.py`: stdlib `urllib`로 Airflow REST API v2를 읽는다(`POST /auth/token`으로 JWT → `GET /api/v2/dags`, `GET /api/v2/dags/~/dagRuns`). `real-estate-finder/api_client.py`와 같은 이유로 HTTP 의존성을 새로 넣지 않는다. **읽기 전용이다 — DAG를 트리거·중지·삭제하는 경로를 두지 않는다.**
 - Airflow가 꺼져 있거나 설정이 없으면 500이 아니라 사유를 적은 화면을 돌려준다. 스케줄러가 죽었을 때 그 사실을 보여주는 것이 이 화면의 목적이므로 스택 트레이스로 죽으면 안 된다.
@@ -623,7 +626,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 2. 단지명 별칭으로 `SearchCondition`에 매핑하고 `explain_condition()` 실행 → 탈락 사유를 `Observation.exclusion_reason`에 기록
 3. 통과분은 `Listing` upsert (`first_seen_at` 보존, `last_seen_at`·`price_won` 갱신)
 4. `is_urgent` = `price_won <= effective_urgent_price_won`, `is_new` = 기존 행 없음
-5. `should_alert` = 급매이면서 (`last_urgent_alert_price_won`이 없거나 그보다 **더 내려간** 경우). `notify_new` 조건은 신규도 알림 대상
+5. `should_alert` = **이번 스캔에서 처음 발견된 급매**. 기존 매물이 나중에 급매가 되거나 더 내려가도 재알림하지 않는다. `notify_new` 조건은 일반 신규도 별도 알림 대상
 6. 수집 성공한 조건에 한해 이번에 안 보인 `Listing`을 `active=False`로
 7. 여기까지 하나의 **트랜잭션**으로 커밋 — 커밋이 끝나야 리포트가 이번 조회를 서빙하고 `is_live()`가 통과한다
 8. 커밋 후 전송. 알림 대상이 없으면 `_no_alert_reason()`(`service.py:278-313`)을 옮겨 **미전송 사유를 반드시 기록**
@@ -641,7 +644,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ### Django admin 접속
 
-- 주소는 리포트와 같은 토큰 경로 아래다: `.../r/<REPORT_PATH_TOKEN>/admin/`. 실제 토큰은 `report-site/.env`에 있고 `run-site` 창이 `Local admin:` 줄로 출력한다. 여기에는 적지 않는다.
+- 주소는 현재 `.../admin/`이며, 나중에 `REPORT_PATH_TOKEN`을 채우면 `.../<TOKEN>/admin/`으로 이동한다. `run-site` 창이 `Local admin:` 줄로 현재 주소를 출력한다.
 - 슈퍼유저 `admin`이 생성돼 있다. 비밀번호는 문서에 기록하지 않았으며, 잊었다면 `manage.py changepassword admin`으로 재설정한다.
 - 조회에 쓰는 화면: `Observation`(제외 사유는 `exclusion_reason` 필터), `Listing`(`active` 필터), `Scan`(실행 이력과 미전송 사유), `Search condition`(가격·면적 조건 편집).
 - admin은 Tailscale Funnel 공개 주소로도 열린다. 로그인 화면이 인터넷에 노출돼 있으므로 비밀번호는 강해야 한다.
@@ -663,12 +666,12 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 - **`report-site/run-site.bat`이 실행 중이 아니면 공개 리포트 주소가 죽는다.** PC 종료·절전도 마찬가지다. 자동 시작을 등록하지 않기로 했으므로(Key Decisions 참고) 리포트를 외부에서 열어야 할 때 사용자가 직접 켜야 한다. 다행히 조용히 깨지지는 않는다 — 서버가 없으면 `is_live()`가 실패해 카카오 메시지에서 두 버튼이 빠지고 텍스트만 나간다.
 - **이제 스캔 자체가 리포트 서버 실행을 요구한다.** `run-scan.ps1`의 1단계 `check-api`가 실패하면 브라우저를 열지 않고 멈춘다. 예전처럼 "서버가 꺼져 있어도 스캔은 된다"가 더 이상 성립하지 않는다. 자동 시작(작업 스케줄러 로그온 트리거) 등록 여부를 다시 판단할 시점이다.
-- **전환 후 Django admin이 공개 URL에 노출된다.** 토큰 경로 뒤에 두더라도 로그인 화면이 인터넷에 열린다. 강한 비밀번호가 필요하다.
+- **Django admin 로그인 화면이 공개 `/admin/`에 노출된다.** 토큰을 다시 켜기 전에는 경로 은닉도 없으므로 특히 강한 비밀번호가 필요하다.
 - 예전 Codex Sites 주소(`https://my-property-report-20260902.ssong7988.chatgpt.site`)는 더 이상 갱신되지 않는다. 루트 `.env`의 `KAKAO_REPORT_URL`을 지우면 이 오래된 주소로 폴백하므로 비우지 않는다.
 - 휴대전화에서 `127.0.0.1`/`localhost`는 서버 PC를 가리키지 않으며 카카오 웹 도메인으로도 부적합하다(Tailscale Funnel 주소를 써야 하는 이유).
-- 토큰 경로(`REPORT_PATH_TOKEN`)는 우발적 노출만 막는다. 주소가 유출되면 인증 없이 누구나 볼 수 있다.
+- 현재 `REPORT_PATH_TOKEN`은 비어 있어 `/report/`, `/statistics/`, `/dagster/`가 바로 공개된다. 나중에 값을 채우면 우발적 노출을 줄일 수 있지만, 주소가 유출되면 인증 없이 누구나 볼 수 있다는 한계는 같다.
 - **코드를 바꿨으면 리포트 서버를 재시작해야 한다.** 실행 중인 프로세스는 옛 코드를 들고 있다. 이 구조에서는 재시작을 잊어도 조용히 넘어가지 않고 `check-api`가 404로 실패해 드러난다.
-- **급매가 아니면 과천·판교 조건에서는 카카오톡이 오지 않는다. 정상이다.** `notify_new`가 켜진 조건은 광교 4개(광교푸르지오월드마크·광교더리브·광교경남아너스빌·광교센트럴뷰)다. 과천·판교 10개는 신규 매물이 나와도 알리지 않으며 급매 기준을 통과할 때만 보낸다. 이미 같은 가격 이하로 알린 급매도 더 내려가지 않으면 다시 알리지 않는다. 사유는 항상 콘솔과 `Scan.notification`에 남으므로, 조용하다고 느껴지면 먼저 그것을 읽는다. 지금 전체를 받고 싶으면 `send-report.bat`이다.
+- **과천·판교 조건은 신규 급매일 때만 카카오톡이 온다.** 기존 매물이 나중에 급매 기준을 통과하거나 더 내려가도 보내지 않는다. `notify_new`가 켜진 광교 4개는 급매 여부와 별개로 일반 신규도 보낸다. 사유는 항상 콘솔과 `Scan.notification`에 남는다. 지금 전체를 받고 싶으면 `send-report.bat`이다.
 - 루트와 예전 UI(`property-report-site/site-app/`)가 중첩 Git 저장소로 남아 있다. 그 디렉터리를 다시 건드릴 일이 생기면 UI 커밋 누락이나 루트 포인터만 변경되는 실수에 유의한다.
 - 마지막 `npm audit` 결과는 취약점 11개(낮음 1, 보통 2, 높음 8)였다(예전 UI 저장소 기준, 더 이상 서빙 경로가 아니므로 우선순위 낮음).
 - **Django 테스트에는 DB 생성 권한이 필요하다.** `property_report` 역할에 `CREATEDB`가 없어 `manage.py test`가 테스트 DB를 만들지 못한다. 테스트 동안만 부여했다가 되돌린다(`ALTER ROLE property_report CREATEDB;` → `NOCREATEDB;`).
@@ -688,12 +691,12 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - **DRF를 추가하지 않는다.** 엔드포인트가 4개뿐이라 `JsonResponse` + 명시적 검증으로 충분하고, 프로젝트의 "가장 단순한 해법" 원칙에 맞는다.
 - **카드 전송을 `POST /api/scans/` 요청 안에서 동기로 처리한다.** 큐를 도입하지 않는 대신 요청이 수 초~수십 초 걸린다. 단일 사용자 시스템이고 수집기는 어차피 대기 중이다.
 - **API는 `Authorization: Bearer <FINDER_API_TOKEN>`으로 보호한다.** 사이트가 Tailscale Funnel로 인터넷에 열려 있어 `/api/`도 외부에서 닿는다.
-- **Django admin을 `r/<REPORT_PATH_TOKEN>/admin/` 아래에 둔다.** `/admin/`을 그대로 노출하지 않기 위해서다.
+- **Django admin에도 선택 토큰 규칙을 적용한다.** 현재는 `/admin/`, `REPORT_PATH_TOKEN`을 채우면 `/<TOKEN>/admin/`이다.
 
 ### 이전에 정해져 유지되는 것
 
 - **서빙 방식을 Next.js/Codex Sites 빌드·배포에서 Django(`report-site/`) 요청 시 렌더링으로 전환했다.** 이유: 조회할 때마다 UI를 빌드·배포해야 하는 것이 불합리했고, 목표 아키텍처에도 더 가깝다.
-- 외부 공개는 도메인 구입 없이 Tailscale Funnel을 쓴다. 접근 제어는 로그인이 아니라 추측 불가능한 경로 토큰이다 — 리포트에 담긴 정보가 네이버 부동산 공개 정보 수준이라 판단했기 때문이다.
+- 외부 공개는 도메인 구입 없이 Tailscale Funnel을 쓴다. 현재 사용자의 결정으로 경로 토큰 없이 명시적인 `/report/`, `/statistics/`, `/dagster/`를 쓰며, 나중에 `REPORT_PATH_TOKEN` 환경변수만 채워 모든 비-API 경로에 토큰을 붙일 수 있게 유지한다.
 - **리포트 서버 자동 시작(작업 스케줄러)은 등록하지 않는다.** 상시 실행 프로세스를 늘리지 않는 대신, 서버가 꺼져 있으면 카카오 카드에서 버튼이 빠지는 것을 정상 동작으로 받아들인다. (전환 후 스캔이 서버를 요구하게 되면 이 결정을 재검토한다.)
 - 표시 로직은 한 곳에만 둔다. 가격/면적 포맷이 카카오 카드와 웹 리포트 사이에서 갈라지지 않게 하기 위함이다. 전환 후 그 한 곳은 `report-site/properties/report.py`가 된다.
 - `is_live()` 게이트는 유지한다. "리포트 서버가 살아있고 이번 조회를 서빙 중인가"를 확인하며, PC가 꺼져 있으면 카카오 카드에서 `전체 매물 보기` 버튼이 올바르게 빠진다.

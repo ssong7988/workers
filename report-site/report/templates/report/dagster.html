@@ -72,7 +72,7 @@
 
   {% if status.reachable %}
   <section class="summary">
-    <div class="tile tile-green"><div class="tile-value">{{ jobs|length }}</div><div class="tile-label">등록된 작업</div></div>
+    <div class="tile tile-green"><div class="tile-value">1</div><div class="tile-label">등록된 잡</div></div>
     <div class="tile tile-navy"><div class="tile-value">{{ status.runs|length }}</div><div class="tile-label">최근 실행</div></div>
     <div class="tile{% if failed_runs %} tile-red{% else %} tile-navy{% endif %}"><div class="tile-value">{{ failed_runs|length }}</div><div class="tile-label">실패한 실행</div></div>
   </section>
@@ -80,16 +80,16 @@
 
   <div class="section-title">
     <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#047857" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-    작업
+    {{ job_name }} 시간대별 실행
   </div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>작업</th><th>일정</th></tr></thead>
       <tbody>
-        {% for job in jobs %}
+        {% for schedule in schedules %}
         <tr>
-          <td>{{ job.description }}</td>
-          <td>{{ job.cron }}</td>
+          <td>{{ schedule.description }}</td>
+          <td>{{ schedule.cron }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -132,7 +132,7 @@
 
   <p class="footer">
     이 화면은 Dagster에서 읽기만 합니다 &mdash; 여기서 작업을 실행하거나 멈출 수 없습니다.<br>
-    자세한 로그와 실제 조작은 <a href="/url/dagster/runs" target="_blank" rel="noreferrer">Dagster 웹 UI</a>에서 합니다.
+    자세한 로그와 실제 조작은 <a href="{{ dagster_runs_url }}" target="_blank" rel="noreferrer">Dagster 웹 UI</a>에서 합니다.
   </p>
 </div>
 </body>

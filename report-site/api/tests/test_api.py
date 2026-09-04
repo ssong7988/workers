@@ -131,6 +131,8 @@ class ApiTests(TestCase):
         self.assertEqual(len(response.json()["alerts"]), 1)
         decision = delivery_class.return_value.send_scan_alerts.call_args.args[0]
         self.assertIsNotNone(decision.scan.pk)
+        self.assertTrue(decision.alerts[0].is_urgent)
+        self.assertTrue(decision.alerts[0].is_new)
         self.assertEqual(Observation.objects.count(), 1)
         self.assertEqual(Listing.objects.get().last_urgent_alert_price_won, 2_500_000_000)
 

@@ -130,9 +130,10 @@ class DeliveryService:
         ]
         channel = self.send_message(items, alerts=alerts, scan=decision.scan)
         urgent_count = sum(alert.is_urgent for alert in decision.alerts)
+        new_count = sum(alert.is_new for alert in decision.alerts)
         notification = (
             f"카카오 전송 완료({channel}): 급매 {urgent_count}건 · "
-            f"신규 {len(decision.alerts) - urgent_count}건 · "
+            f"신규 {new_count}건 · "
             f"조건충족 {len(decision.matched)}건"
         )
         decision.scan.notification = notification

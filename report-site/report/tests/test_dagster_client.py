@@ -44,7 +44,7 @@ class NotConfiguredTests(SimpleTestCase):
 
 
 @override_settings(
-    DAGSTER_GRAPHQL_URL="http://127.0.0.1:3000/url/dagster/graphql",
+    DAGSTER_GRAPHQL_URL="http://127.0.0.1:3000/test-token/dagster/console/graphql",
     DAGSTER_TIMEOUT_SECONDS=5.0,
 )
 class FetchStatusTests(SimpleTestCase):
@@ -59,14 +59,14 @@ class FetchStatusTests(SimpleTestCase):
                         "results": [
                             {
                                 "runId": "ce42589c-3c6a-4cbd-a558-0b789fc5fdcf",
-                                "jobName": "site_watchdog_job",
+                                "jobName": "property_pipeline_job",
                                 "status": "SUCCESS",
                                 "startTime": 1788485963.618406,
                                 "endTime": 1788485970.147663,
                             },
                             {
                                 "runId": "a1b2c3",
-                                "jobName": "morning_digest_job",
+                                "jobName": "property_pipeline_job",
                                 "status": "FAILURE",
                                 "startTime": 1788485000.0,
                                 "endTime": 1788485010.0,
@@ -86,13 +86,14 @@ class FetchStatusTests(SimpleTestCase):
         self.assertEqual(len(status.runs), 2)
         self.assertEqual(status.runs[0].status, "SUCCESS")
         self.assertEqual(len(status.failed_runs), 1)
-        self.assertEqual(status.failed_runs[0].job_name, "morning_digest_job")
+        self.assertEqual(status.failed_runs[0].job_name, "property_pipeline_job")
         # Epoch seconds convert to an ISO string, not pass through raw.
         self.assertTrue(status.runs[0].start.startswith("2026-"))
 
         request = urlopen.call_args.args[0]
         self.assertEqual(
-            request.full_url, "http://127.0.0.1:3000/url/dagster/graphql"
+            request.full_url,
+            "http://127.0.0.1:3000/test-token/dagster/console/graphql",
         )
         self.assertEqual(request.get_header("Content-type"), "application/json")
 

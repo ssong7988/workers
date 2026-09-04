@@ -20,7 +20,7 @@ class ReportViewTests(TestCase):
             urgent_price_won=2_500_000_000,
         )
         self.client = Client()
-        self.url = f"/r/{settings.REPORT_PATH_TOKEN}/"
+        self.url = f"{settings.REPORT_URL_PATH}/"
         self.observed_at = timezone.make_aware(datetime(2026, 9, 3, 8, 0))
 
     def listing(self, listing_id: str, price_won: int, **overrides) -> Listing:
@@ -79,7 +79,7 @@ class ReportViewTests(TestCase):
         self.assertEqual(response["Cache-Control"], "no-store")
 
     def test_wrong_token_is_404(self) -> None:
-        response = self.client.get("/r/not-the-real-token/")
+        response = self.client.get("/not-the-real-token/report/")
         self.assertEqual(response.status_code, 404)
 
     def test_root_path_is_404(self) -> None:

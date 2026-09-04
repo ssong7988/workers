@@ -72,7 +72,7 @@ def _no_alert_reason(
     failed_conditions: Mapping[str, str],
     matched_count: int,
     urgent_hit: int,
-    urgent_repeat: int,
+    existing_urgent: int,
     new_seen: int,
     new_muted: int,
 ) -> str:
@@ -87,8 +87,8 @@ def _no_alert_reason(
     reasons: list[str] = []
     if not urgent_hit:
         reasons.append("급매 기준(urgent_price_won) 이하로 내려온 매물 없음")
-    elif urgent_repeat:
-        reasons.append(f"급매 {urgent_repeat}건은 이미 같은 가격 이하로 알림을 보냈습니다")
+    elif existing_urgent:
+        reasons.append(f"급매 {existing_urgent}건은 이번 스캔에서 처음 발견된 매물이 아닙니다")
     if not new_seen:
         reasons.append("처음 보는 매물 없음 (모두 이전 스캔에서 확인)")
     elif new_muted:
@@ -146,7 +146,7 @@ def record_scan(
     }
     matched: list[Listing] = []
     alerts: list[AlertDecision] = []
-    collected_count = excluded_count = urgent_hit = urgent_repeat = 0
+    collected_count = excluded_count = urgent_hit = existing_urgent = 0
     new_seen = new_muted = 0
 
     for raw_payload in observations:
@@ -186,7 +186,6 @@ def record_scan(
         seen_matched[condition_id].add(listing_id)
         old = existing.get(identity)
         is_new = old is None
-        last_alert_price = old.last_urgent_alert_price_won if old else None
         listing_values = {
             key: getattr(observation, key)
             for key in (
@@ -225,9 +224,12 @@ def record_scan(
         is_urgent = listing.is_urgent
         urgent_hit += int(is_urgent)
         new_seen += int(is_new)
-        should_alert = is_urgent and (
-            last_alert_price is None or listing.price_won < last_alert_price
-        )
+        # An urgent alert is useful only when the listing itself is new in this
+        # scan.  Existing listings crossing the threshold (or dropping again)
+        # remain visible in the report, but no longer generate another Kakao
+        # message.  A condition's separate `notify_new` policy still applies
+        # to ordinary new listings.
+        should_alert = is_urgent and is_new
         should_notify = notify_urgent and not smoke and (
             should_alert or (condition.notify_new and is_new)
         )
@@ -237,13 +239,15 @@ def record_scan(
             alert = AlertDecision(
                 listing=listing,
                 is_urgent=should_alert,
-                is_new=not should_alert and is_new,
+                is_new=is_new,
             )
             alerts.append(alert)
             if should_alert:
+                # Keep the legacy history field accurate for imported data and
+                # admin visibility, although repeat-price alerting is retired.
                 listing.last_urgent_alert_price_won = listing.price_won
         else:
-            urgent_repeat += int(is_urgent and not should_alert)
+            existing_urgent += int(is_urgent and not should_alert)
             new_muted += int(is_new and not condition.notify_new)
         listing.save()
         matched.append(listing)
@@ -269,7 +273,7 @@ def record_scan(
             failed_conditions=failures,
             matched_count=len(matched),
             urgent_hit=urgent_hit,
-            urgent_repeat=urgent_repeat,
+            existing_urgent=existing_urgent,
             new_seen=new_seen,
             new_muted=new_muted,
         )

@@ -1,4 +1,4 @@
-"""Dagster definitions for this repo's schedule: site watchdog, scan, morning digest.
+"""One Dagster pipeline for the report server, scan, and morning report.
 
 Runs natively on this Windows machine - no WSL required. That is the whole
 reason this exists instead of the Airflow plan in `airflow/dags/`: Airflow
@@ -78,36 +78,47 @@ def ensure_site() -> None:
     _run_powershell(REPORT_SITE / "ensure-site.ps1", timeout=90)
 
 
-@dg.op(retry_policy=RETRY_POLICY, ins={"start": dg.In(dg.Nothing)})
-def run_scan() -> None:
-    """매물 수집 1회.
+@dg.op(
+    retry_policy=RETRY_POLICY,
+    ins={"start": dg.In(dg.Nothing)},
+    config_schema={"mode": dg.Field(str, default_value="skip")},
+)
+def scan_step(context) -> None:
+    """시간대에 따라 수집을 생략, 실행, 또는 최신 여부 확인 후 실행한다.
 
     Edge와 네이버 로그인 세션이 Windows 데스크톱에 있어야 한다 - 세션이
     잠겨 있으면 사람이 로그인할 때까지 매달린다. 자동화할 수 없는 지점이고
     (PROJECT_STATE.md 위험 절 참고), 타임아웃 후 재시도 1회, 그래도 실패하면
     failure hook이 카톡으로 알리는 것이 유일한 대응이다.
     """
-    _run_powershell(REAL_ESTATE_FINDER / "run-scan.ps1", timeout=1200)
-
-
-@dg.op(retry_policy=RETRY_POLICY, ins={"start": dg.In(dg.Nothing)})
-def send_digest() -> None:
-    """활성 매물 전체를 카카오톡으로 발송."""
-    _run_powershell(REAL_ESTATE_FINDER / "send-report.ps1", timeout=180)
-
-
-@dg.op(retry_policy=RETRY_POLICY)
-def ensure_fresh_scan() -> None:
-    """오늘 07:00 이후 성공한 수집이 없으면 지금 한 번 수집한다.
-
-    Airflow 버전을 설계할 때와 같은 이유로 스케줄러 자신의 실행 이력이
-    아니라 DB의 Scan 테이블을 기준으로 삼는다 - 사람이 손으로 돌린 수집도
-    쳐 준다(PROJECT_STATE.md 참고).
-    """
-    result = _run_manage("scan_status", "--since=07:00", timeout=30)
-    if result.returncode == 0:
+    mode = context.op_config["mode"]
+    if mode == "skip":
+        context.log.info("이 시간대에는 서버 확인만 합니다.")
         return
-    _run_powershell(REAL_ESTATE_FINDER / "run-scan.ps1", timeout=1200)
+    if mode == "run":
+        _run_powershell(REAL_ESTATE_FINDER / "run-scan.ps1", timeout=1200)
+        return
+    if mode == "ensure_fresh":
+        result = _run_manage("scan_status", "--since=07:00", timeout=30)
+        if result.returncode == 0:
+            context.log.info("오늘 07:00 이후 성공한 수집이 있어 재수집하지 않습니다.")
+            return
+        _run_powershell(REAL_ESTATE_FINDER / "run-scan.ps1", timeout=1200)
+        return
+    raise ValueError(f"지원하지 않는 scan_step mode: {mode}")
+
+
+@dg.op(
+    retry_policy=RETRY_POLICY,
+    ins={"start": dg.In(dg.Nothing)},
+    config_schema={"enabled": dg.Field(bool, default_value=False)},
+)
+def report_step(context) -> None:
+    """활성 매물 전체 발송. 아침 리포트 시간 외에는 명시적으로 생략한다."""
+    if not context.op_config["enabled"]:
+        context.log.info("이 시간대에는 리포트를 보내지 않습니다.")
+        return
+    _run_powershell(REAL_ESTATE_FINDER / "send-report.ps1", timeout=180)
 
 
 @dg.failure_hook
@@ -128,37 +139,53 @@ def alert_on_failure(context: dg.HookContext) -> None:
 
 
 @dg.job(hooks={alert_on_failure})
-def site_watchdog_job() -> None:
-    ensure_site()
+def property_pipeline_job() -> None:
+    """서버 확인 → 필요 시 수집 → 필요 시 리포트의 단일 실행 그래프."""
+    report_step(start=scan_step(start=ensure_site()))
 
 
-@dg.job(hooks={alert_on_failure})
-def scan_job() -> None:
-    run_scan(start=ensure_site())
-
-
-@dg.job(hooks={alert_on_failure})
-def morning_digest_job() -> None:
-    send_digest(start=ensure_fresh_scan())
-
-
-site_watchdog_schedule = dg.ScheduleDefinition(
-    job=site_watchdog_job,
-    cron_schedule="0 * * * *",
+server_only_schedule = dg.ScheduleDefinition(
+    name="server_only_schedule",
+    job=property_pipeline_job,
+    # 7·8·12·17시는 아래 전용 스케줄이 같은 서버 확인부터 시작한다.
+    cron_schedule="0 0-6,9-11,13-16,18-23 * * *",
     execution_timezone="Asia/Seoul",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+    run_config={
+        "ops": {
+            "scan_step": {"config": {"mode": "skip"}},
+            "report_step": {"config": {"enabled": False}},
+        }
+    },
 )
 scan_schedule = dg.ScheduleDefinition(
-    job=scan_job,
+    name="scan_schedule",
+    job=property_pipeline_job,
     cron_schedule="0 7,12,17 * * *",
     execution_timezone="Asia/Seoul",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+    run_config={
+        "ops": {
+            "scan_step": {"config": {"mode": "run"}},
+            "report_step": {"config": {"enabled": False}},
+        }
+    },
 )
-morning_digest_schedule = dg.ScheduleDefinition(
-    job=morning_digest_job,
+morning_report_schedule = dg.ScheduleDefinition(
+    name="morning_report_schedule",
+    job=property_pipeline_job,
     cron_schedule="0 8 * * *",
     execution_timezone="Asia/Seoul",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+    run_config={
+        "ops": {
+            "scan_step": {"config": {"mode": "ensure_fresh"}},
+            "report_step": {"config": {"enabled": True}},
+        }
+    },
 )
 
 defs = dg.Definitions(
-    jobs=[site_watchdog_job, scan_job, morning_digest_job],
-    schedules=[site_watchdog_schedule, scan_schedule, morning_digest_schedule],
+    jobs=[property_pipeline_job],
+    schedules=[server_only_schedule, scan_schedule, morning_report_schedule],
 )

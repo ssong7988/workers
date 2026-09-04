@@ -126,8 +126,8 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 
 | 파일/경로 | 책임 |
 |---|---|
-| `report_site/settings.py` | PostgreSQL, admin 배선, whitenoise, 필수 토큰 두 개, 루트 `.env`까지 로드 |
-| `report_site/urls.py` | `r/<TOKEN>/` 리포트, `r/<TOKEN>/stats/` 가격 통계, `r/<TOKEN>/admin/` admin, `api/` 수집기 API |
+| `report_site/settings.py` | PostgreSQL, admin 배선, whitenoise, 필수 API 토큰과 선택 경로 토큰, 루트 `.env`까지 로드 |
+| `report_site/urls.py` | `/report/` 리포트, `/statistics/` 가격 통계, `/dagster/` 운영 요약, `/admin/` admin. `REPORT_PATH_TOKEN`을 채우면 모두 `/<TOKEN>/` 아래로 이동. `api/` 수집기 API는 별도 |
 | `run-site.ps1`, `run-site.bat` | `check` → `migrate --check` → `collectstatic` → waitress `127.0.0.1:8000` |
 
 ### properties — 도메인 (b/e)
@@ -152,7 +152,7 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 2. 단지명 별칭으로 조건에 매핑하고 `explain_condition()`을 실행해 탈락 사유를 `Observation.exclusion_reason`에, 그 안정적 코드를 `exclusion_code`에 남긴다.
 3. 통과분은 `Listing`에 upsert한다. `first_seen_at`은 보존하고 `last_seen_at`과 가격 등을 갱신한다.
 4. `is_urgent` = 가격이 유효 급매가 이하. `is_new` = 기존 행 없음.
-5. `should_alert` = 급매이면서 이전에 알린 적이 없거나 그보다 **더 내려간** 경우. `notify_new` 조건은 신규도 알림 대상.
+5. `should_alert` = **이번 스캔에서 처음 발견된 급매**. 기존 매물이 나중에 급매가 되거나 더 내려가도 재알림하지 않는다. `notify_new` 조건은 일반 신규도 별도 알림 대상.
 6. **수집에 성공한 조건에 한해서만** 이번에 안 보인 매물을 `active=False`로 바꾼다.
 7. 여기까지가 하나의 트랜잭션이다. 커밋이 끝나야 리포트가 이번 조회를 서빙하고 `is_live()`가 통과한다.
 8. 커밋 후 전송한다. 보내지 않았다면 그 사유를 `Scan.notification`에 기록한다.

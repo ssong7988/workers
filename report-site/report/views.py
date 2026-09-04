@@ -23,7 +23,8 @@ from properties.statistics import (
 )
 
 from .airflow_client import fetch_status as fetch_airflow_status
-from .dagster_client import JOBS as DAGSTER_JOBS
+from .dagster_client import JOB_NAME as DAGSTER_JOB_NAME
+from .dagster_client import SCHEDULES as DAGSTER_SCHEDULES
 from .dagster_client import fetch_status as fetch_dagster_status
 from .stats_params import resolve_range, resolve_scope
 
@@ -214,7 +215,7 @@ def dagster(request) -> HttpResponse:
     Read-only, and it never 500s on Dagster's account: when the scheduler is
     down the point of this page is to say so, which a stack trace does not.
     Dagster drives the schedule for now; Airflow's equivalent screen at
-    r/<TOKEN>/airflow/ stays in place but parked (see PROJECT_STATE.md).
+    r[/<TOKEN>]/airflow/ stays in place but parked (see PROJECT_STATE.md).
     """
     status = fetch_dagster_status()
     timezone_name = _timezone_name()
@@ -225,13 +226,15 @@ def dagster(request) -> HttpResponse:
         "report/dagster.html",
         {
             "status": status,
-            "jobs": DAGSTER_JOBS,
+            "job_name": DAGSTER_JOB_NAME,
+            "schedules": DAGSTER_SCHEDULES,
             "failed_runs": status.failed_runs,
             "latest_scan_at": _display_time(
                 latest_scan.started_at if latest_scan else None, timezone_name
             ),
             "report_url": reverse("report-index"),
             "stats_url": reverse("report-stats"),
+            "dagster_runs_url": f"{settings.DAGSTER_PATH_PREFIX}/runs",
         },
     )
     response["Cache-Control"] = "no-store"

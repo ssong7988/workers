@@ -13,7 +13,7 @@ from report.airflow_client import AirflowStatus, Dag, DagRun
 class AirflowViewTests(TestCase):
     def setUp(self) -> None:
         GlobalRule.objects.create(timezone="Asia/Seoul")
-        self.url = f"/r/{settings.REPORT_PATH_TOKEN}/airflow/"
+        self.url = f"/{settings.ROUTE_PREFIX}airflow/"
         self.client = Client()
 
     def test_anonymous_visitor_is_redirected_to_admin_login(self) -> None:

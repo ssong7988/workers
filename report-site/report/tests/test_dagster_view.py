@@ -13,7 +13,7 @@ from report.dagster_client import DagsterStatus, Run
 class DagsterViewTests(TestCase):
     def setUp(self) -> None:
         GlobalRule.objects.create(timezone="Asia/Seoul")
-        self.url = f"/r/{settings.REPORT_PATH_TOKEN}/dagster/"
+        self.url = f"{settings.DAGSTER_SUMMARY_PATH}/"
         self.client = Client()
 
     def test_anonymous_visitor_is_redirected_to_admin_login(self) -> None:
@@ -53,20 +53,20 @@ class DagsterViewTests(TestCase):
         Scan.objects.create(started_at=observed_at, finished_at=observed_at, success=True)
 
         status = DagsterStatus(
-            base_url="http://127.0.0.1:3000/url/dagster/graphql",
+            base_url=f"http://127.0.0.1:3000{settings.DAGSTER_PATH_PREFIX}/graphql",
             configured=True,
             reachable=True,
             runs=[
                 Run(
                     run_id="ce42589c-3c6a-4cbd-a558-0b789fc5fdcf",
-                    job_name="site_watchdog_job",
+                    job_name="property_pipeline_job",
                     status="SUCCESS",
                     start="2026-09-04T01:39:23+00:00",
                     end="2026-09-04T01:39:30+00:00",
                 ),
                 Run(
                     run_id="a1b2c3",
-                    job_name="morning_digest_job",
+                    job_name="property_pipeline_job",
                     status="FAILURE",
                     start="2026-09-04T00:00:00+00:00",
                     end="2026-09-04T00:00:10+00:00",
@@ -78,6 +78,9 @@ class DagsterViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "ce42589c-3c6a-4cbd-a558-0b789fc5fdcf")
-        self.assertContains(response, "morning_digest_job")
+        self.assertContains(response, "property_pipeline_job")
         self.assertContains(response, "2026.09.04 07:00")
-        self.assertContains(response, 'href="/url/dagster/runs"')
+        self.assertContains(
+            response,
+            f'href="{settings.DAGSTER_PATH_PREFIX}/runs"',
+        )

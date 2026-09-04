@@ -55,8 +55,11 @@ python -m real_estate_finder scan-once
 이 프로젝트에는 설정 파일이 없습니다. 검색 조건(단지, 가격 상한, 급매가, 전용면적, 저층 할인)은 PostgreSQL에 있고 **Django admin에서 고칩니다**.
 
 ```text
-http://127.0.0.1:8000/r/<REPORT_PATH_TOKEN>/admin/
+http://127.0.0.1:8000/admin/
 ```
+
+`report-site/.env`의 선택값 `REPORT_PATH_TOKEN`을 나중에 채우면 이 주소는
+`/<TOKEN>/admin/`으로 바뀝니다.
 
 수집기가 쓰는 값은 두 개뿐이며 둘 다 환경 변수로 읽습니다.
 

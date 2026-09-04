@@ -15,8 +15,8 @@ docs - see PROJECT_STATE.md for how. Dagster's own docs say the GraphQL
 schema "is still evolving and is subject to breaking changes... primarily
 for internal use by the Dagster webserver", so the job/schedule listing -
 which would need a much more fragile, undocumented query shape - is not
-attempted here; JOBS below is a short static list instead, kept in sync by
-hand with `dagster_project/definitions.py`.
+attempted here; the job name and schedule descriptions below are a short
+static summary instead, kept in sync by hand with `dagster_project/definitions.py`.
 
 stdlib `urllib` on purpose, matching `report/airflow_client.py` and
 `real-estate-finder/api_client.py`: the project has no HTTP dependency and
@@ -37,13 +37,13 @@ from django.conf import settings
 DEFAULT_TIMEOUT_SECONDS = 5.0
 MAX_RUNS = 20
 
-# Mirrors dagster_project/definitions.py's three jobs/schedules. Not read
-# from Dagster itself (see module docstring) - update this by hand if a
-# schedule there changes.
-JOBS = (
-    {"name": "site_watchdog_job", "description": "리포트 서버 생존 확인/기동", "cron": "매시 정각"},
-    {"name": "scan_job", "description": "매물 수집", "cron": "7시·12시·17시"},
-    {"name": "morning_digest_job", "description": "아침 리포트 발송", "cron": "8시"},
+# Mirrors dagster_project/definitions.py's one job and its three schedules.
+# Not read from Dagster itself (see module docstring).
+JOB_NAME = "property_pipeline_job"
+SCHEDULES = (
+    {"description": "서버 확인", "cron": "그 외 매시 정각"},
+    {"description": "서버 확인 → 매물 수집", "cron": "7시·12시·17시"},
+    {"description": "서버 확인 → 최신 수집 확인/재시도 → 리포트", "cron": "8시"},
 )
 
 

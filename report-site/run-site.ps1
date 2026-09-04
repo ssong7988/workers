@@ -61,10 +61,17 @@ if (-not $Token) {
         }
     }
 }
+$Token = ([string]$Token).Trim().Trim('"').Trim("'").Trim('/')
+if ($Token.Contains('/') -or $Token.Contains('\')) {
+    throw 'REPORT_PATH_TOKEN cannot contain path separators.'
+}
 
 Write-Host ""
-Write-Host "Local report:  http://127.0.0.1:8000/r/$Token/" -ForegroundColor Green
-Write-Host "Local admin:   http://127.0.0.1:8000/r/$Token/admin/" -ForegroundColor Green
+$RoutePrefix = if ([string]::IsNullOrWhiteSpace($Token)) { '' } else { "$Token/" }
+Write-Host "Local report:  http://127.0.0.1:8000/${RoutePrefix}report/" -ForegroundColor Green
+Write-Host "Local stats:   http://127.0.0.1:8000/${RoutePrefix}statistics/" -ForegroundColor Green
+Write-Host "Local Dagster: http://127.0.0.1:8000/${RoutePrefix}dagster/" -ForegroundColor Green
+Write-Host "Local admin:   http://127.0.0.1:8000/${RoutePrefix}admin/" -ForegroundColor Green
 if ($env:KAKAO_REPORT_URL) {
     Write-Host "Public report: $env:KAKAO_REPORT_URL" -ForegroundColor Green
 } else {

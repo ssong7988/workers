@@ -6,11 +6,11 @@ listings match and which are urgent or new, renders the public report, and
 builds and sends the KakaoTalk card. `real-estate-finder/` only collects and
 posts what it scraped to the API here.
 
-Two secrets gate it, both from `report-site/.env` and neither in Git:
+Configuration comes from `report-site/.env` and is never committed:
 
-* `REPORT_PATH_TOKEN` - the unguessable path the public report (and the admin)
-  live under. There is no login on the report itself, because everything behind
-  it is the same listing data already sent to KakaoTalk.
+* `REPORT_PATH_TOKEN` - optional leading path segment. Empty keeps the explicit
+  top-level routes (`/report/`, `/statistics/`, `/dagster/`); a value prepends
+  `/<TOKEN>` to every non-API route.
 * `FINDER_API_TOKEN` - the bearer token `real-estate-finder` sends. The site is
   published to the internet through Tailscale Funnel, so `/api/` is reachable
   from outside and must not be open.
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BASE_DIR.parent
@@ -53,7 +54,14 @@ def _required(name: str, hint: str) -> str:
     return value
 
 
-REPORT_PATH_TOKEN = _required("REPORT_PATH_TOKEN", "<추측 불가 문자열>")
+REPORT_PATH_TOKEN = os.environ.get("REPORT_PATH_TOKEN", "").strip().strip("/")
+if "/" in REPORT_PATH_TOKEN or "\\" in REPORT_PATH_TOKEN:
+    raise RuntimeError("REPORT_PATH_TOKEN에는 경로 구분자를 사용할 수 없습니다.")
+ROUTE_PREFIX = f"{REPORT_PATH_TOKEN}/" if REPORT_PATH_TOKEN else ""
+REPORT_URL_PATH = f"/{ROUTE_PREFIX}report"
+STATISTICS_URL_PATH = f"/{ROUTE_PREFIX}statistics"
+DAGSTER_SUMMARY_PATH = f"/{ROUTE_PREFIX}dagster"
+DAGSTER_PATH_PREFIX = f"{DAGSTER_SUMMARY_PATH}/console"
 # The scanner authenticates with `Authorization: Bearer <FINDER_API_TOKEN>`.
 FINDER_API_TOKEN = _required("FINDER_API_TOKEN", "<추측 불가 문자열>")
 
@@ -61,11 +69,16 @@ FINDER_API_TOKEN = _required("FINDER_API_TOKEN", "<추측 불가 문자열>")
 # misconfigured setup fails visibly rather than sending a broken link; the
 # card's live check refuses to attach a loopback URL anyway.
 REPORT_PUBLIC_URL = os.environ.get("KAKAO_REPORT_URL", "").strip()
-# The statistics screen sits beside the report under the same token prefix, so
-# the second Kakao button is the report URL plus one segment.
-REPORT_STATS_URL = (
-    f"{REPORT_PUBLIC_URL.rstrip('/')}/stats/" if REPORT_PUBLIC_URL else ""
-)
+# The statistics screen is a sibling of `/report/`, not a child of it. Reuse
+# the configured public origin and replace only the path so host changes stay
+# in one environment variable.
+if REPORT_PUBLIC_URL:
+    _public_parts = urlsplit(REPORT_PUBLIC_URL)
+    REPORT_STATS_URL = urlunsplit(
+        (_public_parts.scheme, _public_parts.netloc, f"{STATISTICS_URL_PATH}/", "", "")
+    )
+else:
+    REPORT_STATS_URL = ""
 
 # Airflow runs the schedule from WSL2 and drives this machine through interop.
 # Django only reads its status for the operations screen, so every value here
@@ -83,11 +96,11 @@ except ValueError:
 # this machine while the Airflow/WSL2 plan above stays parked - see
 # .agent/PROJECT_STATE.md, "Active Work: Dagster로 스케줄 구동". Unlike
 # Airflow's, this address has one predictable local default: `dagster dev`
-# always binds 127.0.0.1:3000 with /url/dagster as its path prefix the way
-# run-dagster.ps1 starts it, so no .env entry is required for the common case,
-# only to override it.
+# always binds 127.0.0.1:3000 below the same optional route prefix the way
+# run-dagster.ps1 starts it, so no second secret or .env entry is required.
 DAGSTER_GRAPHQL_URL = os.environ.get(
-    "DAGSTER_GRAPHQL_URL", "http://127.0.0.1:3000/url/dagster/graphql"
+    "DAGSTER_GRAPHQL_URL",
+    f"http://127.0.0.1:3000{DAGSTER_PATH_PREFIX}/graphql",
 ).strip()
 try:
     DAGSTER_TIMEOUT_SECONDS = float(os.environ.get("DAGSTER_TIMEOUT_SECONDS", "5"))

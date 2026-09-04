@@ -15,11 +15,12 @@ from properties.models import (
     SearchCondition,
 )
 from properties.notifier import KakaoNotifier
+from properties.scanning import AlertDecision, ScanDecision
 
 
 @override_settings(
-    REPORT_PUBLIC_URL="https://example.com/r/token/",
-    REPORT_STATS_URL="https://example.com/r/token/stats/",
+    REPORT_PUBLIC_URL="https://example.com/token/report/",
+    REPORT_STATS_URL="https://example.com/token/statistics/",
 )
 class DeliveryTests(TestCase):
     def setUp(self) -> None:
@@ -73,12 +74,25 @@ class DeliveryTests(TestCase):
         self.assertEqual(
             buttons,
             [
-                ("통계 보기", "https://example.com/r/token/stats/"),
-                ("전체 매물 보기", "https://example.com/r/token/"),
+                ("통계 보기", "https://example.com/token/statistics/"),
+                ("전체 매물 보기", "https://example.com/token/report/"),
             ],
         )
         self.assertIn("급매1", message)
         self.assertLessEqual(len(message), 200)
+
+    @mock.patch("properties.delivery.is_live", return_value=True)
+    def test_new_urgent_scan_counts_as_both_urgent_and_new(self, _live) -> None:
+        calls: list = []
+        scan = Scan.objects.create(started_at=self.listing.observed_at, success=True)
+        decision = ScanDecision(
+            scan=scan,
+            alerts=(AlertDecision(self.listing, is_urgent=True, is_new=True),),
+            matched=(self.listing,),
+        )
+        result = DeliveryService(self.notifier(calls)).send_scan_alerts(decision)
+        self.assertIn("급매 1건 · 신규 1건", result)
+        self.assertIn("급매1 · 신규1", calls[0][1])
 
     @mock.patch("properties.delivery.is_live", return_value=True)
     def test_statistics_line_leads_the_message_when_there_is_history(self, _live) -> None:
@@ -130,7 +144,7 @@ class DeliveryTests(TestCase):
             )
         failure = NotificationFailure.objects.get()
         self.assertIn("send", failure.error)
-        self.assertEqual(failure.link_url, "https://example.com/r/token/")
+        self.assertEqual(failure.link_url, "https://example.com/token/report/")
 
     @mock.patch("properties.delivery.is_live", return_value=True)
     def test_digest_sends_the_active_listings(self, _live) -> None:

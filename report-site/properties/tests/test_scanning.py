@@ -65,9 +65,11 @@ class RecordScanTests(TestCase):
         self.assertEqual(Observation.objects.get().building, "101동")
         self.assertEqual(Listing.objects.get().building, "101동")
 
-    def test_first_urgent_same_price_and_lower_price_alert_policy(self) -> None:
+    def test_only_a_new_urgent_listing_alerts(self) -> None:
         first = self.record([self.payload()])
         self.assertEqual(len(first.alerts), 1)
+        self.assertTrue(first.alerts[0].is_urgent)
+        self.assertTrue(first.alerts[0].is_new)
         listing = Listing.objects.get()
         first_seen = listing.first_seen_at
         self.assertEqual(listing.last_urgent_alert_price_won, 2_500_000_000)
@@ -77,15 +79,24 @@ class RecordScanTests(TestCase):
         self.assertEqual(repeat.alerts, ())
         listing.refresh_from_db()
         self.assertEqual(listing.first_seen_at, first_seen)
-        self.assertIn("이미", repeat.scan.notification)
+        self.assertIn("처음 발견된 매물이 아닙니다", repeat.scan.notification)
 
         self.started_at += timedelta(hours=1)
         lower = self.record(
             [self.payload(price_won=2_490_000_000, observed_at=self.started_at.isoformat())]
         )
-        self.assertEqual(len(lower.alerts), 1)
+        self.assertEqual(lower.alerts, ())
         listing.refresh_from_db()
-        self.assertEqual(listing.last_urgent_alert_price_won, 2_490_000_000)
+        self.assertEqual(listing.last_urgent_alert_price_won, 2_500_000_000)
+
+    def test_existing_listing_crossing_into_urgent_does_not_alert(self) -> None:
+        self.record([self.payload(price_won=2_550_000_000)])
+        self.started_at += timedelta(hours=1)
+        decision = self.record(
+            [self.payload(price_won=2_500_000_000, observed_at=self.started_at.isoformat())]
+        )
+        self.assertEqual(decision.alerts, ())
+        self.assertIn("처음 발견된 매물이 아닙니다", decision.scan.notification)
 
     def test_smoke_does_not_consume_alert_history(self) -> None:
         decision = self.record([self.payload()], notify_urgent=False, smoke=True)
