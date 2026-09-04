@@ -48,6 +48,23 @@ def _timezone_name() -> str:
     return rule.timezone if rule else settings.TIME_ZONE
 
 
+def _grouped_conditions(
+    conditions: list[SearchCondition], region: str
+) -> list[tuple[str, list[SearchCondition]]]:
+    """Group conditions into (region, items) pairs, scoped to one region.
+
+    An empty `region` means "every region" (unfiltered), matching how the
+    지역 select's "전체 지역" option resolves to `scope.region == ""`.
+    """
+    scoped = [c for c in conditions if c.region == region] if region else conditions
+    regions = [r for r in dict.fromkeys(c.region for c in scoped) if r]
+    grouped = [(r, [c for c in scoped if c.region == r]) for r in regions]
+    unassigned = [c for c in scoped if not c.region]
+    if unassigned:
+        grouped.append(("지역 미지정", unassigned))
+    return grouped
+
+
 def index(request) -> HttpResponse:
     rule = GlobalRule.objects.filter(pk=1).first()
     timezone_name = rule.timezone if rule else settings.TIME_ZONE
@@ -103,12 +120,7 @@ def index(request) -> HttpResponse:
     regions = [
         region for region in dict.fromkeys(c.region for c in all_conditions) if region
     ]
-    grouped = [
-        (region, [c for c in all_conditions if c.region == region]) for region in regions
-    ]
-    unassigned = [c for c in all_conditions if not c.region]
-    if unassigned:
-        grouped.append(("지역 미지정", unassigned))
+    grouped = _grouped_conditions(all_conditions, scope.region)
 
     response = render(
         request,
@@ -151,12 +163,7 @@ def stats(request) -> HttpResponse:
     regions = [
         region for region in dict.fromkeys(c.region for c in conditions) if region
     ]
-    grouped = [
-        (region, [c for c in conditions if c.region == region]) for region in regions
-    ]
-    unassigned = [c for c in conditions if not c.region]
-    if unassigned:
-        grouped.append(("지역 미지정", unassigned))
+    grouped = _grouped_conditions(conditions, scope.region)
 
     response = render(
         request,
