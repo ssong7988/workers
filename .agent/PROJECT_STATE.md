@@ -78,10 +78,14 @@ Airflow 작업 때는 WSL이 없어 전부 문서 조사만으로 코드를 짰�
 - `dagster dev -f definitions.py --host 127.0.0.1 --port 3000`을 실제로 띄워 **gRPC 크래시 없이** 정상 기동함을 확인했다(검색 당시 Windows에서 `cygrpc` 관련 크래시 리포트가 있었던 부분이라 특히 이걸 확인해야 했다).
 - `runsOrError` GraphQL 쿼리를 curl로 실제 호출해 응답 형태를 확인했다. **`status` 필드는 대문자(`"SUCCESS"`, `"FAILURE"`)이고 `startTime`/`endTime`은 ISO 문자열이 아니라 float epoch seconds다** — 둘 다 추측이 아니라 실측이다.
 - 과거 `site_watchdog_job` 수동 실행 검증에 더해, 통합 후에는 `property_pipeline_job`의 네 가지 모드(서버만, 서버→스캔, 최신 스캔 있음→리포트, 최신 스캔 없음→재스캔→리포트)를 외부 호출 스텁으로 `execute_in_process()` 실행해 순서와 성공을 확인했다. 실제 스캔·카카오 전송은 이 검증에서 호출하지 않았다.
+- **asset 전환(2026-09-04) 후 같은 검증을 다시 했다.** `_run_powershell`·`_run_manage`를 스텁으로 바꾸고 네 잡을 전부 `execute_in_process()`로 돌려, 각 잡이 정확히 자기 몫의 스크립트만 부르고(`server_check_job`→`ensure-site.ps1`만, `scan_job`→`ensure-site`+`run-scan`, `morning_report_job`→ 거기에 `send-report` 추가, `restart_report_site_job`→`restart-site.ps1`만) 선택된 asset이 전부 머티리얼라이즈되며 메타데이터에 수집 카운트 다섯 항목이 붙는 것을 확인했다. `ensure_fresh` 회귀도 명시적으로 확인했다 — 07:00 이후 성공 수집이 있으면 `run-scan.ps1`이 **호출되지 않고**, 머티리얼라이즈 메타데이터에 `재수집: 생략`이 남는다. 잘못된 `mode` 값은 `ValueError`로 거부되고 수집을 부르지 않는다.
+- **세 스케줄의 `run_config`가 각자의 잡에 대해 실제로 유효한지** `evaluate_tick()` + `validate_run_config()`로 확인했다. 구 이름(`scan_step`)을 넣으면 `DagsterInvalidConfigError`로 거부되는 것도 함께 확인했다 — 설정 오타가 8시 정각이 아니라 Launch 시점에 걸린다는 뜻이다.
+- **재시작 후 살아 있는 Dagster에 GraphQL로 직접 물어 반영을 확인했다.** 최종 형태(asset 2개)에서 `naver_listings`가 `graphName=naver_listings`, `opNames=['naver_listings.ensure_site_op', 'naver_listings.run_scan_op']`로 graph-backed asset임을 확인했고, 세 스케줄 모두 각자의 잡을 가리키며 `RUNNING`으로 복귀했다. 스케줄 이름을 바꾸지 않아 기존 schedule storage 상태가 그대로 이어졌다.
+- **`scan_status --json`을 운영 DB에 대해 실제로 실행했다.** 오늘 마지막 성공 수집(17:00) 기준 수집 204·조건 충족 93·급매 1·제외 111이 나왔고, 기존 exit-code 계약(있으면 0, 없으면 1)이 그대로임을 `--since=07:00`과 `--since=23:59` 양쪽으로 확인했다. dagster venv에서 finder venv의 python을 거쳐 호출해도 한글 키가 깨지지 않는 것을 `ensure_ascii` 덤프로 확인했다.
 - **`alert_on_failure` 훅이 실제로 실패 시 발동하는지**는 별도 스텁 스크립트로 검증했다 — `_run_manage`를 가짜 함수로 바꿔치기하고 일부러 실패하는 옵을 하나 만들어 `execute_in_process()`로 돌린 뒤, 훅이 정확히 `"doomed_job/doomed_op 실패: boom - deliberate test failure"` 형태로 `send_alert`를 호출했음을 어서션으로 확인했다. **실제 카카오 메시지는 보내지 않았다** — `_run_manage`를 스텁으로 바꿨기 때문에 진짜 `manage.py send_alert`가 호출되지 않았다.
 - `run-dagster.ps1`도 실제로 실행해 `data/dagster.yaml`이 생성되고(telemetry 끔) 서버가 뜨는 것까지 확인했다.
 - `report/dagster_client.py`의 `fetch_status()`를 report-site venv에서 **실제 Django 설정과 실제로 뜬 Dagster 웹서버**를 상대로 호출해 `reachable=True`가 나오는 것까지 확인했다(모킹이 아니라 진짜 HTTP 왕복).
-- **실행하지 않은 것(의도적으로):** 통합 잡에서 실제 `run-scan.ps1`과 `send-report.ps1`을 연달아 호출하는 종단 실행은 네이버 스캔·카카오 전송이라는 부작용이 있어 하지 않았다. 두 스크립트 자체는 독립적으로 검증돼 있고, 이번에는 Dagster 배선을 스텁으로 검증했다.
+- **실행하지 않은 것(의도적으로):** 실제 `run-scan.ps1`과 `send-report.ps1`을 연달아 호출하는 종단 실행은 네이버 스캔·카카오 전송이라는 부작용이 있어 하지 않았다. 두 스크립트 자체는 독립적으로 검증돼 있고, 이번에는 Dagster 배선을 스텁으로 검증했다.
 - 스모크 테스트에 쓴 프로세스는 전부 PID로 찾아 종료했고, `.dagster_home`/로그 파일도 지웠다. 커밋에는 소스 파일 4개(`definitions.py`, `requirements.txt`, `run-dagster.ps1`, `run-dagster.bat`)만 들어간다 — `.venv`와 `data/`는 `.gitignore`에 있다.
 
 ### 아키텍처 — Airflow 버전과의 결정적 차이
@@ -93,16 +97,20 @@ Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Djan
 
 이 단순함이 Dagster를 고른 실질적인 이유다 — WSL이 없어도 된다는 것뿐 아니라, 있었어도 코드가 훨씬 단순했을 것이다.
 
-### 통합 잡과 시간대별 실행
+### asset 체인과 시간대별 실행
 
 `dagster_project/definitions.py` 하나에 전부 있다.
 
-등록 잡은 두 개다. `property_pipeline_job`은 그래프가 항상 `ensure_site → scan_step → report_step` 순서이고 세 스케줄이 같은 잡에 모드만 다르게 넣는다. `restart_report_site_job`(2026-09-04 추가)은 `restart_report_site` 단일 op만 실행하는 스케줄 없는 잡으로, report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
+**2026-09-04에 op 기반에서 asset 기반으로 바꿨다.** 이전에는 `property_pipeline_job` 하나가 `ensure_site → scan_step → report_step`을 항상 전부 실행하고, 세 스케줄이 run config로 뒤 두 단계를 no-op으로 만들었다. 지금은 asset `naver_listings → morning_report`가 있고, 각 스케줄이 어디까지 실행할지 고른다. `naver_listings`는 `ensure_site_op → run_scan_op` 두 op을 품은 `graph_asset`이다.
 
-1. `server_only_schedule` — 7·8·12·17시를 제외한 매시 정각. 서버 확인만 하고 뒤 두 단계는 명시적으로 생략한다.
-2. `scan_schedule` — `0 7,12,17 * * *`. 서버 확인 후 실제 스캔, 리포트는 생략한다. 신규 급매 또는 `notify_new` 일반 신규의 카카오는 `record_scan()`이 처리한다.
-3. `morning_report_schedule` — `0 8 * * *`. 서버 확인 후 DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다.
-4. `alert_on_failure` — 두 잡 모두에 걸려 있고 재시도(`RetryPolicy(max_retries=1, delay=300)`)를 다 쓴 뒤 `manage.py send_alert`를 부른다.
+등록 잡은 네 개다. asset job 둘(`scan_job`, `morning_report_job`)과 op job 둘(`server_check_job`, `restart_report_site_job`). `server_check_job`은 `naver_listings` 안에서 쓰는 것과 **같은 `ensure_site_op`을 재사용**하므로 서버 확인 로직이 두 벌로 갈라지지 않는다. `restart_report_site_job`(2026-09-04 추가)은 스케줄 없는 잡이며 report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
+
+전환으로 없어진 것: `scan_step.mode="skip"`과 `report_step.enabled`. 남은 설정 손잡이는 `run_scan_op.mode`(`run` | `ensure_fresh`) 하나뿐이다. graph_asset이라 run config 경로가 한 겹 깊다 — `ops.naver_listings.ops.run_scan_op.config.mode`. 새로 생긴 것: Catalog의 lineage 그래프, 그리고 수집할 때마다 그 `Scan` 행의 수집 수·조건 충족 수·급매 수·제외 수가 머티리얼라이즈 메타데이터로 붙는다(`manage.py scan_status --json`을 새로 추가해 되읽는다). 잡 이름이 스케줄별로 갈라져서 실행 이력에서 어떤 성격의 런인지도 이제 잡 이름만으로 구분된다.
+
+1. `server_only_schedule` — 7·8·12·17시를 제외한 매시 정각. `server_check_job`(=`ensure_site_op`만) 실행. 설정 값이 아예 없다.
+2. `scan_schedule` — `0 7,12,17 * * *`. `scan_job`(=`naver_listings`, `mode: run`). 신규 급매 또는 `notify_new` 일반 신규의 카카오는 `record_scan()`이 처리한다.
+3. `morning_report_schedule` — `0 8 * * *`. `morning_report_job`(=`naver_listings → morning_report`, `mode: ensure_fresh`). DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다. 수집을 생략해도 `naver_listings`는 머티리얼라이즈된다 — "매물이 최신이다"라는 결과는 같기 때문이다.
+4. `alert_on_failure` — 네 잡 모두에 걸려 있고 재시도(`RetryPolicy(max_retries=1, delay=300)`)를 다 쓴 뒤 `manage.py send_alert`를 부른다.
 5. `restart_report_site_job` — `report-site/restart-site.ps1`을 실행한다. 8000번 포트를 듣는 `python` 프로세스를 찾아 종료(다른 이름의 프로세스면 건너뛰고 경고만 남긴다)하고, 포트가 풀릴 때까지 최대 20초 기다린 뒤 `run-site.ps1`을 hidden으로 새로 띄우고 `check-api`로 최대 60초 재확인한다. `real-estate-finder`는 스캔·리포트 전송이 매번 새 subprocess로 돌기 때문에 이런 재시작 잡이 필요 없다.
 
 **Dagster 자신(`definitions.py`)의 재시작은 job으로 만들 수 없다** — 자기 자신을 실행 중인 프로세스를 자기 job이 끄면 그 실행 자체가 중단된다. 대신 독립 스크립트 `dagster_project/restart-dagster.bat`(→ `restart-dagster.ps1`)을 추가했다(2026-09-04). 3000번 포트의 기존 `python` 프로세스를 종료 → 포트 해제 대기(최대 20초) → `run-dagster.ps1`을 hidden으로 새로 띄움 → GraphQL(`{__typename}`)로 최대 60초 재확인, 구조는 `restart-site.ps1`과 동일하다. `run-dagster.bat`도 기존 프로세스를 자동으로 끄지 않으므로(포트 3000이 이미 쓰이면 새 프로세스가 바인딩 실패), `definitions.py`를 고친 뒤에는 이 스크립트로 직접 재시작해야 한다.
@@ -111,7 +119,7 @@ Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Djan
 
 Airflow 화면(현재 `/airflow/`, 토큰 사용 시 `/<TOKEN>/airflow/`)과 나란히 유지한다. **Airflow 화면은 지우지 않았다** — `AIRFLOW_API_URL`이 비어 있으면 여전히 "설정되지 않았습니다"를 보여줄 뿐 죽지 않는다.
 
-- `report/dagster_client.py` — `runsOrError` GraphQL 쿼리 하나만 쓴다(위에서 실측 확인). **작업/스케줄 목록은 GraphQL로 조회하지 않는다** — 깨지기 쉬운 내부 쿼리 대신 `definitions.py`와 손으로 맞추는 잡 이름과 짧은 스케줄 요약(`JOB_NAME`, `SCHEDULES`)을 쓴다.
+- `report/dagster_client.py` — `runsOrError` GraphQL 쿼리 하나만 쓴다(위에서 실측 확인). **작업/스케줄 목록은 GraphQL로 조회하지 않는다** — 깨지기 쉬운 내부 쿼리 대신 `definitions.py`와 손으로 맞추는 정적 요약(`JOBS`)을 쓴다. 2026-09-04 asset 전환으로 스케줄된 잡 이름이 셋 다 바뀌어서 `JOBS`도 함께 갱신했다. **이 손 동기화는 실제로 한 번 어긋났다** — `restart_report_site_job`을 추가하고도 요약을 안 고쳐서 `/dagster/` 화면이 등록 잡을 계속 1개로 표시했다(2026-09-04 수정). 잡·스케줄을 추가하거나 이름을 바꾸면 같은 변경 안에서 `JOBS`도 고친다. 잡 개수는 이제 `{{ jobs|length }}`로 렌더링하고, 스케줄 없는 잡도 "수동 실행"으로 표에 남는다.
 - Django 요약 화면은 `/dagster/`에 있고 `@staff_member_required`를 유지한다. 실제 Dagster 웹 UI는 충돌하지 않는 `/dagster/console/`, 실행 목록은 `/dagster/console/runs`다. `raw`보다 화면의 용도를 설명하는 `console`을 사용하기로 했다.
 - `run-dagster.ps1`이 `report-site/.env`의 선택적 `REPORT_PATH_TOKEN`을 읽어 path prefix를 만들며, 값이 생기면 `/<TOKEN>/dagster/console/`로 바뀐다. Tailscale Funnel mount도 경로 변경 때 함께 갱신해야 한다.
 - 실행 중인 report-site와 Dagster를 새 코드로 재시작하고 Funnel mount를 `/dagster/console`로 옮겼다. 공개 `/report/`, `/statistics/`, `/dagster/console/runs`는 HTTP 200이고 `/dagster/`는 의도대로 admin 로그인으로 302, GraphQL은 200이다. 이전 `/r/`와 `/r/dagster/runs`는 404다. `check_report`, finder `check-api`가 통과했고 `dagster schedule list`에서 세 스케줄 모두 `RUNNING`이다.
@@ -142,7 +150,7 @@ Airflow 화면(현재 `/airflow/`, 토큰 사용 시 `/<TOKEN>/airflow/`)과 나
 
 - **무인 상태로 며칠 돌려본 적이 없다.** 오늘 한 것은 수동 실행과 짧은 smoke test뿐이다. Windows gRPC 이슈 리포트들이 언급한 크래시가 장시간 실행에서는 나타날 수도 있다 — 실제 스케줄을 붙이고 최소 하루 이상 지켜봐야 한다.
 - **스케줄러 데몬이 실제로 정시에 잡을 틱하는지는 안 봤다** — 통합 잡과 스케줄 정의 로드는 확인했지만 정각까지 기다린 검증은 하지 않았다.
-- 통합 잡의 실제 스캔·리포트 모드는 위에서 적었듯 종단 실행하지 않았다 — 특히 Dagster 서브프로세스에서도 Edge CDP·데스크톱 세션에 정상 접근하는지는 실제 스캔으로 한 번 더 확인해야 한다.
+- 스캔·리포트 asset의 실제 실행은 위에서 적었듯 종단 실행하지 않았다 — 특히 Dagster 서브프로세스에서도 Edge CDP·데스크톱 세션에 정상 접근하는지는 실제 스캔으로 한 번 더 확인해야 한다.
 - **컴퓨트 로그(옵별 stdout/stderr)가 Dagster UI 안에서는 여전히 기본적으로 꺼져 있다** — 시작 로그에 `PYTHONLEGACYWINDOWSSTDIO`를 설정해야 잡힌다는 경고가 떴다. 필요해지면 `run-dagster.ps1`에 그 환경변수를 추가한다. **UI 밖에서는 2026-09-04부터 `.logs/dagster_project/<날짜>.log`에 전체 콘솔이 남으므로 실무 진단 목적은 이걸로 대신할 수 있다.**
 - **부팅 시 자동 시작이 없다.** 지금은 `run-dagster.bat`을 사람이 띄워야 한다 — Windows 작업 스케줄러에 등록하는 문제는 아직 다루지 않았다(Airflow 계획의 "Airflow 자신이 죽으면 아무도 깨우지 않는다" 위험과 동일하게 적용된다).
 
@@ -721,6 +729,16 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - **카드 전송을 `POST /api/scans/` 요청 안에서 동기로 처리한다.** 큐를 도입하지 않는 대신 요청이 수 초~수십 초 걸린다. 단일 사용자 시스템이고 수집기는 어차피 대기 중이다.
 - **API는 `Authorization: Bearer <FINDER_API_TOKEN>`으로 보호한다.** 사이트가 Tailscale Funnel로 인터넷에 열려 있어 `/api/`도 외부에서 닿는다.
 - **Django admin에도 선택 토큰 규칙을 적용한다.** 현재는 `/admin/`, `REPORT_PATH_TOKEN`을 채우면 `/<TOKEN>/admin/`이다.
+
+### Dagster 구조에 대해 정한 것 (2026-09-04)
+
+- **파이프라인을 op가 아니라 asset으로 모델링한다.** `naver_listings → morning_report`를 선언하고, 각 스케줄이 어디까지 실행할지 고른다. 이유: 세 스케줄이 원하는 것은 결국 "어디까지"인데, op 방식에서는 그것을 "세 단계를 전부 실행하되 두 개는 아무것도 안 한다"로 우회 표현해야 했다. 설정 손잡이가 둘에서 하나(`run_scan_op.mode`)로 줄었고, `skip`·`enabled: false` 같은 가짜 실행이 없어졌다.
+- **서버 확인은 asset이 아니라 op다.** 전환 직후 `report_site_up`이라는 asset을 하나 뒀다가 같은 날 되돌렸다. asset은 끝나고 나서 남는 것인데 "서버가 응답했다"는 아무것도 남기지 않는다 — 실제로 셋 중 유일하게 머티리얼라이즈 메타데이터가 영구히 비어 있었다. 지금은 `ensure_site_op`이 `server_check_job`의 전부이자 `naver_listings`의 첫 단계로 재사용된다(`ensure-site.ps1`이 멱등이라 안전).
+- **그래서 `naver_listings`는 `@dg.graph_asset`이다.** 평범한 op은 asset의 상류가 될 수 없다 — `@dg.asset(deps=[some_op])`은 `ParameterCheckError`, `define_asset_job(selection=[asset, op])`은 `DagsterError`로 거부된다(둘 다 실측). 하지만 asset **안에서** op을 순서대로 돌리는 것은 `graph_asset`으로 가능하다. 대가는 서버 확인이 Catalog·Lineage에서 독립 노드로 안 보인다는 것이고, 대신 모든 런에 `naver_listings.ensure_site_op` step으로 남는다. "전제 조건을 그래프에 그릴 값어치가 있는가"에서 없다고 판단했다.
+- **잡을 셋으로 나눈 것이 lineage를 만든 것은 아니다.** Dagster에서 잡끼리는 여전히 이어지지 않는다. 순서를 아는 것은 asset 의존성이고, 잡은 그 그래프에서 얼마만큼을 실행할지 고르는 창이다. (전환 전에는 "잡을 쪼개면 `run_status_sensor`가 필요하다"는 이유로 단일 잡을 유지했는데, asset으로 옮기면서 그 전제 자체가 사라졌다.)
+- **Catalog는 탐지가 아니라 선언 기반이다.** Dagster는 PostgreSQL을 들여다보지 않는다. 상태를 Django/PostgreSQL이 소유해도 asset 선언은 성립한다 — Dagster가 직접 써야만 asset인 것이 아니다. 다만 선언만으로는 이름과 시각뿐이라, 값어치는 메타데이터를 돌려줄 때 생긴다.
+- **Catalog와 Lineage는 Dagster UI의 서로 다른 화면이다.** `/assets`(목록)와 `/lineage`(그래프)로 좌측 내비게이션에 따로 있다. 같은 asset 집합의 두 표현이다.
+- **그래서 `manage.py scan_status`에 `--json`을 추가했다.** Dagster가 `run-scan.ps1`을 불투명한 subprocess로 실행해 종료 코드밖에 모르므로, 수집 후 방금 기록된 `Scan` 행의 카운트를 되읽어 머티리얼라이즈 메타데이터로 붙인다. 기존 exit-code 계약(0=있음/1=없음)은 그대로 두고 stdout에 JSON 한 줄만 추가했으며, 페이로드는 순수 ASCII라 Windows 콘솔 코드페이지를 추측하지 않아도 된다. 이 조회가 실패해도 머티리얼라이즈는 성공한다 — 장식이 본 작업을 깨뜨리면 안 된다.
 
 ### 이전에 정해져 유지되는 것
 
