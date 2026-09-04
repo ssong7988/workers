@@ -67,6 +67,8 @@ Dagster의 실행 이력도 같은 PostgreSQL DB에 들어가지만 Django 테�
 
 `dagster_project/run-dagster.ps1`이 이 schema를 가리키는 `data/dagster.yaml`을 매번 다시 쓴다(손으로 고쳐도 다음 실행에서 덮어써진다). 비밀번호는 `report-site/.env`의 `POSTGRES_PASSWORD`를 그대로 읽어 쓰므로 따로 설정할 것이 없다.
 
+연결 옵션에 `-c timezone=UTC`가 함께 들어간다. **빼면 안 된다** — 이 DB의 기본 타임존이 `Asia/Seoul`이라, PostgreSQL이 자기 `CURRENT_TIMESTAMP` 기본값으로 채우는 컬럼(`runs.create_timestamp` 등)에 KST 벽시계가 들어가고 Dagster는 그것을 UTC로 읽는다. 그러면 모든 실행이 9시간 미래로 기록돼 Dagster UI의 Overview 타임라인에 아무것도 안 그려진다(Runs 목록은 멀쩡해 보여서 더 헷갈린다).
+
 카카오톡 전송에는 `kakao-notifier/.env`와 `kakao-notifier/data/kakao-token.json`이 필요하다. 아직 없다면 `kakao-notifier/README.md`의 앱 등록과 최초 인증 절차를 먼저 수행한다. 인증·토큰 갱신·장애 대응의 상세 설명은 `kakao-notifier/README.md`에서 연결되는 `.docs/kakao-notifier/` 문서를 본다. 비밀키와 토큰은 Git에 커밋하지 않는다.
 
 ## 자주 쓰는 개별 명령

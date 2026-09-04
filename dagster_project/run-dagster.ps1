@@ -89,10 +89,19 @@ $env:DAGSTER_PG_PASSWORD = $PgPassword
 # opts out of the anonymous usage telemetry Dagster sends by default - this
 # is a personal single-PC deployment, not something to phone home from. Also
 # points run/event-log/schedule storage at PostgreSQL (see comment above).
-# Written once; hand edits to this file afterward are left alone.
+# Rewritten on every launch, so a change here actually reaches the running
+# instance; hand edits to data/dagster.yaml do not survive a restart.
+#
+# `timezone=UTC` is not cosmetic. This database's default TimeZone is
+# Asia/Seoul, and the columns PostgreSQL fills from its own
+# CURRENT_TIMESTAMP default (runs.create_timestamp, job_ticks.*, ...) then
+# hold KST wall-clock time, which Dagster reads back as UTC - every run
+# lands 9 hours in the future, so the Overview timeline draws nothing while
+# the Runs list still looks fine. SQLite never showed this because its
+# CURRENT_TIMESTAMP is always UTC. Scoped to Dagster's own connections so
+# Django (which pins UTC per session itself) is untouched.
 $ConfigFile = Join-Path $DataDir 'dagster.yaml'
-if (-not (Test-Path $ConfigFile)) {
-    @"
+@"
 telemetry:
   enabled: false
 
@@ -106,9 +115,8 @@ storage:
       db_name: property_report
       port: 5432
       params:
-        options: "-c search_path=dagster"
+        options: "-c search_path=dagster -c timezone=UTC"
 "@ | Set-Content -Path $ConfigFile -Encoding utf8
-}
 
 Write-Host "Dagster webserver: http://127.0.0.1:3000$DagsterPathPrefix/runs" -ForegroundColor Green
 Write-Host "DAGSTER_HOME: $DataDir"
