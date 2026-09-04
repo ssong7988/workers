@@ -1,14 +1,14 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (**공개 경로를 `/report/`, `/statistics/`, `/dagster/`로 명시하고, 네이티브 Dagster UI는 `/dagster/console/`로 분리**. `REPORT_PATH_TOKEN`을 채우면 나중에 모든 비-API 경로 앞에 `/<TOKEN>`이 붙는다. Dagster는 `property_pipeline_job` 하나이며 급매 카카오는 신규 급매에만 보낸다.)
+마지막 갱신: 2026-09-04 (**상세 문서를 `.docs/`로 분리하고 `kakao-notifier` 문서를 추가했으며, 사용하지 않는 예전 `property-report-site/` UI를 제거했다.** 공개 경로는 `/report/`, `/statistics/`, `/dagster/`이고 네이티브 Dagster UI는 `/dagster/console/`이다.)
 
 ## Current Architecture
 
-- 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.agent/docs/ARCHITECTURE.md`에 정리되어 있다.
+- 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.docs/ARCHITECTURE.md`에 정리되어 있다. `.agent/`에는 최신 운영 상태인 이 파일만 두고 장기 상세 문서는 `.docs/`에서 관리한다.
 - `real-estate-finder/`는 네이버 부동산 매물을 수집해 `report-site` API로 넘기기만 한다. 조건 판정·상태·표현·전송 코드는 없다.
 - `report-site/properties/`가 카카오 메시지 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. finder 쪽 중복 코드는 8단계에서 삭제했다.
 - `report-site/`(Django + waitress)가 PostgreSQL을 요청마다 읽어 화면을 렌더링한다. `/report/`는 활성 `Listing`으로 매물 리포트를, `/statistics/`는 `Observation` 이력으로 날짜별 호가 분포를, `/dagster/`는 운영 요약을 그린다. `REPORT_PATH_TOKEN`을 채우면 모두 `/<TOKEN>/` 아래로 이동한다. 빌드나 배포 단계는 없다.
-- `property-report-site/site-app/`(예전 Next.js/Codex Sites UI)은 서빙 경로에서 은퇴했다. 루트와 별도 중첩 Git 저장소이며 삭제하지 않고 참고용으로만 남겼다.
+- 예전 Next.js/Codex Sites UI였던 `property-report-site/`는 운영 코드가 참조하지 않는 것을 확인한 뒤 2026-09-04 저장소에서 제거했다. 현재 웹 화면은 `report-site/`만 소유한다.
 - 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
 - 급매가 아닌 전체 결과를 카카오톡으로 보내는 진입점은 `real-estate-finder/send-report.bat`이며 `report-site`의 `manage.py send_digest`를 실행한다. 브라우저·로그인·웹 서버가 필요 없고 DB만 있으면 된다.
 - 리포트 서버 실행 진입점은 `report-site/run-site.bat` 또는 `report-site/run-site.ps1`이다.
@@ -110,6 +110,10 @@ Airflow 화면(현재 `/airflow/`, 토큰 사용 시 `/<TOKEN>/airflow/`)과 나
 - `run-dagster.ps1`이 `report-site/.env`의 선택적 `REPORT_PATH_TOKEN`을 읽어 path prefix를 만들며, 값이 생기면 `/<TOKEN>/dagster/console/`로 바뀐다. Tailscale Funnel mount도 경로 변경 때 함께 갱신해야 한다.
 - 실행 중인 report-site와 Dagster를 새 코드로 재시작하고 Funnel mount를 `/dagster/console`로 옮겼다. 공개 `/report/`, `/statistics/`, `/dagster/console/runs`는 HTTP 200이고 `/dagster/`는 의도대로 admin 로그인으로 302, GraphQL은 200이다. 이전 `/r/`와 `/r/dagster/runs`는 404다. `check_report`, finder `check-api`가 통과했고 `dagster schedule list`에서 세 스케줄 모두 `RUNNING`이다.
 - 선택 경로 계산은 별도 프로세스에서 빈 값→`/report`·`/statistics`·`/dagster`·`/dagster/console`, 값 있음→`/<TOKEN>/report`·`/<TOKEN>/statistics`·`/<TOKEN>/dagster`·`/<TOKEN>/dagster/console` 양쪽을 확인했다. 관련 테스트 76개 중 기존 Known Issue `test_urgent_section_respects_region_filter` 1개만 실패하고 75개가 통과했으며, `manage.py check`, `makemigrations --check --dry-run`, PowerShell 문법 검사도 통과했다. 운영 PostgreSQL 계정에는 `CREATEDB`가 없어 테스트는 운영 DB와 분리한 메모리 SQLite에서 실행했다.
+- Dagster를 처음 다루는 사람을 위해 `.docs/dagster_project/`에 코드 지도, PostgreSQL과 Dagster 메타데이터의 차이, console/Funnel 연결, 시간대별 설정, Launchpad 수동 실행 예시와 장애 확인 절차를 정리했다.
+- 같은 수준의 구성요소별 문서로 `.docs/real-estate-finder/`와 `.docs/report-site/`를 추가했다. 수집기는 Edge/CDP·관심단지·묶음 매물·전체 실패 보호·API 전달과 운영 진단을, Django는 모델·트랜잭션·판정/알림 정책·통계 모집단·API/카카오 계약·서버/admin 운영을 코드 기준으로 나눠 설명한다.
+- `.docs/kakao-notifier/`에 모듈 경계, OAuth 최초 인증, 액세스/리프레시 토큰 수명주기, 텍스트·다중 버튼·이미지 API, Django 동적 로딩 경로, 운영 점검과 장애 대응을 소스 기준으로 정리했다. 현재 운영 발송은 Django가 메시지 정책을 결정하고 `kakao-notifier`는 인증·HTTP 어댑터 역할만 한다.
+- 기존 상세 문서를 저장소 루트 `.docs/`로 옮기고 `AGENTS.md`, README, 실행 스크립트 주석, 설정 설명과 상태 문서의 경로 참조를 함께 갱신했다.
 
 ### 아직 검증하지 못한 것 (다음에 확인할 목록)
 
@@ -420,7 +424,7 @@ cd ..\real-estate-finder
 
 ### 5단계 — 문서
 
-`.agent/docs/RUNBOOK.md`에 "관심단지를 새로 추가했을 때" 절(= 이 문서의 1~2단계)을 넣고, `.agent/PROJECT_STATE.md`의 단지 수·지역 수를 갱신하고, 이 `Active Work` 절을 완료 기록으로 정리한다. `AGENTS.md`의 프로젝트 개요 한 줄(과천 중심 표현)도 확인한다.
+`.docs/RUNBOOK.md`에 "관심단지를 새로 추가했을 때" 절(= 이 문서의 1~2단계)을 넣고, `.agent/PROJECT_STATE.md`의 단지 수·지역 수를 갱신하고, 이 `Active Work` 절을 완료 기록으로 정리한다. `AGENTS.md`의 프로젝트 개요 한 줄(과천 중심 표현)도 확인한다.
 
 ### 위험
 
@@ -563,8 +567,8 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 #### 9단계에서 완료한 문서
 
-- `.agent/docs/ARCHITECTURE.md`를 역할 경계 중심으로 다시 썼다(350 → 273줄). 수집기 절과 애플리케이션 절을 나누고, "이 작업에는 어떤 파일을 읽는가" 표를 `properties/`·`api/`·`report/` 기준으로 다시 매핑했다. 에이전트가 걸려 넘어질 결과 세 가지를 명시했다 — 스캔이 서버를 요구한다, 코드 변경 후 서버 재시작이 필요하다, 테스트에는 DB 생성 권한이 필요하다.
-- `.agent/docs/RUNBOOK.md`: 진입점이 셋이 되었고 리포트 서버를 먼저 켠다. PostgreSQL 준비와 `import_searches`를 최초 설정에 넣었고, digest·카드 미리보기·리포트 확인을 Django 관리 명령으로 바꿨다. "서버가 꺼져 있어도 스캔은 된다"는 설명을 반대로 고쳤다.
+- `.docs/ARCHITECTURE.md`를 역할 경계 중심으로 다시 썼다(350 → 273줄). 수집기 절과 애플리케이션 절을 나누고, "이 작업에는 어떤 파일을 읽는가" 표를 `properties/`·`api/`·`report/` 기준으로 다시 매핑했다. 에이전트가 걸려 넘어질 결과 세 가지를 명시했다 — 스캔이 서버를 요구한다, 코드 변경 후 서버 재시작이 필요하다, 테스트에는 DB 생성 권한이 필요하다.
+- `.docs/RUNBOOK.md`: 진입점이 셋이 되었고 리포트 서버를 먼저 켠다. PostgreSQL 준비와 `import_searches`를 최초 설정에 넣었고, digest·카드 미리보기·리포트 확인을 Django 관리 명령으로 바꿨다. "서버가 꺼져 있어도 스캔은 된다"는 설명을 반대로 고쳤다.
 - `AGENTS.md`: 역할 경계를 규칙으로 못박았다(판정·표현·전송 코드를 수집기로 되돌려 놓지 않는다). 검증 명령과 비밀 키 목록도 갱신했다.
 - `real-estate-finder/README.md`와 루트 `README.md`를 다시 썼다. 사라진 명령과 설정 파일 설명을 걷어내고 실행 순서를 명확히 했다.
 - 문서 전체에서 `state.json`, `searches.local.yaml`, `scheduled-run`, `validate-config`, `explain-filters`와 옛 CLI 명령 참조가 남아 있지 않음을 확인했다.
@@ -664,6 +668,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ## Known Issues
 
+- **네이티브 `/dagster/console/`은 현재 Django 인증을 거치지 않는다.** `/dagster/` 요약은 staff 로그인이 필요하지만 console은 Funnel이 3000번 포트로 직접 프록시하며, 현재 `REPORT_PATH_TOKEN`도 비어 있다. URL을 아는 외부 사용자는 실제 스캔·카카오 발송이 가능한 job을 실행할 수 있다. 필요하면 console Funnel mount를 제거해 Tailscale 사설망 Serve로만 열거나 인증 reverse proxy 뒤로 옮겨야 한다.
 - **`report-site/run-site.bat`이 실행 중이 아니면 공개 리포트 주소가 죽는다.** PC 종료·절전도 마찬가지다. 자동 시작을 등록하지 않기로 했으므로(Key Decisions 참고) 리포트를 외부에서 열어야 할 때 사용자가 직접 켜야 한다. 다행히 조용히 깨지지는 않는다 — 서버가 없으면 `is_live()`가 실패해 카카오 메시지에서 두 버튼이 빠지고 텍스트만 나간다.
 - **이제 스캔 자체가 리포트 서버 실행을 요구한다.** `run-scan.ps1`의 1단계 `check-api`가 실패하면 브라우저를 열지 않고 멈춘다. 예전처럼 "서버가 꺼져 있어도 스캔은 된다"가 더 이상 성립하지 않는다. 자동 시작(작업 스케줄러 로그온 트리거) 등록 여부를 다시 판단할 시점이다.
 - **Django admin 로그인 화면이 공개 `/admin/`에 노출된다.** 토큰을 다시 켜기 전에는 경로 은닉도 없으므로 특히 강한 비밀번호가 필요하다.
@@ -672,13 +677,11 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 현재 `REPORT_PATH_TOKEN`은 비어 있어 `/report/`, `/statistics/`, `/dagster/`가 바로 공개된다. 나중에 값을 채우면 우발적 노출을 줄일 수 있지만, 주소가 유출되면 인증 없이 누구나 볼 수 있다는 한계는 같다.
 - **코드를 바꿨으면 리포트 서버를 재시작해야 한다.** 실행 중인 프로세스는 옛 코드를 들고 있다. 이 구조에서는 재시작을 잊어도 조용히 넘어가지 않고 `check-api`가 404로 실패해 드러난다.
 - **과천·판교 조건은 신규 급매일 때만 카카오톡이 온다.** 기존 매물이 나중에 급매 기준을 통과하거나 더 내려가도 보내지 않는다. `notify_new`가 켜진 광교 4개는 급매 여부와 별개로 일반 신규도 보낸다. 사유는 항상 콘솔과 `Scan.notification`에 남는다. 지금 전체를 받고 싶으면 `send-report.bat`이다.
-- 루트와 예전 UI(`property-report-site/site-app/`)가 중첩 Git 저장소로 남아 있다. 그 디렉터리를 다시 건드릴 일이 생기면 UI 커밋 누락이나 루트 포인터만 변경되는 실수에 유의한다.
-- 마지막 `npm audit` 결과는 취약점 11개(낮음 1, 보통 2, 높음 8)였다(예전 UI 저장소 기준, 더 이상 서빙 경로가 아니므로 우선순위 낮음).
 - **Django 테스트에는 DB 생성 권한이 필요하다.** `property_report` 역할에 `CREATEDB`가 없어 `manage.py test`가 테스트 DB를 만들지 못한다. 테스트 동안만 부여했다가 되돌린다(`ALTER ROLE property_report CREATEDB;` → `NOCREATEDB;`).
 - **검색 조건을 admin에서 바꾸면 과거 관측은 옛 기준으로 판정된 채 남는다.** 통계가 새 조건과 어긋나므로 `manage.py reclassify_observations`로 다시 판정한다. 다시 판정은 *현재* 조건을 쓰므로 당시 조건과 다를 수 있다 — 의도된 절충이다.
 - 공개 리포트에는 매물 정보가 노출되므로 민감한 개인 데이터나 인증 정보를 포함하지 않아야 한다.
 - **관심단지 하나가 실패하면 스캔 전체가 실패로 끝난다(2026-09-04 관측).** `collect_favorites_snapshot()`이 단지 목록을 순회하다 예외가 나면 그 자리에서 전체가 중단되고, 활성 조건 전부가 실패로 보고된다. 이제 단지별 진행 로그(`관심단지 N/총 'OO' 확인 중...`)와 필터 에러에 단지명이 붙어 어디서 막혔는지는 바로 보이지만, 부분 실패를 허용하도록 격리하는 작업은 아직 하지 않았다.
-- **Edge 창을 최소화하거나 백그라운드에 두면 스캔이 "네이버 로그인 상태가 만료되었습니다"로 오탐 실패할 수 있다(2026-09-04).** Chromium이 비활성 탭의 렌더링을 늦춰, `page.goto()` 직후 로그인 헤더가 아직 안 그려진 상태를 로그아웃으로 오인했다. `_raise_if_blocked()`에 짧은 재시도와 `page.bring_to_front()`를 추가해 완화했지만, OS 창이 완전히 최소화된 경우까지는 보장하지 못한다 — 스캔 중에는 Edge 창을 보이는 상태로 두는 것이 가장 확실하다(`.agent/docs/RUNBOOK.md` 참고).
+- **Edge 창을 최소화하거나 백그라운드에 두면 스캔이 "네이버 로그인 상태가 만료되었습니다"로 오탐 실패할 수 있다(2026-09-04).** Chromium이 비활성 탭의 렌더링을 늦춰, `page.goto()` 직후 로그인 헤더가 아직 안 그려진 상태를 로그아웃으로 오인했다. `_raise_if_blocked()`에 짧은 재시도와 `page.bring_to_front()`를 추가해 완화했지만, OS 창이 완전히 최소화된 경우까지는 보장하지 못한다 — 스캔 중에는 Edge 창을 보이는 상태로 두는 것이 가장 확실하다(`.docs/RUNBOOK.md` 참고).
 
 ## Key Decisions
 
@@ -700,7 +703,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - **리포트 서버 자동 시작(작업 스케줄러)은 등록하지 않는다.** 상시 실행 프로세스를 늘리지 않는 대신, 서버가 꺼져 있으면 카카오 카드에서 버튼이 빠지는 것을 정상 동작으로 받아들인다. (전환 후 스캔이 서버를 요구하게 되면 이 결정을 재검토한다.)
 - 표시 로직은 한 곳에만 둔다. 가격/면적 포맷이 카카오 카드와 웹 리포트 사이에서 갈라지지 않게 하기 위함이다. 전환 후 그 한 곳은 `report-site/properties/report.py`가 된다.
 - `is_live()` 게이트는 유지한다. "리포트 서버가 살아있고 이번 조회를 서빙 중인가"를 확인하며, PC가 꺼져 있으면 카카오 카드에서 `전체 매물 보기` 버튼이 올바르게 빠진다.
-- 예전 `property-report-site/site-app/`은 삭제하지 않는다. 별도 중첩 Git 저장소라 삭제는 되돌리기 어렵다.
+- **은퇴한 UI는 운영 참조가 없으면 보존하지 않는다.** `property-report-site/`는 중첩 저장소가 깨끗하고 운영 소스 참조가 없음을 확인한 뒤 2026-09-04 제거했다. 과거 UI가 필요하면 Git 이력의 gitlink 커밋에서 찾는다.
 - `KAKAO_REPORT_URL`(루트 `.env`)과 `REPORT_PATH_TOKEN`(`report-site/.env`)은 분리해서 관리한다. 전자는 공유 공개 URL, 후자는 Django 라우팅에만 쓰는 비밀 토큰이다.
 - 고정 도메인이 바뀌면(Tailscale 호스트명 포함) 카카오 개발자 콘솔의 웹 도메인과 `KAKAO_REPORT_URL`을 함께 변경한다.
 - 토큰, 비밀번호, 쿠키, 인증 코드는 Git 및 상태 문서에 기록하지 않는다.

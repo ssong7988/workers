@@ -58,7 +58,7 @@ Copy-Item .env.example .env    # FINDER_API_TOKEN, POSTGRES_PASSWORD를 채운�
 
 검색 조건은 이후 Django admin(`.../admin/`, 토큰 사용 시 `.../<TOKEN>/admin/`)에서 고친다. `properties/seed/searches.yaml`은 첫 시드일 뿐이다.
 
-카카오톡 전송에는 `kakao-notifier/.env`와 `kakao-notifier/data/kakao-token.json`이 필요하다. 아직 없다면 `kakao-notifier/README.md`의 앱 등록과 최초 인증 절차를 먼저 수행한다. 비밀키와 토큰은 Git에 커밋하지 않는다.
+카카오톡 전송에는 `kakao-notifier/.env`와 `kakao-notifier/data/kakao-token.json`이 필요하다. 아직 없다면 `kakao-notifier/README.md`의 앱 등록과 최초 인증 절차를 먼저 수행한다. 인증·토큰 갱신·장애 대응의 상세 설명은 `kakao-notifier/README.md`에서 연결되는 `.docs/kakao-notifier/` 문서를 본다. 비밀키와 토큰은 Git에 커밋하지 않는다.
 
 ## 자주 쓰는 개별 명령
 

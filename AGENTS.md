@@ -6,8 +6,8 @@
 
 - 의미 있는 작업을 시작하기 전에 반드시 `.agent/PROJECT_STATE.md`를 끝까지 읽는다.
 - 현재 아키텍처, 배포 상태, 진행 중인 일, 알려진 문제, 주요 결정은 `.agent/PROJECT_STATE.md`에 있다. 기억이나 추측보다 이 파일을 우선한다.
-- 더 자세한 문서가 필요하면 `.agent/docs/`를 확인한다.
-- 사람 또는 자동화가 에이전트 없이 실행하는 방법과 엔트리 포인트는 `.agent/docs/RUNBOOK.md`를 기준으로 한다.
+- 더 자세한 문서가 필요하면 `.docs/`를 확인한다.
+- 사람 또는 자동화가 에이전트 없이 실행하는 방법과 엔트리 포인트는 `.docs/RUNBOOK.md`를 기준으로 한다.
 - 아키텍처, 배포 상태, 활성 작업, 알려진 문제 또는 결정이 실질적으로 바뀌면 작업 종료 전에 `.agent/PROJECT_STATE.md`도 갱신한다.
 - 비밀번호, 토큰, 쿠키, 인증 코드와 같은 비밀정보는 문서나 Git에 기록하지 않는다.
 
@@ -20,7 +20,6 @@
 - `real-estate-finder/`: **수집 전용.** 네이버에서 본 매물을 판정 없이 전량 `report-site` API로 넘긴다. 조건 판정, 상태, 표현, 전송 코드가 없다.
 - `report-site/`: **애플리케이션.** PostgreSQL에 원본을 전부 저장하고, 조건 필터·급매/신규/알림 판정·상태 갱신을 하고, 웹 리포트와 가격 통계를 렌더링하고, 카카오 메시지를 만들어 보낸다. 내부는 `properties/`(도메인) · `api/`(수집기 전용 경계) · `report/`(공개 화면)으로 나뉜다.
 - `kakao-notifier/`: 카카오 인증, 토큰 관리, 메시지 전송
-- `property-report-site/site-app/`: 예전 Next.js/Codex Sites UI. 서빙 경로에서 은퇴했고 별도 중첩 Git 저장소로 참고용으로만 남아 있다.
 - 공개 리포트는 `report-site/`를 Tailscale Funnel로 노출한 주소를 쓴다. 실제 주소는 `.agent/PROJECT_STATE.md`에서 확인한다.
 - 검색 조건은 PostgreSQL의 `SearchCondition`이며 Django admin에서 고친다. `report-site/properties/seed/searches.yaml`은 초기 시드일 뿐 운영 소스가 아니다.
 - **스캔은 리포트 서버 실행을 요구한다.** 데이터가 갈 곳이 없기 때문이다. `run-scan.ps1`은 브라우저를 열기 전에 `/api/health/`를 확인하고 실패하면 멈춘다.
@@ -48,7 +47,6 @@
 - 카카오톡의 공개 링크에는 `127.0.0.1`이나 `localhost`를 사용하지 않는다.
 - 카카오 메시지의 `통계 보기`·`전체 매물 보기` 버튼은 리포트 서버(`report-site/`)가 현재 조회 시각과 일치하는 데이터를 서빙 중일 때만 포함한다. 이미지는 보내지 않는다.
 - `report-site/.env`의 `REPORT_PATH_TOKEN`, `FINDER_API_TOKEN`, `POSTGRES_PASSWORD`와 루트 `.env`의 `KAKAO_REPORT_URL`은 Git에 커밋하지 않는다.
-- 예전 `property-report-site/site-app/`은 루트와 별도 Git 저장소다. 그 디렉터리를 다시 건드릴 일이 생기면 중첩 저장소에서 먼저 커밋한 뒤 루트에서 포인터 변경을 커밋한다.
 - 배포, 외부 메시지 전송, 토큰 갱신, Tailscale Funnel 설정은 대상과 결과를 확인하고 수행한다.
 
 ## 주요 검증 명령

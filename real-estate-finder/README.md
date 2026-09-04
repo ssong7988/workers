@@ -4,7 +4,7 @@
 
 여기서 하는 일은 그게 전부입니다. 어떤 매물이 조건에 맞는지, 급매인지, 신규인지, 카카오톡을 보낼지, 화면에 어떻게 보일지는 전부 `report-site`(Django + PostgreSQL)가 결정합니다. 그래서 **스캔하려면 리포트 서버가 켜져 있어야 합니다** — 수집한 데이터가 갈 곳이 없기 때문입니다.
 
-전체 구조는 [`.agent/docs/ARCHITECTURE.md`](../.agent/docs/ARCHITECTURE.md), 운영 절차는 [`.agent/docs/RUNBOOK.md`](../.agent/docs/RUNBOOK.md)를 참고하세요.
+전체 구조는 [`.docs/ARCHITECTURE.md`](../.docs/ARCHITECTURE.md), 운영 절차는 [`.docs/RUNBOOK.md`](../.docs/RUNBOOK.md)를 참고하세요.
 
 ## 가장 빠른 실행
 

@@ -22,13 +22,6 @@ Thumbs.db
 real-estate-finder/data/
 real-estate-finder/config/searches.local.yaml
 
-# Hosted report workspace (tracked separately, retired as the serving path;
-# see .agent/PROJECT_STATE.md)
-property-report-site/.tools/
-property-report-site/node-v*.zip
-property-report-site/node-shasums.txt
-property-report-site/*.tar.gz
-
 # report-site/ (Django). The database is PostgreSQL, outside the repo;
 # collectstatic output and any scratch files are generated.
 report-site/db.sqlite3

@@ -34,7 +34,7 @@ Claude-Session: https://claude.ai/code/session_01QyJfWuG4BG4c8NpzBh7aV3
 
 ## 4. 문서 갱신 (필요한 경우에만)
 
-- 이번 변경이 `.agent/docs/RUNBOOK.md`(실행 방법, 엔트리 포인트)나 `.agent/docs/ARCHITECTURE.md`(구조, 데이터 흐름)에 영향을 주는지 판단한다.
+- 이번 변경이 `.docs/RUNBOOK.md`(실행 방법, 엔트리 포인트)나 `.docs/ARCHITECTURE.md`(구조, 데이터 흐름)에 영향을 주는지 판단한다.
 - 영향이 없다면 건드리지 않는다. 억지로 문서를 늘리지 않는다.
 - 영향이 있다면 해당 문서에서 실제로 달라진 부분만 정확히 고친다.
 

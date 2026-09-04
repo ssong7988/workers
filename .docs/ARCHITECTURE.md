@@ -1,6 +1,6 @@
 # 프로젝트 아키텍처와 코드 탐색 가이드
 
-이 문서는 에이전트가 저장소 전체를 읽지 않고도 현재 구조를 이해하고, 작업에 필요한 파일만 선택하도록 돕는 상세 지도다. 현재 운영 상태와 최근 결과는 `../PROJECT_STATE.md`, 사람이 실행하는 절차는 `RUNBOOK.md`를 기준으로 한다.
+이 문서는 에이전트가 저장소 전체를 읽지 않고도 현재 구조를 이해하고, 작업에 필요한 파일만 선택하도록 돕는 상세 지도다. 현재 운영 상태와 최근 결과는 `../.agent/PROJECT_STATE.md`, 사람이 실행하는 절차는 `RUNBOOK.md`를 기준으로 한다.
 
 ## 1. 한눈에 보는 구조
 
@@ -34,23 +34,19 @@ report-site                   애플리케이션 (Django + PostgreSQL)
 ```text
 outputs/
 ├── .agent/
-│   ├── PROJECT_STATE.md       # 최신 운영 상태와 주요 결정
-│   └── docs/
-│       ├── ARCHITECTURE.md    # 이 문서: 구조와 코드 탐색 지도
-│       ├── README.md          # 문서 색인
-│       └── RUNBOOK.md         # 사람이 실행하는 운영 절차
+│   └── PROJECT_STATE.md       # 최신 운영 상태와 주요 결정
+├── .docs/                     # 장기 보존 상세 문서
+│   ├── ARCHITECTURE.md        # 이 문서: 구조와 코드 탐색 지도
+│   ├── README.md              # 문서 색인
+│   └── RUNBOOK.md             # 사람이 실행하는 운영 절차
 ├── real-estate-finder/        # 수집기 (Python, Playwright/Edge CDP)
 ├── report-site/               # 애플리케이션 (Django + PostgreSQL)
 ├── kakao-notifier/            # 독립 실행 가능한 카카오 API 모듈
-├── property-report-site/
-│   └── site-app/              # 은퇴한 UI. 별도 Git 저장소, 참고용으로만 보존
 ├── .env                        # KAKAO_REPORT_URL (공유, Git 제외)
 ├── load-env.ps1                # 위 .env를 여러 PS 스크립트가 공유하는 헬퍼
 ├── AGENTS.md                   # 모든 코딩 에이전트의 공통 규칙
 └── README.md                   # 사용자용 짧은 소개
 ```
-
-`property-report-site/site-app/`은 루트 Git이 gitlink로 추적하는 별도 Git 저장소다. 서빙 경로에서 은퇴했고 코드가 이를 참조하지 않는다. 다시 건드릴 일이 생기면 중첩 저장소에서 먼저 커밋한 뒤 루트에서 포인터 변경을 커밋한다. 루트에서만 diff를 보면 내부 변경이 아니라 포인터 변경만 보인다.
 
 ## 3. 수집기
 
@@ -201,9 +197,12 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 
 버튼 링크의 도메인은 카카오 개발자 콘솔의 **웹 도메인**에 등록돼 있어야 한다. 등록되지 않은 도메인은 카카오가 조용히 다른 주소로 치환하므로, URL을 바꿀 때는 `.env`만 고치고 끝내지 말고 콘솔도 함께 확인한다.
 
+OAuth와 토큰 수명주기, 함수별 메시지 계약, 운영 장애 대응은
+`kakao-notifier/README.md`에서 시작하는 구성요소 문서에 따로 정리되어 있다.
+
 ## 6. 작업별 최소 읽기 경로
 
-모든 작업은 먼저 `../PROJECT_STATE.md`를 읽는다.
+모든 작업은 먼저 `../.agent/PROJECT_STATE.md`를 읽는다.
 
 | 작업 | 먼저 읽을 파일 | 관련 검증 |
 |---|---|---|
@@ -227,7 +226,6 @@ Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
 다음은 보통 처음부터 읽지 않는다.
 
 - `collector.py` 전체: 관련 메서드부터 좁혀 읽는다.
-- `property-report-site/site-app/` 전체: 은퇴했고 코드가 참조하지 않는다.
 - `node_modules/`, `.next/`, `dist/`, `.venv/`, `__pycache__/`, `staticfiles/`: 생성 결과물.
 - `real-estate-finder/project_state.md`: 과거 문맥. 최신 공통 상태는 `.agent/PROJECT_STATE.md`가 우선이다.
 
@@ -267,13 +265,12 @@ cd ..\kakao-notifier
 - `data-observed-at` 속성 이름을 바꾸지 않는다.
 - `build_report_payload`는 숫자 매물번호 + `/articles/` 직접 링크만 포함한다. 묶음 카드의 해시 id가 리포트에서 빠지는 것은 의도된 동작이다. 통계는 이 필터를 쓰지 않으므로 해시 id 매물도 분포에 들어간다.
 - 검색 조건 스키마를 바꾸면 `properties/models.py`, `import_searches`, `api/views.py`의 조건 직렬화, 수집기의 `SearchCondition.from_api`를 함께 확인한다.
-- `property-report-site/site-app/`을 건드릴 일이 생기면 중첩 저장소와 루트 포인터의 두 커밋 경계를 지킨다.
 
 ## 9. 문서의 역할 구분
 
-- `../PROJECT_STATE.md`: 지금 무엇이 돌고 있고 최근 결과와 결정이 무엇인지
+- `../.agent/PROJECT_STATE.md`: 지금 무엇이 돌고 있고 최근 결과와 결정이 무엇인지
 - `ARCHITECTURE.md`: 코드가 어떻게 연결되고 어떤 작업에 어떤 파일을 읽는지
 - `RUNBOOK.md`: 사람이 설치, 조회, 서버 실행, Tailscale Funnel 설정을 어떻게 하는지
 - 각 하위 프로젝트 `README.md`: 해당 구성 요소의 상세 사용법
 
-아키텍처, 저장 계층, 서빙 방식 또는 실제 주 실행 경로가 바뀌면 이 문서와 `../PROJECT_STATE.md`를 같은 작업에서 갱신한다.
+아키텍처, 저장 계층, 서빙 방식 또는 실제 주 실행 경로가 바뀌면 이 문서와 `../.agent/PROJECT_STATE.md`를 같은 작업에서 갱신한다.

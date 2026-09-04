@@ -15,7 +15,7 @@ Configuration comes from `report-site/.env` and is never committed:
   published to the internet through Tailscale Funnel, so `/api/` is reachable
   from outside and must not be open.
 
-See `.agent/docs/RUNBOOK.md` for how this is run and tunneled.
+See `.docs/RUNBOOK.md` for how this is run and tunneled.
 """
 
 from __future__ import annotations

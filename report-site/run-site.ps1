@@ -4,7 +4,7 @@
 # deploy step: a scan's result shows up on refresh. This only starts the local
 # server on 127.0.0.1:8000; making it reachable from outside this PC is a
 # separate one-time step (`tailscale funnel --bg 8000`), documented in
-# .agent/docs/RUNBOOK.md.
+# .docs/RUNBOOK.md.
 #
 # The scanner (real-estate-finder) posts to this server's API, so it has to be
 # running before a scan, not only when someone opens the report.
@@ -75,7 +75,7 @@ Write-Host "Local admin:   http://127.0.0.1:8000/${RoutePrefix}admin/" -Foregrou
 if ($env:KAKAO_REPORT_URL) {
     Write-Host "Public report: $env:KAKAO_REPORT_URL" -ForegroundColor Green
 } else {
-    Write-Host "Public report: not set yet (KAKAO_REPORT_URL) - see .agent/docs/RUNBOOK.md for the Tailscale Funnel setup." -ForegroundColor Yellow
+    Write-Host "Public report: not set yet (KAKAO_REPORT_URL) - see .docs/RUNBOOK.md for the Tailscale Funnel setup." -ForegroundColor Yellow
 }
 Write-Host "Press Ctrl+C to stop."
 Write-Host ""
