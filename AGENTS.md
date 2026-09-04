@@ -48,6 +48,7 @@
 - 카카오 메시지의 `통계 보기`·`전체 매물 보기` 버튼은 리포트 서버(`report-site/`)가 현재 조회 시각과 일치하는 데이터를 서빙 중일 때만 포함한다. 이미지는 보내지 않는다.
 - `report-site/.env`의 `REPORT_PATH_TOKEN`, `FINDER_API_TOKEN`, `POSTGRES_PASSWORD`와 루트 `.env`의 `KAKAO_REPORT_URL`은 Git에 커밋하지 않는다.
 - 배포, 외부 메시지 전송, 토큰 갱신, Tailscale Funnel 설정은 대상과 결과를 확인하고 수행한다.
+- 지금 개발은 `dev` 브랜치에서 진행한다(`kakao-image-card`는 더 이상 새 작업 대상이 아니다). 저장소 루트의 `VERSION` 파일이 현재 버전(`devX.Y.Z` 형식)을 담고 있으며, `dev` 브랜치에 푸시할 때마다 마지막 숫자를 1 증가시킨다.
 
 ## 주요 검증 명령
 
