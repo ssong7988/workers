@@ -53,7 +53,7 @@ class DagsterViewTests(TestCase):
         Scan.objects.create(started_at=observed_at, finished_at=observed_at, success=True)
 
         status = DagsterStatus(
-            base_url="http://127.0.0.1:3000/graphql",
+            base_url="http://127.0.0.1:3000/url/dagster/graphql",
             configured=True,
             reachable=True,
             runs=[
@@ -80,3 +80,4 @@ class DagsterViewTests(TestCase):
         self.assertContains(response, "ce42589c-3c6a-4cbd-a558-0b789fc5fdcf")
         self.assertContains(response, "morning_digest_job")
         self.assertContains(response, "2026.09.04 07:00")
+        self.assertContains(response, 'href="/url/dagster/runs"')

@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (**Dagster로 스케줄 구동 전환 — WSL 없이 이 PC에서 네이티브로 실제 설치·실행·검증까지 완료**. Airflow/WSL 계획은 VT-x 블로커로 계속 보류, 매물 리포트에서 면적 표시를 지우고 타입 표시로 교체, 통계·리포트 화면에 지역/단지 필터 추가, 매물에 동(building) 필드 추가, 스캔 진단 로그 추가, 백그라운드 Edge 탭 로그인 오탐 완화)
+마지막 갱신: 2026-09-04 (**Dagster 웹 UI를 별도 `:8443` 대신 공개 리포트와 같은 HTTPS 호스트의 `/url/dagster/` 경로로 프록시하도록 전환**. Dagster로 스케줄 구동 전환은 WSL 없이 이 PC에서 네이티브로 실제 설치·실행·검증까지 완료. Airflow/WSL 계획은 VT-x 블로커로 계속 보류, 매물 리포트에서 면적 표시를 지우고 타입 표시로 교체, 통계·리포트 화면에 지역/단지 필터 추가, 매물에 동(building) 필드 추가, 스캔 진단 로그 추가, 백그라운드 Edge 탭 로그인 오탐 완화)
 
 ## Current Architecture
 
@@ -105,7 +105,7 @@ Airflow 화면(`r/<TOKEN>/airflow/`)과 나란히 새로 추가했다. **Airflow
 
 - `report/dagster_client.py` — `runsOrError` GraphQL 쿼리 하나만 쓴다(위에서 실측 확인). **작업/스케줄 목록은 GraphQL로 조회하지 않는다** — Dagster 공식 문서가 스케줄 관련 스키마를 "여전히 변하는 중이고 주로 웹서버 내부용"이라고 명시하고 있어, 그 부분만큼은 `airflow_client.py`의 DAG 목록처럼 실시간 조회를 시도하는 대신 `definitions.py`와 손으로 맞추는 짧은 정적 목록(`JOBS` 상수)으로 대체했다 — 얕은 확신으로 깨지기 쉬운 쿼리를 짜느니 정직하게 정적 목록을 쓰는 쪽을 택했다.
 - `report/views.py`의 `dagster()` 뷰, `report_site/urls.py`의 라우팅, `report_site/settings.py`의 `DAGSTER_GRAPHQL_URL`/`DAGSTER_TIMEOUT_SECONDS`(둘 다 기본값이 있어 `.env` 설정 없이도 동작 — `run-dagster.ps1`이 항상 `127.0.0.1:3000`에 뜨기 때문). `@staff_member_required`로 admin 로그인을 추가로 요구하는 것도 Airflow 화면과 동일.
-- 화면 아래에 실제 Dagster 웹서버(`127.0.0.1:3000`, 이 PC에서만 열림) 링크를 달아 자세한 로그는 거기서 보게 했다.
+- 화면 아래의 실제 Dagster 웹 UI 링크는 `/url/dagster/runs`다. `run-dagster.ps1`이 Dagster에 같은 path prefix를 설정하고, Tailscale Funnel이 공개 443의 그 경로를 로컬 `127.0.0.1:3000/url/dagster`로 전달한다. Tailscale 1.102.3이 mount prefix를 제거하므로 프록시 대상에도 prefix를 붙여야 한다. 로컬 UI·GraphQL과 공개 UI를 실제 HTTP 200으로 확인했고 기존 `:8443` Funnel은 제거했다.
 - 새 테스트 15개(`test_dagster_client.py` 6개, `test_dagster_view.py` 5개, 기존 `test_airflow_view.py`는 import 리네임에 맞춰 패치 대상만 수정) 전부 통과. 전체 Django 테스트 122개 중 121개 통과 — 나머지 1개는 이 작업 전부터 있던 무관한 실패(`test_urgent_section_respects_region_filter`). `manage.py check`, `makemigrations --check --dry-run` 통과.
 
 ### 아직 검증하지 못한 것 (다음에 확인할 목록)

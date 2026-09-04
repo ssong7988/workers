@@ -11,9 +11,9 @@ without any interop layer, since this process already runs natively on
 Windows.
 
 Load with: `dagster dev -f definitions.py --host 127.0.0.1 --port 3000`
-(see run-dagster.ps1). Binding to 127.0.0.1 only matters: nothing about this
-webserver is meant to be reachable outside this PC, unlike the Tailscale
-Funnel-exposed report site.
+(see run-dagster.ps1, which also supplies the webserver path prefix). Binding
+to 127.0.0.1 still matters: the webserver is reachable externally only through
+the explicit Tailscale Funnel path, not as a directly listening LAN service.
 """
 
 from __future__ import annotations

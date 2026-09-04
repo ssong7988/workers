@@ -196,6 +196,21 @@ cd report-site
 
    `https://<이 PC 이름>.<tailnet 이름>.ts.net` 형태의 주소가 출력된다. 이 주소는 PC를 재부팅해도 바뀌지 않는다. 상태 확인은 `tailscale funnel status`.
 
+   Dagster 웹 UI도 같은 HTTPS 호스트의 `/url/dagster/` 아래에 연결한다. Dagster를
+   `dagster_project\run-dagster.bat`으로 실행한 뒤 한 번만 설정하면 된다.
+
+   ```powershell
+   tailscale funnel --https=443 --set-path=/url/dagster --bg http://127.0.0.1:3000/url/dagster
+   ```
+
+   이후 `https://<이 PC 이름>.<tailnet 이름>.ts.net/url/dagster/runs`에서
+   실행 내역을 볼 수 있다. 예전에 8443 포트 전체를 Dagster에 연결했다면 다음으로
+   그 설정을 제거한다.
+
+   ```powershell
+   tailscale funnel --https=8443 off
+   ```
+
 4. 카카오 개발자 콘솔 → 내 애플리케이션 → 플랫폼 → Web에 위 주소를 등록한다. 등록되지 않은 도메인은 카카오가 조용히 다른 주소로 치환할 수 있다.
 5. 루트 `.env`(`.env.example`을 복사해 만든다)에 다음을 채운다.
 
@@ -207,7 +222,7 @@ cd report-site
 
 **주의할 제약**
 
-- Tailscale Funnel은 공개 443/8443/10000 포트만 지원한다. `--bg 8000`은 공개 443을 로컬 8000으로 프록시하는 것이다.
+- Tailscale Funnel은 공개 443/8443/10000 포트만 지원한다. `--bg 8000`은 공개 443의 `/`를 로컬 8000으로, `--set-path=/url/dagster --bg http://127.0.0.1:3000/url/dagster`는 같은 443의 해당 경로를 로컬 3000으로 프록시한다. 대상 URL에도 prefix를 쓰는 이유는 Tailscale 1.102.3이 mount prefix를 제거한 뒤 백엔드로 전달하기 때문이다.
 - **`run-site.bat`이 실행 중이고 PC가 절전에 들어가지 않아야** 공개 주소가 응답한다. 자동 시작은 일부러 등록하지 않았으므로, 리포트를 외부에서 열어야 할 때 직접 켠다. 서버가 꺼져 있으면 카카오 메시지는 두 버튼을 조용히 빼고 텍스트만 보내므로 깨진 링크가 나가지는 않는다.
 - 나중에 상시 공개로 바꾸고 싶으면 Windows 작업 스케줄러에 "로그온할 때" 트리거로 `report-site/run-site.ps1`을 등록하면 된다. Tailscale 서비스(`tailscaled`)는 별도 등록 없이 자동으로 뜨고, `funnel --bg` 설정도 재부팅 후 알아서 복구된다.
 - 토큰 경로(`REPORT_PATH_TOKEN`)는 우발적 노출만 막는다. 주소 자체가 유출되면 인증 없이 누구나 리포트를 볼 수 있다.

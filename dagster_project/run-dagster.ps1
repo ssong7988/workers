@@ -4,8 +4,9 @@
 # existing alongside the parked airflow/dags/ plan; see
 # .agent/PROJECT_STATE.md, "Active Work: Dagster로 스케줄 구동".
 #
-# Binds to 127.0.0.1 only. Nothing about this server is meant to be reachable
-# outside this PC, unlike the Tailscale Funnel-exposed report site.
+# Binds to 127.0.0.1 only. Tailscale Funnel exposes it through the report
+# site's HTTPS origin at /url/dagster/; the prefix must therefore be present
+# in Dagster's generated asset and GraphQL URLs as well as in Funnel routing.
 #
 # Double-click run-dagster.bat to launch this script.
 
@@ -30,6 +31,7 @@ if (-not (Test-Path $DataDir)) {
     New-Item -ItemType Directory -Path $DataDir | Out-Null
 }
 $env:DAGSTER_HOME = $DataDir
+$env:DAGSTER_WEBSERVER_PATH_PREFIX = '/url/dagster'
 
 # Silences dagster's "no dagster.yaml found" warning on every startup and
 # opts out of the anonymous usage telemetry Dagster sends by default - this
@@ -39,7 +41,7 @@ if (-not (Test-Path $ConfigFile)) {
     "telemetry:`n  enabled: false`n" | Set-Content -Path $ConfigFile -Encoding utf8
 }
 
-Write-Host "Dagster webserver: http://127.0.0.1:3000" -ForegroundColor Green
+Write-Host "Dagster webserver: http://127.0.0.1:3000/url/dagster/runs" -ForegroundColor Green
 Write-Host "DAGSTER_HOME: $DataDir"
 Write-Host "Press Ctrl+C to stop."
 Write-Host ""

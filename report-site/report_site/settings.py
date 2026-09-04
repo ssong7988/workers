@@ -83,10 +83,11 @@ except ValueError:
 # this machine while the Airflow/WSL2 plan above stays parked - see
 # .agent/PROJECT_STATE.md, "Active Work: Dagster로 스케줄 구동". Unlike
 # Airflow's, this address has one predictable local default: `dagster dev`
-# always binds 127.0.0.1:3000 the way run-dagster.ps1 starts it, so no .env
-# entry is required for the common case, only to override it.
+# always binds 127.0.0.1:3000 with /url/dagster as its path prefix the way
+# run-dagster.ps1 starts it, so no .env entry is required for the common case,
+# only to override it.
 DAGSTER_GRAPHQL_URL = os.environ.get(
-    "DAGSTER_GRAPHQL_URL", "http://127.0.0.1:3000/graphql"
+    "DAGSTER_GRAPHQL_URL", "http://127.0.0.1:3000/url/dagster/graphql"
 ).strip()
 try:
     DAGSTER_TIMEOUT_SECONDS = float(os.environ.get("DAGSTER_TIMEOUT_SECONDS", "5"))

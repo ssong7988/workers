@@ -44,7 +44,7 @@ class NotConfiguredTests(SimpleTestCase):
 
 
 @override_settings(
-    DAGSTER_GRAPHQL_URL="http://127.0.0.1:3000/graphql",
+    DAGSTER_GRAPHQL_URL="http://127.0.0.1:3000/url/dagster/graphql",
     DAGSTER_TIMEOUT_SECONDS=5.0,
 )
 class FetchStatusTests(SimpleTestCase):
@@ -91,7 +91,9 @@ class FetchStatusTests(SimpleTestCase):
         self.assertTrue(status.runs[0].start.startswith("2026-"))
 
         request = urlopen.call_args.args[0]
-        self.assertEqual(request.full_url, "http://127.0.0.1:3000/graphql")
+        self.assertEqual(
+            request.full_url, "http://127.0.0.1:3000/url/dagster/graphql"
+        )
         self.assertEqual(request.get_header("Content-type"), "application/json")
 
     def test_empty_run_list(self) -> None:
