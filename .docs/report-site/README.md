@@ -142,8 +142,8 @@ PostgreSQL은 단순 캐시가 아니라 애플리케이션의 원천이다.
 - `SearchCondition`, `GlobalRule`: 운영 중인 설정
 - `NotificationFailure`: 카카오 실패 진단
 
-Dagster의 `dagster_project/data/` SQLite는 스케줄러 실행 이력일 뿐 매물
-데이터가 아니다.
+Dagster의 실행 이력은 같은 DB의 별도 `dagster` schema에 있다 — 스케줄러
+자체 이력일 뿐 매물 데이터가 아니고, Django 모델은 그 schema를 보지 않는다.
 
 ## 핵심 불변 조건
 

@@ -174,10 +174,22 @@ Get-NetTCPConnection -LocalPort 3000 -State Listen
 # 업무 DB에서 오늘 07시 이후 성공 수집 여부만 확인
 cd ..\report-site
 ..\real-estate-finder\.venv\Scripts\python.exe manage.py scan_status --since=07:00
+
+# Dagster 테이블이 dagster schema에만 있고 public(Django)에는 없는지
+# (psql이 PATH에 없어 manage.py dbshell 대신 Django ORM 연결을 직접 쓴다)
+..\real-estate-finder\.venv\Scripts\python.exe -c "
+import django, os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'report_site.settings')
+django.setup()
+from django.db import connection
+with connection.cursor() as c:
+    c.execute(\"select table_schema, count(*) from information_schema.tables where table_name in ('runs','event_logs','job_ticks') group by 1\")
+    print(c.fetchall())
+"
 ```
 
-마지막 명령은 읽기 전용이지만 성공한 수집이 없으면 의도적으로 종료 코드 1을
-반환한다.
+마지막 두 명령은 읽기 전용이지만 `scan_status`는 성공한 수집이 없으면 의도적으로
+종료 코드 1을 반환한다.
 
 ## 흔한 장애
 
@@ -189,7 +201,8 @@ cd ..\report-site
 | `ensure_site` 실패 | report-site 로그, `check-api`, `FINDER_API_TOKEN`, PostgreSQL 서비스 |
 | scan이 로그인 만료로 실패 | Edge를 로그인된 상태로 열고 최소화하지 않았는지 |
 | 8시에 재수집됨 | DB에 오늘 07:00 이후 `Scan(success=True)`가 있는지 |
-| 실행 로그가 UI에 부족함 | 현재 Windows stdout/stderr compute log 제한이 있으며 콘솔 창도 확인 |
+| 실행 로그가 UI에 부족함 | Windows stdout/stderr compute log 제한이 있다. `.logs/dagster_project/<날짜>.log`(전체 콘솔, 프로세스 종료 시점에 기록)와 `data/storage/<run_id>/compute_logs/`(op별 stdout/stderr, storage 설정과 무관하게 항상 로컬 파일)도 함께 확인 |
+| 메타데이터가 안 보임 / 재시작해도 run 이력이 없음 | `dagster` schema가 실제로 있는지, `data/dagster.yaml`의 `storage.postgres`가 맞게 쓰였는지, `POSTGRES_PASSWORD`가 `report-site/.env`에 있는지 확인 |
 
 `dagster dev`는 현재 환경에서 검증된 간단한 단일 PC 실행 방식이지만 장기
 운영용 배포 명령은 아니다. PC 종료·절전 또는 해당 콘솔 창 종료 시 webserver와

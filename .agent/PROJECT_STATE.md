@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (**상세 문서를 `.docs/`로 분리하고 `kakao-notifier` 문서를 추가했으며, 사용하지 않는 예전 `property-report-site/` UI를 제거했다.** 공개 경로는 `/report/`, `/statistics/`, `/dagster/`이고 네이티브 Dagster UI는 `/dagster/console/`이다.)
+마지막 갱신: 2026-09-04 (**앱별 날짜 로그(`.logs/`)를 추가하고 Dagster 저장소를 SQLite에서 PostgreSQL의 `dagster` schema로 옮겼다.** 그 전에는 상세 문서를 `.docs/`로 분리하고 `kakao-notifier` 문서를 추가했으며, 사용하지 않는 예전 `property-report-site/` UI를 제거했다. 공개 경로는 `/report/`, `/statistics/`, `/dagster/`이고 네이티브 Dagster UI는 `/dagster/console/`이다.)
 
 ## Current Architecture
 
@@ -18,6 +18,8 @@
 - `is_live()`(`report-site/properties/publish.py`)는 리포트 서버(그리고 Tailscale Funnel)가 살아있고 이번 조회를 서빙 중인지만 확인한다.
 - 외부 공개는 Tailscale Funnel로 `report-site/`의 8000번 포트를 노출해 고정 HTTPS 주소(`https://<pc>.<tailnet>.ts.net`)를 얻는 방식이다. 현재 경로 토큰은 비워 두었다.
 - `KAKAO_REPORT_URL`은 루트 `.env`에, 선택 경로 토큰 `REPORT_PATH_TOKEN`은 `report-site/.env`에 둔다. 토큰을 비우면 명시적인 최상위 경로를 쓰고, 채우면 모든 비-API 경로 앞에 `/<TOKEN>`이 붙는다. 둘 다 Git에서 제외한다.
+- 네 진입점(`run-site.ps1`, `run-scan.ps1`, `send-report.ps1`, `run-dagster.ps1`)은 저장소 루트 `start-logging.ps1`을 통해 그날 콘솔 출력을 `.logs/<앱>/<날짜>.log`에 남긴다(30일 보관). 네이티브 프로세스 출력은 그 프로세스가 끝나는 시점에 기록되므로 크래시 진단에는 쓸 수 있지만 건강한 상태의 실시간 tail 용도는 아니다. 자세한 내용은 `.docs/RUNBOOK.md`의 "로그 보기" 참고.
+- Dagster의 run/event-log/schedule 이력은 `property_report` DB의 `dagster` schema에 있다(Django는 `public`). SQLite로 떨어지지 않도록 `dagster_project/data/dagster.yaml`을 `run-dagster.ps1`이 매 실행마다 다시 쓴다.
 
 위 구조는 2026-09-03에 끝난 역할 분리 이관의 결과다. 그 배경과 단계별 이력은 아래 "Completed Migration" 절에 있다.
 
@@ -115,12 +117,29 @@ Airflow 화면(현재 `/airflow/`, 토큰 사용 시 `/<TOKEN>/airflow/`)과 나
 - `.docs/kakao-notifier/`에 모듈 경계, OAuth 최초 인증, 액세스/리프레시 토큰 수명주기, 텍스트·다중 버튼·이미지 API, Django 동적 로딩 경로, 운영 점검과 장애 대응을 소스 기준으로 정리했다. 현재 운영 발송은 Django가 메시지 정책을 결정하고 `kakao-notifier`는 인증·HTTP 어댑터 역할만 한다.
 - 기존 상세 문서를 저장소 루트 `.docs/`로 옮기고 `AGENTS.md`, README, 실행 스크립트 주석, 설정 설명과 상태 문서의 경로 참조를 함께 갱신했다.
 
+### 앱별 날짜 로그 + Dagster 저장소 PostgreSQL 이전 (2026-09-04 완료)
+
+**계기: 서버가 백그라운드로 돈다는 것 자체는 장점이지만, 실패해도 이유를 볼 수 없었다.** `ensure-site.ps1`이 `Start-Process -WindowStyle Hidden`으로 리포트 서버를 띄우는데 리다이렉션이 없어 출력이 통째로 버려졌고, `settings.py`에 `LOGGING`이 없어 `DEBUG=False`에서 뷰 500 에러가 어디에도 안 남았다.
+
+- 저장소 루트 `start-logging.ps1`(신설, `load-env.ps1`과 같은 방식으로 dot-source)이 `Start-AppLog -App '<이름>'` 함수를 제공한다. `report-site/run-site.ps1`, `real-estate-finder/run-scan.ps1`·`send-report.ps1`, `dagster_project/run-dagster.ps1` 네 진입점 모두에 두 줄씩 추가했다. `.logs/<앱>/<yyyy-MM-dd>.log`에 `Start-Transcript -Append`로 기록하고 시작 시 30일 지난 파일을 지운다. `ensure-site.ps1` 자신에는 일부러 넣지 않았다 — 같은 날짜 로그 파일을 `run-site.ps1`과 동시에 열게 되기 때문이다.
+- **`Start-Transcript`의 실제 캡처 시점을 직접 검증했다.** Windows PowerShell 5.1에서 네이티브 프로세스의 stdout/stderr는 그 프로세스가 **끝나는 시점에** 한꺼번에 transcript에 기록되고, 떠 있는 동안 실시간으로는 안 찍힌다. 크래시·정상 종료·Ctrl+C 전부 이 경로로 잡힌다 — 서버가 기동 직후 실패하는, 정확히 사용자가 원한 시나리오다. 반대로 몇 주째 멀쩡히 도는 waitress의 요청 로그를 실시간 tail하는 용도는 아니다. 이 구분은 리다이렉션 유무에 따라 갈린다 — `Start-Process`에 `-RedirectStandardOutput`을 붙이면 실시간으로 잡히지만(별도 테스트로 확인), 그러려면 스크립트 구조를 더 바꿔야 해서 이번 범위에서는 하지 않았다.
+- **실제 회귀 재현으로 확인했다.** `report-site/.env`를 잠시 치우고 `ensure-site.ps1`과 똑같이 `run-site.ps1`을 숨김 콘솔로 띄웠더니, 이전에는 통째로 사라지던 `report-site\.env not found...` 오류가 파일·행 번호까지 그대로 `.logs/report-site/`에 남았다. 확인 후 `.env`는 원복했다.
+- `report_site/settings.py`에 `LOGGING`을 추가해 `django.request`(뷰 500)를 `mail_admins`(설정 안 됨이라 무음) 대신 stdout으로 보낸다. 파일 핸들러는 두지 않았다 — `send_digest`/`send_alert`/`scan_status`/`check_report`가 같은 설정으로 뜨는 별도 프로세스라 파일을 무조건 붙이면 Windows에서 `WinError 32`로 충돌한다. Django 테스트 클라이언트로 뷰에서 강제로 `RuntimeError`를 던져 트레이스백이 타임스탬프와 함께 stdout에 찍히는 것을 실제로 확인했다.
+- `.gitignore`에 `.logs/`를 추가했다(`**/logs/`는 `.logs`를 매칭하지 않는다).
+- **Dagster의 run/event-log/schedule storage를 SQLite에서 `property_report` DB의 `dagster` schema로 옮겼다.** 아무도 고른 값이 아니라 `dagster.yaml`에 `storage:`가 없어 떨어진 기본값이었다. `property_report`가 DB 소유자라 `CREATE SCHEMA dagster AUTHORIZATION property_report;`에 superuser가 필요 없었다. `dagster-postgres==0.29.21`(+ `psycopg2-binary`)을 `dagster_project/.venv`에 설치했다 — dagster 본체와 버전 번호 체계가 다르다(`dagster==1.13.21`인데 `dagster-postgres`는 0.29대).
+- `run-dagster.ps1`이 `report-site/.env`의 `POSTGRES_PASSWORD`를 읽어(토큰을 읽는 것과 같은 방식) `$env:DAGSTER_PG_PASSWORD`로 넘기고, `data/dagster.yaml`을 **매 실행마다 다시 쓴다** — 예전의 "파일 없을 때만 생성" 로직을 유지했다면 이미 diskette에 있던 telemetry-only 파일이 영원히 안 바뀌는 함정이 있었다.
+- `search_path=dagster`가 실제로 세션에 적용되는지 `dagster_postgres.get_conn_string()` + SQLAlchemy로 사전 확인(`current_schema()` → `'dagster'`)한 뒤 적용했다. 적용 후 `information_schema.tables`로 Dagster 테이블 9개가 전부 `dagster` schema에 있고 `public`(Django, 16개 그대로)에는 하나도 안 생겼음을 확인했다.
+- 옛 SQLite 파일은 지우지 않고 `data/history.sqlite.bak`, `data/schedules.sqlite.bak`로 이름만 바꿔 보존했다(검증 며칠 뒤 삭제 예정). 실행 이력은 이관 도구가 없어 새로 시작한다 — 며칠치뿐이라 손실을 감수했다.
+- 재시작 검증: 새 schema에서 실제 job을 2회 실행(`SUCCESS`)했고, Dagster를 완전히 껐다 켠 뒤에도 `dagster.runs`에서 그 기록이 그대로 조회됐다 — `data/history`·`data/schedules` 디렉터리가 재생성되지 않아 SQLite로 조용히 되돌아가지 않았음도 확인했다. 세 스케줄 모두 새 schedule storage에서 자동으로 `RUNNING`으로 복귀했다.
+- **작업 중 이 세션이 만들지 않은 Dagster 중복 프로세스 8개(트리 2벌, 한쪽은 문서화되지 않은 `anaconda3\python.exe`로 기동)를 발견해 사용자 확인 후 정리했다.** 둘 다 오늘 같은 초에 시작돼 있었다 — 다른 세션이 남긴 것으로 보인다. `dagster_project\.venv`가 아닌 인터프리터로 뜬 적이 있었다는 뜻이므로, 앞으로 수동으로 `dagster dev`를 띄울 때는 반드시 `run-dagster.bat`을 거친다.
+- `manage.py check`, `makemigrations --check --dry-run`, finder 테스트 32개 통과. **`manage.py test`는 실행하지 못했다** — `property_report` 역할에 `CREATEDB`가 없고 부여할 superuser 비밀번호를 에이전트가 모른다(기존에 알려진 제약, `Known Issues` 참고).
+
 ### 아직 검증하지 못한 것 (다음에 확인할 목록)
 
 - **무인 상태로 며칠 돌려본 적이 없다.** 오늘 한 것은 수동 실행과 짧은 smoke test뿐이다. Windows gRPC 이슈 리포트들이 언급한 크래시가 장시간 실행에서는 나타날 수도 있다 — 실제 스케줄을 붙이고 최소 하루 이상 지켜봐야 한다.
 - **스케줄러 데몬이 실제로 정시에 잡을 틱하는지는 안 봤다** — 통합 잡과 스케줄 정의 로드는 확인했지만 정각까지 기다린 검증은 하지 않았다.
 - 통합 잡의 실제 스캔·리포트 모드는 위에서 적었듯 종단 실행하지 않았다 — 특히 Dagster 서브프로세스에서도 Edge CDP·데스크톱 세션에 정상 접근하는지는 실제 스캔으로 한 번 더 확인해야 한다.
-- **컴퓨트 로그가 기본적으로 꺼져 있다** — 시작 로그에 `PYTHONLEGACYWINDOWSSTDIO`를 설정해야 옵의 stdout/stderr가 Dagster UI에 잡힌다는 경고가 떴다. 지금은 콘솔에만 보인다. 필요해지면 `run-dagster.ps1`에 그 환경변수를 추가한다.
+- **컴퓨트 로그(옵별 stdout/stderr)가 Dagster UI 안에서는 여전히 기본적으로 꺼져 있다** — 시작 로그에 `PYTHONLEGACYWINDOWSSTDIO`를 설정해야 잡힌다는 경고가 떴다. 필요해지면 `run-dagster.ps1`에 그 환경변수를 추가한다. **UI 밖에서는 2026-09-04부터 `.logs/dagster_project/<날짜>.log`에 전체 콘솔이 남으므로 실무 진단 목적은 이걸로 대신할 수 있다.**
 - **부팅 시 자동 시작이 없다.** 지금은 `run-dagster.bat`을 사람이 띄워야 한다 — Windows 작업 스케줄러에 등록하는 문제는 아직 다루지 않았다(Airflow 계획의 "Airflow 자신이 죽으면 아무도 깨우지 않는다" 위험과 동일하게 적용된다).
 
 ## Planned Work: Airflow로 스케줄 이관 (2026-09-04 설계, Django·helper 코드 작성 완료, Airflow 자체는 미착수 — **현재 보류, 아래 Dagster 절 참고**)
@@ -682,6 +701,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - 공개 리포트에는 매물 정보가 노출되므로 민감한 개인 데이터나 인증 정보를 포함하지 않아야 한다.
 - **관심단지 하나가 실패하면 스캔 전체가 실패로 끝난다(2026-09-04 관측).** `collect_favorites_snapshot()`이 단지 목록을 순회하다 예외가 나면 그 자리에서 전체가 중단되고, 활성 조건 전부가 실패로 보고된다. 이제 단지별 진행 로그(`관심단지 N/총 'OO' 확인 중...`)와 필터 에러에 단지명이 붙어 어디서 막혔는지는 바로 보이지만, 부분 실패를 허용하도록 격리하는 작업은 아직 하지 않았다.
 - **Edge 창을 최소화하거나 백그라운드에 두면 스캔이 "네이버 로그인 상태가 만료되었습니다"로 오탐 실패할 수 있다(2026-09-04).** Chromium이 비활성 탭의 렌더링을 늦춰, `page.goto()` 직후 로그인 헤더가 아직 안 그려진 상태를 로그아웃으로 오인했다. `_raise_if_blocked()`에 짧은 재시도와 `page.bring_to_front()`를 추가해 완화했지만, OS 창이 완전히 최소화된 경우까지는 보장하지 못한다 — 스캔 중에는 Edge 창을 보이는 상태로 두는 것이 가장 확실하다(`.docs/RUNBOOK.md` 참고).
+- **`.logs/`는 건강한 상태에서 계속 도는 서버의 실시간 로그가 아니다(2026-09-04, 검증됨).** `Start-Transcript`는 네이티브 프로세스 출력을 그 프로세스가 끝날 때 한꺼번에 기록한다 — 크래시·정상 종료는 잡히지만, waitress나 Dagster가 몇 주째 멀쩡히 떠 있는 동안의 요청 로그를 `Get-Content -Wait`로 실시간 추적할 수는 없다. 필요해지면 `Start-Process -RedirectStandardOutput`으로 구조를 바꿔야 하는데, 스크립트가 블로킹 호출을 직접 하는 대신 자식 프로세스를 추적해야 해서 이번 범위에서는 하지 않았다.
 
 ## Key Decisions
 

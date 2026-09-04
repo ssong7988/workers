@@ -6,3 +6,9 @@
 # Dagster로 스케줄 구동".
 dagster>=1.13,<2
 dagster-webserver>=1.13,<2
+# Run/event-log/schedule storage in the existing PostgreSQL database (its own
+# "dagster" schema, kept separate from Django's tables) instead of the
+# SQLite files DAGSTER_HOME falls back to when dagster.yaml has no `storage:`
+# block. Pulls in psycopg2-binary; independent of report-site's psycopg3,
+# since this venv is not shared with it. See dagster.yaml and run-dagster.ps1.
+dagster-postgres>=0.29,<0.30

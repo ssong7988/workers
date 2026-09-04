@@ -16,6 +16,12 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+# This project's own venv, so unlike the other run-*.ps1 scripts it does not
+# dot-source load-env.ps1 - but the logging helper lives at the repo root
+# the same way.
+. (Join-Path $Root '..\start-logging.ps1')
+Start-AppLog -App 'dagster_project'
+
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 if (-not (Test-Path $Python)) {
     throw "Python virtual environment not found: $Python`n" +
@@ -58,12 +64,50 @@ $DagsterPathPrefix = if ([string]::IsNullOrWhiteSpace($ReportPathToken)) {
 }
 $env:DAGSTER_WEBSERVER_PATH_PREFIX = $DagsterPathPrefix
 
+# Run/event-log/schedule storage lives in the same PostgreSQL database
+# report-site uses (its own "dagster" schema - see dagster.yaml), not the
+# SQLite files Dagster falls back to with no `storage:` block. The password
+# is read from report-site/.env the same way REPORT_PATH_TOKEN is above, so
+# it is never duplicated into a second .env: dagster.yaml only references
+# the env var name, never the value itself.
+$ReportEnvForPassword = Join-Path $Root '..\report-site\.env'
+$PgPassword = $null
+if (Test-Path -LiteralPath $ReportEnvForPassword) {
+    $PgPasswordLine = Get-Content -LiteralPath $ReportEnvForPassword -Encoding utf8 |
+        Where-Object { $_ -match '^\s*POSTGRES_PASSWORD\s*=' } |
+        Select-Object -Last 1
+    if ($PgPasswordLine) {
+        $PgPassword = ($PgPasswordLine -split '=', 2)[1].Trim().Trim('"').Trim("'")
+    }
+}
+if ([string]::IsNullOrEmpty($PgPassword)) {
+    throw "POSTGRES_PASSWORD not found in report-site\.env - Dagster's run storage needs it to reach PostgreSQL."
+}
+$env:DAGSTER_PG_PASSWORD = $PgPassword
+
 # Silences dagster's "no dagster.yaml found" warning on every startup and
 # opts out of the anonymous usage telemetry Dagster sends by default - this
-# is a personal single-PC deployment, not something to phone home from.
+# is a personal single-PC deployment, not something to phone home from. Also
+# points run/event-log/schedule storage at PostgreSQL (see comment above).
+# Written once; hand edits to this file afterward are left alone.
 $ConfigFile = Join-Path $DataDir 'dagster.yaml'
 if (-not (Test-Path $ConfigFile)) {
-    "telemetry:`n  enabled: false`n" | Set-Content -Path $ConfigFile -Encoding utf8
+    @"
+telemetry:
+  enabled: false
+
+storage:
+  postgres:
+    postgres_db:
+      username: property_report
+      password:
+        env: DAGSTER_PG_PASSWORD
+      hostname: 127.0.0.1
+      db_name: property_report
+      port: 5432
+      params:
+        options: "-c search_path=dagster"
+"@ | Set-Content -Path $ConfigFile -Encoding utf8
 }
 
 Write-Host "Dagster webserver: http://127.0.0.1:3000$DagsterPathPrefix/runs" -ForegroundColor Green

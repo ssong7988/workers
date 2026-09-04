@@ -63,24 +63,25 @@ Dagster는 수집·판정·전송 로직을 새로 구현하지 않는다. 이�
 | `report-site/report/views.py` | 로그인 보호된 `/dagster/` 요약 화면 렌더링 |
 | `report-site/report_site/settings.py` | Django·Dagster가 공유할 URL prefix와 GraphQL 주소 계산 |
 
-## 두 데이터베이스는 역할이 다르다
+## 하나의 DB, 두 schema
 
-이 구성에는 서로 독립적인 DB가 두 개 있다.
+업무 데이터와 스케줄러 메타데이터는 같은 PostgreSQL `property_report` DB에 있지만 schema로 나뉘어 있어 서로 섞이지 않는다.
 
-1. PostgreSQL `property_report`
+1. `public` schema (Django가 소유)
    - 매물, 원본 관측, 검색 조건, 수집 성공 여부를 저장한다.
    - `scan_status`와 리포트가 보는 업무 데이터의 원천이다.
-2. `dagster_project/data/` 아래 Dagster SQLite 메타데이터
-   - Dagster run, schedule 상태 등 스케줄러 자체 이력을 저장한다.
-   - 매물 데이터는 들어 있지 않으며 Git에서도 제외된다.
+2. `dagster` schema
+   - Dagster run, schedule, event log 등 스케줄러 자체 이력을 저장한다(2026-09-04부터 — 그 전에는 `dagster_project/data/`의 SQLite 파일이었다).
+   - 매물 데이터는 들어 있지 않다. `dagster_project/data/` 자체는 여전히 Git에서 제외되며 `dagster.yaml`과 compute log(op의 stdout/stderr)만 로컬에 남는다.
 
-따라서 8시 작업은 “7시 Dagster run이 성공했는가”가 아니라 PostgreSQL에
+따라서 8시 작업은 “7시 Dagster run이 성공했는가”가 아니라 PostgreSQL `public`에
 07:00 이후 `Scan(success=True)`가 있는지를 확인한다. 사람이 수동으로 수집한
-성공 기록도 똑같이 최신 수집으로 인정하기 위해서다.
+성공 기록도 똑같이 최신 수집으로 인정하기 위해서다. schema를 나눈 뒤에도 이 판단
+기준은 바뀌지 않는다 — Dagster run 이력이 아니라 항상 업무 데이터를 본다.
 
 ## 설치와 기동
 
-최초 한 번만 Dagster 전용 가상환경을 만든다.
+최초 한 번만 Dagster 전용 가상환경을 만들고, `property_report` DB에 `dagster` schema를 만든다(`.docs/RUNBOOK.md`의 "최초 한 번만 준비" 참고 — 소유자 권한만 있으면 되고 superuser는 필요 없다).
 
 ```powershell
 py -3.11 -m venv dagster_project\.venv
@@ -95,15 +96,15 @@ dagster_project\run-dagster.bat
 
 이 스크립트는 다음을 수행한다.
 
-1. `dagster_project/data`를 `DAGSTER_HOME`으로 지정한다.
+1. `dagster_project/data`를 `DAGSTER_HOME`으로 지정한다. (compute log와 `dagster.yaml`만 여기 남는다 — run/schedule 이력은 아래 4번의 PostgreSQL에 있다)
 2. `report-site/.env`에서 선택값 `REPORT_PATH_TOKEN`을 읽는다.
 3. `DAGSTER_WEBSERVER_PATH_PREFIX`를 `/dagster/console` 또는
    `/<TOKEN>/dagster/console`로 설정한다.
-4. 익명 사용 통계를 끄는 `data/dagster.yaml`을 최초 한 번 만든다.
+4. `report-site/.env`의 `POSTGRES_PASSWORD`를 읽어 `run/event-log/schedule storage`가 `property_report`의 `dagster` schema를 가리키는 `data/dagster.yaml`을 **매번 다시 쓴다.** 손으로 고쳐도 다음 실행에서 덮어써진다 — 바꾸고 싶으면 이 스크립트의 템플릿을 고친다.
 5. `127.0.0.1:3000`에서 `dagster dev`를 실행한다. 이 명령이 개발용
    webserver와 schedule daemon을 함께 띄운다.
 
-현재 의존성 범위는 `dagster>=1.13,<2`, `dagster-webserver>=1.13,<2`이며
+현재 의존성 범위는 `dagster>=1.13,<2`, `dagster-webserver>=1.13,<2`, `dagster-postgres>=0.29,<0.30`이며
 가상환경은 finder·Django와 분리돼 있다. Dagster의 큰 의존성 트리가 기존
 애플리케이션 패키지와 충돌하지 않게 하기 위해서다.
 
