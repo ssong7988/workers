@@ -26,10 +26,20 @@ function Test-Site {
     # failure - down server, bad token, or unreachable database. `-m
     # real_estate_finder` only resolves from inside real-estate-finder, so
     # this pushes location there rather than assuming the caller's cwd.
+    #
+    # The preference is relaxed to 'Continue' for the call itself: in Windows
+    # PowerShell 5.1 a redirected native command that writes to stderr raises
+    # a terminating error while the preference is 'Stop', and check-api writes
+    # there whenever the server is down - which is exactly the case this
+    # script exists to fix. Without this, a down server threw out of the first
+    # check and the server was never started.
     Push-Location $FinderDir
     try {
+        $ErrorActionPreference = 'Continue'
         & $Python -m real_estate_finder check-api *> $null
         return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
     } finally {
         Pop-Location
     }

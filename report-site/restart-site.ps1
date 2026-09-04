@@ -26,10 +26,20 @@ function Test-Site {
     # Same check ensure-site.ps1 uses: authenticates with FINDER_API_TOKEN
     # and exits non-zero on any failure - down server, bad token, or
     # unreachable database.
+    #
+    # The preference is relaxed to 'Continue' for the call itself: in Windows
+    # PowerShell 5.1 a redirected native command that writes to stderr raises
+    # a terminating error while the preference is 'Stop', and check-api writes
+    # there on every failed attempt - the normal case while the server is
+    # still coming up. Without this, "not up yet" kills the script (exit 1)
+    # instead of returning $false and polling again.
     Push-Location $FinderDir
     try {
+        $ErrorActionPreference = 'Continue'
         & $Python -m real_estate_finder check-api *> $null
         return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
     } finally {
         Pop-Location
     }
