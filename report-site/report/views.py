@@ -23,8 +23,7 @@ from properties.statistics import (
 )
 
 from .airflow_client import fetch_status as fetch_airflow_status
-from .dagster_client import JOB_NAME as DAGSTER_JOB_NAME
-from .dagster_client import SCHEDULES as DAGSTER_SCHEDULES
+from .dagster_client import JOBS as DAGSTER_JOBS
 from .dagster_client import fetch_status as fetch_dagster_status
 from .stats_params import resolve_range, resolve_scope
 
@@ -233,8 +232,7 @@ def dagster(request) -> HttpResponse:
         "report/dagster.html",
         {
             "status": status,
-            "job_name": DAGSTER_JOB_NAME,
-            "schedules": DAGSTER_SCHEDULES,
+            "jobs": DAGSTER_JOBS,
             "failed_runs": status.failed_runs,
             "latest_scan_at": _display_time(
                 latest_scan.started_at if latest_scan else None, timezone_name

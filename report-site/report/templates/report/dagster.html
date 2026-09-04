@@ -43,6 +43,7 @@
   .state-running { color: #1e40af; background: #eff6ff; }
   .state-queued { color: #92400e; background: #fffbeb; }
   .state-other { color: #475569; background: #f1f5f9; }
+  .job-purpose { margin: .5rem .25rem 0; font-size: 12px; color: #64748b; }
   .empty { padding: 3rem 1rem; text-align: center; color: #64748b; }
   .footer { padding: 1.75rem .5rem; text-align: center; font-size: 12px; line-height: 1.5; color: #94a3b8; }
   .icon { display: inline-block; vertical-align: -3px; }
@@ -72,21 +73,22 @@
 
   {% if status.reachable %}
   <section class="summary">
-    <div class="tile tile-green"><div class="tile-value">1</div><div class="tile-label">등록된 잡</div></div>
+    <div class="tile tile-green"><div class="tile-value">{{ jobs|length }}</div><div class="tile-label">등록된 잡</div></div>
     <div class="tile tile-navy"><div class="tile-value">{{ status.runs|length }}</div><div class="tile-label">최근 실행</div></div>
     <div class="tile{% if failed_runs %} tile-red{% else %} tile-navy{% endif %}"><div class="tile-value">{{ failed_runs|length }}</div><div class="tile-label">실패한 실행</div></div>
   </section>
   {% endif %}
 
+  {% for job in jobs %}
   <div class="section-title">
     <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#047857" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-    {{ job_name }} 시간대별 실행
+    {{ job.name }}
   </div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>작업</th><th>일정</th></tr></thead>
       <tbody>
-        {% for schedule in schedules %}
+        {% for schedule in job.schedules %}
         <tr>
           <td>{{ schedule.description }}</td>
           <td>{{ schedule.cron }}</td>
@@ -95,6 +97,8 @@
       </tbody>
     </table>
   </div>
+  <p class="job-purpose">{{ job.purpose }}</p>
+  {% endfor %}
 
   {% if status.reachable %}
   <div class="section-title">

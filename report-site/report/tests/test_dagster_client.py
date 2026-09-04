@@ -59,14 +59,14 @@ class FetchStatusTests(SimpleTestCase):
                         "results": [
                             {
                                 "runId": "ce42589c-3c6a-4cbd-a558-0b789fc5fdcf",
-                                "jobName": "property_pipeline_job",
+                                "jobName": "scan_job",
                                 "status": "SUCCESS",
                                 "startTime": 1788485963.618406,
                                 "endTime": 1788485970.147663,
                             },
                             {
                                 "runId": "a1b2c3",
-                                "jobName": "property_pipeline_job",
+                                "jobName": "scan_job",
                                 "status": "FAILURE",
                                 "startTime": 1788485000.0,
                                 "endTime": 1788485010.0,
@@ -86,7 +86,7 @@ class FetchStatusTests(SimpleTestCase):
         self.assertEqual(len(status.runs), 2)
         self.assertEqual(status.runs[0].status, "SUCCESS")
         self.assertEqual(len(status.failed_runs), 1)
-        self.assertEqual(status.failed_runs[0].job_name, "property_pipeline_job")
+        self.assertEqual(status.failed_runs[0].job_name, "scan_job")
         # Epoch seconds convert to an ISO string, not pass through raw.
         self.assertTrue(status.runs[0].start.startswith("2026-"))
 

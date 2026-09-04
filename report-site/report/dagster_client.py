@@ -15,8 +15,15 @@ docs - see PROJECT_STATE.md for how. Dagster's own docs say the GraphQL
 schema "is still evolving and is subject to breaking changes... primarily
 for internal use by the Dagster webserver", so the job/schedule listing -
 which would need a much more fragile, undocumented query shape - is not
-attempted here; the job name and schedule descriptions below are a short
-static summary instead, kept in sync by hand with `dagster_project/definitions.py`.
+attempted here; JOBS below is a short static summary instead, kept in sync
+by hand with `dagster_project/definitions.py`.
+
+That hand-sync is a real cost, not a footnote: `restart_report_site_job`
+existed in definitions.py for a while before this summary learned about it,
+so the screen claimed one registered job when there were two. Adding or
+renaming a job or schedule in definitions.py means editing JOBS in the same
+change - as the 2026-09-04 move to asset jobs did, which renamed every
+scheduled job at once.
 
 stdlib `urllib` on purpose, matching `report/airflow_client.py` and
 `real-estate-finder/api_client.py`: the project has no HTTP dependency and
@@ -37,13 +44,43 @@ from django.conf import settings
 DEFAULT_TIMEOUT_SECONDS = 5.0
 MAX_RUNS = 20
 
-# Mirrors dagster_project/definitions.py's one job and its three schedules.
-# Not read from Dagster itself (see module docstring).
-JOB_NAME = "property_pipeline_job"
-SCHEDULES = (
-    {"description": "서버 확인", "cron": "그 외 매시 정각"},
-    {"description": "서버 확인 → 매물 수집", "cron": "7시·12시·17시"},
-    {"description": "서버 확인 → 최신 수집 확인/재시도 → 리포트", "cron": "8시"},
+# Mirrors every job in dagster_project/definitions.py's `defs`, with the
+# schedules pointed at it. Not read from Dagster itself (see module docstring).
+# A job with no schedule still belongs here - it is launched by hand from the
+# Dagster UI, and the operator needs to know it exists.
+#
+# scan_job and morning_report_job are asset jobs over the chain
+# naver_listings -> morning_report; the lineage lives in the asset graph, not
+# here. server_check_job and restart_report_site_job are plain op jobs.
+JOBS = (
+    {
+        "name": "server_check_job",
+        "purpose": "리포트 서버만 확인한다 (op job)",
+        "schedules": (
+            {"description": "서버 확인", "cron": "그 외 매시 정각"},
+        ),
+    },
+    {
+        "name": "scan_job",
+        "purpose": "서버 확인 후 매물을 수집한다 (asset: naver_listings)",
+        "schedules": (
+            {"description": "서버 확인 → 매물 수집", "cron": "7시·12시·17시"},
+        ),
+    },
+    {
+        "name": "morning_report_job",
+        "purpose": "서버 확인 → 최신 수집 확인/재시도 → 전체 리포트 발송 (asset 2개)",
+        "schedules": (
+            {"description": "서버 확인 → 수집 확인 → 리포트", "cron": "8시"},
+        ),
+    },
+    {
+        "name": "restart_report_site_job",
+        "purpose": "report-site 코드를 바꾼 뒤 쓰는 재시작 전용 job",
+        "schedules": (
+            {"description": "리포트 서버 재시작", "cron": "수동 실행 (Dagster UI)"},
+        ),
+    },
 )
 
 
