@@ -46,11 +46,11 @@ function Test-Site {
 }
 
 if (Test-Site) {
-    Write-Host "리포트 서버가 이미 실행 중입니다." -ForegroundColor Green
+    Write-Host "Report server is already running." -ForegroundColor Green
     exit 0
 }
 
-Write-Host "리포트 서버가 응답하지 않습니다. run-site.ps1을 새로 띄웁니다..." -ForegroundColor Yellow
+Write-Host "Report server is not responding. Starting run-site.ps1..." -ForegroundColor Yellow
 # run-site.bat, not run-site.ps1, is what a person double-clicks - and .bat
 # ends in `pause >nul` so the console stays readable. Started unattended,
 # that means any failure path (bad migration, missing .env, ...) leaves a
@@ -65,10 +65,10 @@ $deadline = (Get-Date).AddSeconds(60)
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 3
     if (Test-Site) {
-        Write-Host "리포트 서버가 떴습니다." -ForegroundColor Green
+        Write-Host "Report server is up." -ForegroundColor Green
         exit 0
     }
 }
 
-Write-Host "60초 안에 리포트 서버가 뜨지 않았습니다." -ForegroundColor Red
+Write-Host "Report server did not come up within 60 seconds." -ForegroundColor Red
 exit 1
