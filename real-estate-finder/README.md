@@ -6,14 +6,19 @@
 
 전체 구조는 [`.docs/ARCHITECTURE.md`](../.docs/ARCHITECTURE.md), 운영 절차는 [`.docs/RUNBOOK.md`](../.docs/RUNBOOK.md)를 참고하세요.
 
-## 가장 빠른 실행
+## 실행
+
+평상시 수집은 Dagster UI의 `scan_job`으로 실행합니다. 아래 파일들은 Dagster를
+쓸 수 없을 때 같은 Python workflow를 수동으로 부르는 호환 진입점입니다.
 
 ```text
 1) report-site\run-site.bat    먼저 켭니다
 2) real-estate-finder\run-scan.bat
 ```
 
-`run-scan.bat`은 서버 확인 → Edge 실행 → 네이버 로그인 확인 → 수집 → 서버 전달을 순서대로 처리합니다. 급매나 신규 매물이 없으면 카카오톡을 보내지 않으며, 그때도 **미전송 사유가 창에 출력됩니다.** 조용히 끝나는 것과 실패를 혼동하지 않기 위해서입니다.
+`run-scan.bat` → `run-scan.ps1`은 Python의 `run_scan_workflow()`만 호출합니다.
+실제 함수가 서버 확인 → Edge 실행 → 네이버 로그인 확인 → 수집 → 서버 전달을
+순서대로 처리합니다.
 
 급매가 아니어도 지금 전체 결과를 받고 싶으면 `send-report.bat`을 실행합니다. 이 스크립트는 `report-site`의 `manage.py send_digest`를 부르므로 브라우저도, 네이버 로그인도, 웹 서버도 필요 없습니다.
 
@@ -37,18 +42,19 @@ python -m playwright install msedge
 |---|---|
 | `check-api` | 리포트 서버 연결과 활성 검색 조건을 출력합니다. 읽기 전용 |
 | `browser-login` | Edge 로그인 프로필을 준비하고 로그인 상태를 확인합니다 |
+| `run-scan` | 서버·Edge·로그인을 준비하고 수집까지 전체 workflow를 실행합니다 |
 | `scan-once` | 수집해서 서버에 넘깁니다. 서버가 급매·신규가 있을 때만 카카오톡을 보냅니다 |
 | `smoke-test` | 수집해서 넘기되, 급매 알림 이력을 소모하지 않고 전체 매물을 보냅니다 |
 | `collect-favorites` | 브라우저 수집 결과를 `data/favorites-latest.json`에만 저장합니다. 서버 전송 없음 |
 
 ```powershell
 python -m real_estate_finder check-api
-python -m real_estate_finder scan-once
+python -m real_estate_finder run-scan
 ```
 
 옵션은 `--headless`(브라우저 창 숨김), `--edge-cdp`(Edge DevTools 주소), `--api-base`(리포트 서버 주소)입니다.
 
-`scan-once`와 `smoke-test`는 실제 카카오톡 메시지를 보낼 수 있습니다. 코드 확인 목적으로 함부로 실행하지 마세요.
+`run-scan`, `scan-once`, `smoke-test`는 실제 카카오톡 메시지를 보낼 수 있습니다. 코드 확인 목적으로 함부로 실행하지 마세요.
 
 ## 설정
 
@@ -73,6 +79,21 @@ http://127.0.0.1:8000/admin/
 ## 동작 방식
 
 ```text
+cli.run_scan_workflow
+  -> ReportSiteClient.health()/conditions()
+  -> runtime.ensure_edge_debugging()
+  -> NaverBrowserCollector.open_login()
+  -> run_lock()
+  -> _collect_and_post()
+       -> ReportSiteClient.conditions()
+       -> NaverBrowserCollector.collect_all()
+       -> 한 조건 안의 중복 제거
+       -> POST /api/scans/
+```
+
+내부 단일 단계인 `scan-once`는 다음 경로만 수행합니다.
+
+```text
 cli.scan-once
   -> ReportSiteClient.health()      서버가 없으면 브라우저를 열기 전에 중단
   -> ReportSiteClient.conditions()  어느 단지가 어느 조건인지 받아옴
@@ -92,6 +113,7 @@ cli.scan-once
 | `real_estate_finder/cli.py` | 명령 정의, 실행 잠금, 수집과 전달 |
 | `real_estate_finder/api_client.py` | `report-site` API 호출 |
 | `real_estate_finder/collector.py` | 네이버 화면 수집 |
+| `real_estate_finder/runtime.py` | Edge 탐색·기동과 CDP 준비 |
 | `real_estate_finder/models.py` | 조건과 원본 매물 형식 |
 | `real_estate_finder/parsing.py` | 화면 텍스트 → 숫자 |
 

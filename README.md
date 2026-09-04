@@ -19,24 +19,28 @@ outputs/
 
 각 앱의 설치 및 실행 방법은 해당 폴더의 README에서 관리합니다.
 
-## 가장 빠른 실행
+## 운영 실행
 
-더블클릭 순서가 중요합니다. 서버가 데이터를 받는 쪽이라 먼저 켜야 합니다.
+정기 실행과 수동 job 실행은 Dagster UI(`/dagster/console/`)가 기본입니다.
+`scan_job`은 매물 수집, `morning_report_job`은 최신 수집 확인 후 전체 리포트
+전송을 수행합니다. 서버 코드 재시작도 `restart_report_site_job`으로 실행합니다.
+
+PC를 처음 켠 뒤에는 Dagster와 애플리케이션 서버만 시작합니다.
 
 ```text
-1) report-site\run-site.bat        애플리케이션 서버
-2) real-estate-finder\run-scan.bat 매물 조회
+1) report-site\run-site.bat       애플리케이션 서버
+2) dagster_project\run-dagster.bat 스케줄러와 운영 UI
 ```
 
 PowerShell에서는 저장소 루트에서 다음과 같이 실행할 수 있습니다.
 
 ```powershell
 .\report-site\run-site.ps1
-.\real-estate-finder\run-scan.ps1
+.\dagster_project\run-dagster.ps1
 ```
 
-`run-scan`이 서버 확인, 전용 Edge 실행, 네이버 로그인 확인, 매물 수집, 서버 전달을 순서대로 처리합니다. 급매나 신규 매물이 있으면 서버가 카카오톡 1통을 `통계 보기`·`전체 매물 보기` 두 버튼과 함께 보내고, 없으면 그 사유를 창에 출력합니다.
-
-급매가 아니어도 지금 전체 결과를 받고 싶으면 `real-estate-finder\send-report.bat`을 실행합니다.
+`run-scan.bat`과 `send-report.bat`은 Dagster를 쓸 수 없을 때의 수동 호환
+진입점으로 남아 있습니다. 실제 스캔 흐름은 Python 함수가 소유하며 Dagster는
+`.bat`/`.ps1`을 거치지 않고 각 앱의 Python 명령을 직접 실행합니다.
 
 최초 설치와 문제 해결, 외부 공개 설정은 [수동 실행 매뉴얼](.docs/RUNBOOK.md)을, 코드 구조는 [아키텍처 문서](.docs/ARCHITECTURE.md)를 참고하세요. 구성요소별 상세 설명은 [문서 색인](.docs/README.md)에서 찾을 수 있습니다.

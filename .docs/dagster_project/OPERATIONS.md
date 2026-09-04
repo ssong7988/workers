@@ -43,9 +43,9 @@ naver_listings ──→ morning_report
 
 ### `run_scan_op` (op, `naver_listings` 안)
 
-- `mode: run`: `real-estate-finder/run-scan.ps1`을 무조건 한 번 실행한다.
+- `mode: run`: 수집기 venv의 `python -m real_estate_finder run-scan`을 실행한다.
 - `mode: ensure_fresh`: PostgreSQL에서 오늘 07:00 이후 `success=True`인 `Scan`을
-  찾는다. 있으면 수집을 생략하고, 없으면 `run-scan.ps1`을 실행한다.
+  찾는다. 있으면 수집을 생략하고, 없으면 같은 Python 명령을 실행한다.
 
 `ensure_fresh`는 매물 행 개수를 검사하는 것이 아니라 성공한 수집 실행의
 존재를 검사한다. 성공 수집의 결과가 활성 매물 0건이어도 "수집은 수행됨"으로
@@ -55,8 +55,8 @@ naver_listings ──→ morning_report
 예전의 `skip` 모드는 없어졌다. "이 시간대에는 수집하지 않는다"는 이제 이
 asset을 실행하지 않는 것으로 표현한다.
 
-**머티리얼라이즈마다 그 수집의 실제 숫자가 붙는다.** Dagster는 `run-scan.ps1`을
-불투명한 subprocess로 실행할 뿐이라 결과를 모르므로, 실행 후
+**머티리얼라이즈마다 그 수집의 실제 숫자가 붙는다.** Dagster는 의존성이 다른
+수집기 venv의 Python을 자식 프로세스로 실행하므로 종료 코드만 받는다. 실행 후
 `manage.py scan_status --since=00:00 --json`으로 방금 기록된 `Scan` 행의
 수집 수·조건 충족 수·급매 수·제외 수를 되읽어 `add_output_metadata()`로
 붙인다. 이 조회가 실패해도 머티리얼라이즈 자체는 성공한다 — 숫자 대신 실패
@@ -64,9 +64,8 @@ asset을 실행하지 않는 것으로 표현한다.
 
 ### `morning_report` (asset)
 
-`real-estate-finder/send-report.ps1`을 실행한다. 이 스크립트는 PostgreSQL의
-현재 활성 매물을 `manage.py send_digest`로 카카오톡에 보낸다. 수집을 새로
-실행하는 단계는 아니다.
+finder venv의 Python으로 `manage.py send_digest`를 직접 실행해 PostgreSQL의
+현재 활성 매물을 카카오톡에 보낸다. 수집을 새로 실행하는 단계는 아니다.
 
 예전의 `enabled` 설정은 없어졌다. "이 시간대에는 리포트를 보내지 않는다"는
 이제 이 asset을 선택하지 않는 것으로 표현한다.
@@ -153,8 +152,8 @@ hook이 `manage.py send_alert`를 호출해 실패한 job/op와 예외를 카카
 |---|---:|
 | `ensure-site.ps1` | 90초 |
 | `scan_status` | 30초 |
-| `run-scan.ps1` | 20분 |
-| `send-report.ps1` | 3분 |
+| Python `real_estate_finder run-scan` | 20분 |
+| Django `send_digest` | 3분 |
 | 실패 카카오 알림 | 30초 |
 
 ## 상태 확인 명령

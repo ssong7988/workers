@@ -4,9 +4,10 @@ Runs natively on this Windows machine - no WSL required. That is the whole
 reason this exists instead of the Airflow plan in `airflow/dags/`: Airflow
 needs WSL2, and WSL2 needs a CPU virtualization bit this PC's firmware has
 off with no software way to flip it (see .agent/PROJECT_STATE.md, "막힌
-지점"). Every step below shells out to a script or `manage.py` command that
-already exists and already works; this file only adds scheduling, retries,
-lineage, and failure alerting on top.
+지점"). Each app keeps its own virtual environment, so Dagster launches the
+app's Python command as a child process instead of importing Playwright or
+Django into Dagster's dependency tree. PowerShell is reserved for Windows
+process lifecycle work such as starting or restarting the report server.
 
 **Assets, not plain ops (changed 2026-09-04).** This used to be one
 `property_pipeline_job` whose three steps were switched on and off by config
@@ -114,13 +115,35 @@ def _run_manage(
     )
 
 
+def _run_finder(*args: str, timeout: float = 1200) -> None:
+    """Run a collector command in its own venv and stream output to Dagster."""
+    result = subprocess.run(
+        [str(PYTHON_EXE), "-u", "-m", "real_estate_finder", *args],
+        cwd=REAL_ESTATE_FINDER,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"real_estate_finder {' '.join(args)} 실패 (종료 코드 {result.returncode})"
+        )
+
+
+def _require_manage(*args: str, timeout: float = 60) -> None:
+    """Run a Django command and turn its exit code into an op failure."""
+    result = _run_manage(*args, timeout=timeout)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"manage.py {' '.join(args)} 실패 (종료 코드 {result.returncode})"
+        )
+
+
 def _scan_metadata(context) -> dict:
     """Ask Django what the latest successful scan of today actually produced.
 
-    Dagster runs `run-scan.ps1` as an opaque subprocess and learns nothing
-    from it but an exit code, so without this the Catalog would show a name
-    and a timestamp and nothing else. Django already records the counts on
-    every `Scan` row; this reads them back with `scan_status --json`.
+    The collector runs in its own venv as a child Python process, so Dagster
+    intentionally learns only its exit code. Without this the Catalog would
+    show a name and a timestamp and nothing else. Django already records the
+    counts on every `Scan` row; this reads them back with `scan_status --json`.
 
     Best-effort by design: a materialization must not fail because the
     decoration around it failed. On any problem the asset still counts as
@@ -199,7 +222,7 @@ def run_scan_op(context) -> None:
         raise ValueError(f"지원하지 않는 run_scan_op mode: {mode}")
 
     if not skipped:
-        _run_powershell(REAL_ESTATE_FINDER / "run-scan.ps1", timeout=1200)
+        _run_finder("run-scan", timeout=1200)
 
     metadata = _scan_metadata(context)
     if skipped:
@@ -207,7 +230,7 @@ def run_scan_op(context) -> None:
     context.add_output_metadata(metadata)
 
 
-@dg.graph_asset(group_name="property_report", kinds={"powershell"})
+@dg.graph_asset(group_name="property_report", kinds={"python", "playwright"})
 def naver_listings():
     """네이버 매물 원본. 살아 있는 리포트 서버를 확인한 뒤 수집한다.
 
@@ -223,7 +246,7 @@ def naver_listings():
     deps=[naver_listings],
     retry_policy=RETRY_POLICY,
     group_name=GROUP,
-    kinds={"powershell"},
+    kinds={"python", "django"},
 )
 def morning_report(context) -> dg.MaterializeResult:
     """활성 매물 전체를 카카오톡으로 발송한다.
@@ -232,7 +255,7 @@ def morning_report(context) -> dg.MaterializeResult:
     않는다"는 이제 이 asset을 선택하지 않는 것으로 표현한다. 메타데이터에는
     이 리포트가 어떤 수집을 근거로 나갔는지가 남는다.
     """
-    _run_powershell(REAL_ESTATE_FINDER / "send-report.ps1", timeout=180)
+    _require_manage("send_digest", timeout=180)
     return dg.MaterializeResult(metadata=_scan_metadata(context))
 
 

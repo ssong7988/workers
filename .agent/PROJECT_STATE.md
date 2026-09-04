@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (**개발 브랜치를 `kakao-image-card`에서 `dev`로 옮기고, 저장소 루트 `VERSION` 파일(`devX.Y.Z`, `dev` 푸시마다 마지막 숫자 +1, 현재 `dev1.1.1`)로 버전을 관리하기 시작했다. report-site와 Dagster 둘 다 코드를 바꾼 뒤 재시작하는 절차를 자동화했다 — report-site는 Dagster job `restart_report_site_job`(수동 트리거), Dagster 자신은 독립 스크립트 `dagster_project/restart-dagster.bat`(자기 자신을 끄는 job은 불가능해서).** 그 전에는 앱별 날짜 로그(`.logs/`)를 추가하고 Dagster 저장소를 SQLite에서 PostgreSQL의 `dagster` schema로 옮겼다. 공개 경로는 `/report/`, `/statistics/`, `/dagster/`이고 네이티브 Dagster UI는 `/dagster/console/`이다.)
+마지막 갱신: 2026-09-04 (**Dagster job의 업무 실행 경로에서 `.bat`/업무용 `.ps1`을 제거했다. 스캔의 서버 확인→Edge 준비→로그인→수집 흐름은 Python `run_scan_workflow()`가 소유하고 Dagster는 수집기 venv의 `python -m real_estate_finder run-scan`을 직접 실행한다. 전체 발송도 `manage.py send_digest`를 직접 실행한다. 앱별 venv의 프로세스 격리는 유지하며 `.bat`은 부트스트랩과 수동 호환 용도로만 남겼다.** 개발 브랜치는 `dev`, 버전은 루트 `VERSION`의 `devX.Y.Z` 형식이다. 공개 경로는 `/report/`, `/statistics/`, `/dagster/`이고 네이티브 Dagster UI는 `/dagster/console/`이다.)
 
 ## Current Architecture
 
@@ -9,7 +9,7 @@
 - `report-site/properties/`가 카카오 메시지 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. finder 쪽 중복 코드는 8단계에서 삭제했다.
 - `report-site/`(Django + waitress)가 PostgreSQL을 요청마다 읽어 화면을 렌더링한다. `/report/`는 활성 `Listing`으로 매물 리포트를, `/statistics/`는 `Observation` 이력으로 날짜별 호가 분포를, `/dagster/`는 운영 요약을 그린다. `REPORT_PATH_TOKEN`을 채우면 모두 `/<TOKEN>/` 아래로 이동한다. 빌드나 배포 단계는 없다.
 - 예전 Next.js/Codex Sites UI였던 `property-report-site/`는 운영 코드가 참조하지 않는 것을 확인한 뒤 2026-09-04 저장소에서 제거했다. 현재 웹 화면은 `report-site/`만 소유한다.
-- 사용자용 조회 진입점은 `real-estate-finder/run-scan.bat` 또는 `real-estate-finder/run-scan.ps1`이며, Edge CDP `http://127.0.0.1:9222`에 연결한다.
+- 운영 조회 진입점은 Dagster의 `scan_job`이고, 수집기 venv에서 Python `run-scan` 명령을 실행해 Edge CDP `http://127.0.0.1:9222`에 연결한다. `run-scan.bat`/`.ps1`은 같은 Python workflow를 부르는 수동 호환 wrapper다.
 - 급매가 아닌 전체 결과를 카카오톡으로 보내는 진입점은 `real-estate-finder/send-report.bat`이며 `report-site`의 `manage.py send_digest`를 실행한다. 브라우저·로그인·웹 서버가 필요 없고 DB만 있으면 된다.
 - 리포트 서버 실행 진입점은 `report-site/run-site.bat` 또는 `report-site/run-site.ps1`이다.
 - `scan-once`는 수집 결과를 `POST /api/scans/`로 넘기고, Django가 급매 또는 신규가 있을 때만 카카오톡을 보낸다. 보내지 않은 경우에도 사유가 응답의 `scan.notification`으로 돌아와 콘솔에 출력되고 `Scan` 행에도 남는다.
@@ -80,6 +80,7 @@ Airflow 작업 때는 WSL이 없어 전부 문서 조사만으로 코드를 짰�
 - 과거 `site_watchdog_job` 수동 실행 검증에 더해, 통합 후에는 `property_pipeline_job`의 네 가지 모드(서버만, 서버→스캔, 최신 스캔 있음→리포트, 최신 스캔 없음→재스캔→리포트)를 외부 호출 스텁으로 `execute_in_process()` 실행해 순서와 성공을 확인했다. 실제 스캔·카카오 전송은 이 검증에서 호출하지 않았다.
 - **asset 전환(2026-09-04) 후 같은 검증을 다시 했다.** `_run_powershell`·`_run_manage`를 스텁으로 바꾸고 네 잡을 전부 `execute_in_process()`로 돌려, 각 잡이 정확히 자기 몫의 스크립트만 부르고(`server_check_job`→`ensure-site.ps1`만, `scan_job`→`ensure-site`+`run-scan`, `morning_report_job`→ 거기에 `send-report` 추가, `restart_report_site_job`→`restart-site.ps1`만) 선택된 asset이 전부 머티리얼라이즈되며 메타데이터에 수집 카운트 다섯 항목이 붙는 것을 확인했다. `ensure_fresh` 회귀도 명시적으로 확인했다 — 07:00 이후 성공 수집이 있으면 `run-scan.ps1`이 **호출되지 않고**, 머티리얼라이즈 메타데이터에 `재수집: 생략`이 남는다. 잘못된 `mode` 값은 `ValueError`로 거부되고 수집을 부르지 않는다.
 - **세 스케줄의 `run_config`가 각자의 잡에 대해 실제로 유효한지** `evaluate_tick()` + `validate_run_config()`로 확인했다. 구 이름(`scan_step`)을 넣으면 `DagsterInvalidConfigError`로 거부되는 것도 함께 확인했다 — 설정 오타가 8시 정각이 아니라 Launch 시점에 걸린다는 뜻이다.
+- **2026-09-04 함수 기반 실행 전환 뒤 finder 테스트 37개와 Dagster 정의 로드·네 job의 `execute_in_process()`를 다시 검증했다.** 외부 호출을 스텁으로 막은 상태에서 `scan_job`은 `ensure-site.ps1` 뒤 Python `real_estate_finder run-scan`만, `morning_report_job`은 여기에 직접 `manage.py send_digest`만 추가로 호출했다. PowerShell wrapper는 실제 job 경로에서 호출되지 않았다. 실제 네이버 수집·카카오 전송은 부작용 때문에 실행하지 않았다.
 - **재시작 후 살아 있는 Dagster에 GraphQL로 직접 물어 반영을 확인했다.** 최종 형태(asset 2개)에서 `naver_listings`가 `graphName=naver_listings`, `opNames=['naver_listings.ensure_site_op', 'naver_listings.run_scan_op']`로 graph-backed asset임을 확인했고, 세 스케줄 모두 각자의 잡을 가리키며 `RUNNING`으로 복귀했다. 스케줄 이름을 바꾸지 않아 기존 schedule storage 상태가 그대로 이어졌다.
 - **`scan_status --json`을 운영 DB에 대해 실제로 실행했다.** 오늘 마지막 성공 수집(17:00) 기준 수집 204·조건 충족 93·급매 1·제외 111이 나왔고, 기존 exit-code 계약(있으면 0, 없으면 1)이 그대로임을 `--since=07:00`과 `--since=23:59` 양쪽으로 확인했다. dagster venv에서 finder venv의 python을 거쳐 호출해도 한글 키가 깨지지 않는 것을 `ensure_ascii` 덤프로 확인했다.
 - **`alert_on_failure` 훅이 실제로 실패 시 발동하는지**는 별도 스텁 스크립트로 검증했다 — `_run_manage`를 가짜 함수로 바꿔치기하고 일부러 실패하는 옵을 하나 만들어 `execute_in_process()`로 돌린 뒤, 훅이 정확히 `"doomed_job/doomed_op 실패: boom - deliberate test failure"` 형태로 `send_alert`를 호출했음을 어서션으로 확인했다. **실제 카카오 메시지는 보내지 않았다** — `_run_manage`를 스텁으로 바꿨기 때문에 진짜 `manage.py send_alert`가 호출되지 않았다.
@@ -104,6 +105,8 @@ Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Djan
 **2026-09-04에 op 기반에서 asset 기반으로 바꿨다.** 이전에는 `property_pipeline_job` 하나가 `ensure_site → scan_step → report_step`을 항상 전부 실행하고, 세 스케줄이 run config로 뒤 두 단계를 no-op으로 만들었다. 지금은 asset `naver_listings → morning_report`가 있고, 각 스케줄이 어디까지 실행할지 고른다. `naver_listings`는 `ensure_site_op → run_scan_op` 두 op을 품은 `graph_asset`이다.
 
 등록 잡은 네 개다. asset job 둘(`scan_job`, `morning_report_job`)과 op job 둘(`server_check_job`, `restart_report_site_job`). `server_check_job`은 `naver_listings` 안에서 쓰는 것과 **같은 `ensure_site_op`을 재사용**하므로 서버 확인 로직이 두 벌로 갈라지지 않는다. `restart_report_site_job`(2026-09-04 추가)은 스케줄 없는 잡이며 report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
+
+**업무 job은 `.bat`/업무용 `.ps1`을 실행하지 않는다.** `run_scan_op`은 수집기 전용 venv의 `python -u -m real_estate_finder run-scan`을, `morning_report`는 finder venv로 Django `manage.py send_digest`를 직접 실행한다. Dagster venv에 Playwright/Django를 합치거나 앱 모듈을 직접 import하지 않는 이유는 의존성 충돌과 장시간 브라우저 작업의 프로세스 격리를 유지하기 위해서다. Windows 장기 프로세스 수명주기(`ensure-site.ps1`, `restart-site.ps1`)에는 PowerShell이 적합하므로 그대로 둔다. `run-scan.ps1`은 Python workflow를 한 줄 호출하는 수동 호환 wrapper로 축소했다.
 
 전환으로 없어진 것: `scan_step.mode="skip"`과 `report_step.enabled`. 남은 설정 손잡이는 `run_scan_op.mode`(`run` | `ensure_fresh`) 하나뿐이다. graph_asset이라 run config 경로가 한 겹 깊다 — `ops.naver_listings.ops.run_scan_op.config.mode`. 새로 생긴 것: Catalog의 lineage 그래프, 그리고 수집할 때마다 그 `Scan` 행의 수집 수·조건 충족 수·급매 수·제외 수가 머티리얼라이즈 메타데이터로 붙는다(`manage.py scan_status --json`을 새로 추가해 되읽는다). 잡 이름이 스케줄별로 갈라져서 실행 이력에서 어떤 성격의 런인지도 이제 잡 이름만으로 구분된다.
 

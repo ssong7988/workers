@@ -26,12 +26,12 @@
 ## 전체 흐름
 
 ```text
-run-scan.bat
-  -> run-scan.ps1
-       -> GET /api/health/          서버·인증·DB 확인
-       -> Edge CDP :9222 준비
-       -> browser-login             네이버 로그인 확인
-       -> scan-once
+Dagster scan_job (수동 fallback: run-scan.bat -> run-scan.ps1)
+  -> python -m real_estate_finder run-scan
+       -> run_scan_workflow()
+            -> GET /api/health/      서버·인증·DB 확인
+            -> Edge CDP :9222 준비
+            -> 로그인 확인
             -> GET /api/conditions/
             -> 관심부동산 스냅샷 1회 수집
             -> 조건별 단지 별칭 매핑
@@ -41,7 +41,7 @@ run-scan.bat
             -> scan.notification 출력
 ```
 
-`scan-once`는 브라우저를 만지기 전에 API health를 확인한다. 데이터의 원천이
+`run_scan_workflow()`는 브라우저를 만지기 전에 API health를 확인한다. 데이터의 원천이
 PostgreSQL로 옮겨간 뒤에는 서버가 꺼진 상태에서 로컬 파일에 임시 저장하는
 정상 경로가 없다. 따라서 `report-site/run-site.bat`이 먼저 실행돼야 한다.
 
@@ -52,9 +52,10 @@ PostgreSQL로 옮겨간 뒤에는 서버가 꺼진 상태에서 로컬 파일에
 | `real_estate_finder/cli.py` | CLI 정의, 실행 잠금, 조건 조회, 수집, 중복 제거, scan POST |
 | `real_estate_finder/api_client.py` | 환경변수 로드, Bearer 인증, 네 API 호출, 사람이 읽을 오류 변환 |
 | `real_estate_finder/collector.py` | Playwright로 Edge와 네이버 관심부동산 화면 제어 |
+| `real_estate_finder/runtime.py` | Windows Edge 탐색·기동, CDP 준비 |
 | `real_estate_finder/models.py` | API에서 받는 얇은 `SearchCondition`과 보내는 원본 `Listing` |
 | `real_estate_finder/parsing.py` | 화면의 가격·타입 문자열을 전송 가능한 값으로 변환 |
-| `run-scan.ps1` | 서버 확인, Edge 기동, 로그인 확인, 1회 수집을 묶는 사용자 진입점 |
+| `run-scan.ps1` | Python `run-scan` 명령만 호출하는 수동 호환 진입점 |
 | `send-report.ps1` | 브라우저 없이 Django `send_digest`를 호출하는 편의 진입점 |
 | `tests/` | 브라우저·네트워크 없이 파서, 병합, CLI, API 오류 계약 검증 |
 
@@ -115,5 +116,5 @@ description, url, observed_at
   받으면 스캔 전체를 롤백한다.
 - 새 필드를 추가하면 수집기 `Listing`, 서버 API 입력과 `PropertyFields`, 관련
   테스트를 한 세트로 확인한다.
-- 실제 `scan-once`, `smoke-test`는 카카오 메시지를 보낼 수 있으므로 단순 코드
+- 실제 `run-scan`, `scan-once`, `smoke-test`는 카카오 메시지를 보낼 수 있으므로 단순 코드
   검증에 사용하지 않는다.

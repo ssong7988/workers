@@ -18,13 +18,17 @@ python -m playwright install msedge
 
 ## 평상시 실행
 
+평상시에는 Dagster UI에서 `scan_job`을 Launch Run 한다. 아래는 Dagster를 쓸
+수 없을 때의 수동 호환 경로다.
+
 ```text
 1. report-site\run-site.bat
 2. real-estate-finder\run-scan.bat
 ```
 
 `run-scan.bat`은 PowerShell 실행 정책을 우회해 `run-scan.ps1`을 부르는
-더블클릭 진입점이다. PowerShell 스크립트는 네 단계를 표시한다.
+더블클릭 진입점이다. PowerShell은 Python `run-scan` 명령만 호출하며, 그
+명령의 `run_scan_workflow()` 함수가 네 단계를 수행한다.
 
 1. `check-api`: 서버, Bearer 토큰, DB, 활성 조건 확인
 2. Edge의 9222 디버깅 포트 확인 또는 전용 프로필로 새 Edge 시작
@@ -43,13 +47,14 @@ admin의 `Scan.notification`에서 이유를 확인한다.
 | `check-api` | 없음 | 없음 | 없음 |
 | `browser-login` | 사용 | 없음 | 없음 |
 | `collect-favorites` | 사용 | 없음 | 없음 |
+| `run-scan` | 사용 | 있음 | 신규 급매 또는 `notify_new` 신규가 있으면 전송 |
 | `scan-once` | 사용 | 있음 | 신규 급매 또는 `notify_new` 신규가 있으면 전송 |
 | `smoke-test` | 사용 | 있음 | 전체 매물 또는 실패 요약을 전송 |
 
 ```powershell
 .\.venv\Scripts\python.exe -m real_estate_finder check-api
 .\.venv\Scripts\python.exe -m real_estate_finder collect-favorites
-.\.venv\Scripts\python.exe -m real_estate_finder scan-once
+.\.venv\Scripts\python.exe -m real_estate_finder run-scan
 ```
 
 공통 옵션은 서브명령 **앞**에 둔다.

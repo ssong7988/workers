@@ -8,8 +8,8 @@ counts just as much as a scheduled one.
 `--json` adds a machine-readable payload on stdout without changing that exit
 code contract. Dagster's `naver_listings` asset uses it to attach the scan's
 own counts to the materialization, which is what makes the Catalog worth
-looking at - Dagster shells out to `run-scan.ps1` and would otherwise know
-nothing about what the scan produced. The payload is pure ASCII
+looking at - Dagster runs the collector in its separate venv and otherwise
+only knows that child process's exit code. The payload is pure ASCII
 (`json.dumps` escapes non-ASCII by default) so the caller can decode it
 without guessing the Windows console codepage.
 """

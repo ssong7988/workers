@@ -5,7 +5,10 @@
 ## 1. 한눈에 보는 구조
 
 ```text
-사용자 (run-scan.bat)
+Dagster UI / schedule
+        |
+        v
+Python workflow (real_estate_finder run-scan)
         |
         v
 real-estate-finder            수집 전용. 판정하지 않는다
@@ -27,7 +30,7 @@ report-site                   애플리케이션 (Django + PostgreSQL)
 
 **역할 경계가 이 프로젝트의 핵심 설계다.** `real-estate-finder`는 네이버에서 본 것을 그대로 넘기고, 그 뒤의 모든 판단은 `report-site`가 한다. 어떤 매물이 조건에 맞는지, 급매인지, 신규인지, 카카오톡을 보낼지, 화면에 어떻게 보일지는 전부 Django 쪽이다.
 
-이 경계의 실질적 결과: **스캔은 리포트 서버 실행을 요구한다.** 데이터가 갈 곳이 없기 때문이다. `run-scan.ps1`은 브라우저를 열기 전에 `/api/health/`를 확인하고 실패하면 멈춘다.
+이 경계의 실질적 결과: **스캔은 리포트 서버 실행을 요구한다.** 데이터가 갈 곳이 없기 때문이다. Python `run_scan_workflow()`는 브라우저를 열기 전에 `/api/health/`를 확인하고 실패하면 멈춘다.
 
 ## 2. 저장소 경계
 
@@ -57,9 +60,10 @@ outputs/
 
 | 파일 | 책임 | 언제 읽는가 |
 |---|---|---|
-| `run-scan.bat` / `run-scan.ps1` | 서버 확인 → Edge 실행/확인 → 로그인 확인 → `scan-once` | 사용자 실행 실패, 브라우저 시작 |
+| `run-scan.bat` / `run-scan.ps1` | Python `run-scan` 명령을 부르는 수동 호환 wrapper | 수동 실행 실패 |
 | `send-report.bat` / `send-report.ps1` | `report-site`의 `manage.py send_digest` 호출 | 전체 결과 즉시 전송 |
 | `real_estate_finder/cli.py` | 명령 정의, 수집 실행, API 전달, 실행 잠금 | 실행 흐름 파악, 새 명령 |
+| `real_estate_finder/runtime.py` | Edge 탐색·기동과 CDP 준비 | 브라우저 시작 실패 |
 | `real_estate_finder/api_client.py` | `report-site` API 호출과 오류 문구 | 서버 연결 문제 |
 | `real_estate_finder/collector.py` | 로그인된 Edge를 Playwright CDP로 제어해 관심부동산에서 매물 수집 | 수집 실패, 화면 변경 |
 | `real_estate_finder/models.py` | `SearchCondition`(API 응답), `Listing`(원본 행), `iso_now` | 전달 형식 변경 |
@@ -70,6 +74,19 @@ outputs/
 ### 실행 경로
 
 ```text
+cli.main (run-scan) -> run_scan_workflow()
+  -> ReportSiteClient health/conditions  브라우저보다 먼저 서버 확인
+  -> ensure_edge_debugging()             전용 Edge/CDP 준비
+  -> NaverBrowserCollector.open_login()  로그인 확인
+  -> run_lock()
+  -> _collect_and_post()
+       -> ReportSiteClient.conditions()
+       -> NaverBrowserCollector.collect_all(conditions)
+       -> _deduplicate()
+       -> ReportSiteClient.post_scan(...)
+
+내부 단일 단계 명령인 `scan-once`의 경로는 다음과 같다.
+
 cli.main (scan-once)
   -> ReportSiteClient.health()          서버가 없으면 여기서 중단
   -> ReportSiteClient.conditions()      -> SearchCondition.from_api

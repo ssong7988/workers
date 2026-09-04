@@ -22,6 +22,7 @@ from typing import Iterator
 from .api_client import ApiError, ReportSiteClient
 from .collector import NaverBrowserCollector
 from .models import Listing, SearchCondition, iso_now
+from .runtime import DEFAULT_EDGE_CDP, ensure_edge_debugging
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_DIR / "data"
@@ -51,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--headless", action="store_true", help="브라우저 창을 숨김")
     parser.add_argument(
         "--edge-cdp",
-        default="http://127.0.0.1:9222",
+        default=DEFAULT_EDGE_CDP,
         help="현재 실행 중인 Edge DevTools 주소 (빈 문자열이면 전용 프로필 사용)",
     )
     parser.add_argument(
@@ -63,6 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("check-api", help="리포트 서버 연결과 검색 조건 확인")
     commands.add_parser("browser-login", help="Edge 로그인 프로필 준비")
     commands.add_parser("scan-once", help="즉시 1회 수집하고 리포트 서버에 전달")
+    commands.add_parser(
+        "run-scan", help="서버 확인, Edge 준비, 로그인 확인, 수집을 순서대로 실행"
+    )
     commands.add_parser(
         "smoke-test", help="즉시 1회 수집하고 급매 이력을 소모하지 않은 채 전체 매물 전송"
     )
@@ -181,9 +185,43 @@ def _collect_favorites(collector: NaverBrowserCollector) -> None:
     )
 
 
+def run_scan_workflow(
+    *,
+    headless: bool = False,
+    edge_cdp: str = DEFAULT_EDGE_CDP,
+    api_base: str | None = None,
+) -> bool:
+    """Run the complete scan workflow used by Dagster and the manual wrapper."""
+    client = ReportSiteClient(api_base)
+    print("[1/4] 리포트 서버를 확인합니다.")
+    _check_api(client)
+
+    print("[2/4] Edge 디버깅 엔드포인트를 준비합니다.")
+    ensure_edge_debugging(edge_cdp)
+    collector = NaverBrowserCollector(
+        DATA_DIR / "browser-profile",
+        headed=not headless,
+        cdp_endpoint=edge_cdp or None,
+    )
+
+    print("[3/4] 네이버 로그인을 확인합니다.")
+    collector.open_login()
+
+    print("[4/4] 매물을 수집해 리포트 서버로 전달합니다.")
+    with run_lock():
+        return _collect_and_post(collector, client, smoke=False)
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "run-scan":
+            if not run_scan_workflow(
+                headless=args.headless, edge_cdp=args.edge_cdp, api_base=args.api_base
+            ):
+                raise SystemExit(1)
+            return
+
         collector = NaverBrowserCollector(
             DATA_DIR / "browser-profile",
             headed=not args.headless,

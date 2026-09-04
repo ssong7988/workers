@@ -1,8 +1,20 @@
-# 수동 실행 매뉴얼
+# 운영 및 수동 실행 매뉴얼
+
+## 기본 운영 경로
+
+정기 작업과 즉시 실행은 Dagster UI(`/dagster/console/`)를 사용한다. PC 시작 후
+`report-site\run-site.bat`과 `dagster_project\run-dagster.bat`을 켜 두고,
+즉시 수집은 `scan_job`, 최신 수집 확인 후 전체 발송은 `morning_report_job`을
+Launch Run 한다. report-site 코드 변경 뒤에는 `restart_report_site_job`을 쓴다.
+
+Dagster는 스캔과 발송을 `.bat`이나 업무용 `.ps1`로 실행하지 않는다. 수집기
+venv의 `python -m real_estate_finder run-scan`과 Django의 `manage.py
+send_digest`를 직접 자식 프로세스로 실행한다. 앱별 의존성 격리를 유지하면서
+실행 이력과 실패를 Dagster가 직접 관리하기 위한 구조다.
 
 ## 메인 엔트리 포인트
 
-에이전트 없이 실행하는 더블클릭 진입점은 세 개다.
+Dagster를 사용할 수 없을 때의 수동 호환 진입점은 세 개다.
 
 ```text
 report-site\run-site.bat             애플리케이션 서버. 나머지 둘보다 먼저 켠다
@@ -25,7 +37,7 @@ PowerShell에서 직접 실행하려면 저장소 루트에서 다음 명령을 
 1. 리포트 서버가 응답하는지 확인한다. 응답하지 않으면 여기서 멈춘다.
 2. 디버깅 포트 `9222`를 사용하는 전용 Edge 프로필을 실행한다.
 3. 네이버 로그인 상태를 확인하고, 로그인이 필요하면 최대 5분 동안 기다린다.
-4. `python -m real_estate_finder scan-once`로 매물을 수집해 서버에 넘긴다.
+4. Python의 `run_scan_workflow()`가 매물을 수집해 서버에 넘긴다.
 5. 서버가 조건 판정 후 급매 또는 신규 매물이 있으면 카카오톡을 보낸다. 없으면 미전송 사유가 창에 출력된다.
 
 **스캔이 도는 동안 Edge 창을 최소화하지 않는다.** 비활성 탭은 Chromium이 렌더링을 늦춰, 페이지 이동 직후 로그인 상태 확인이 실제로는 로그인돼 있는데도 "네이버 로그인 상태가 만료되었습니다"로 오탐할 수 있다. 창을 보이는 상태로 두면 재현되지 않는다.

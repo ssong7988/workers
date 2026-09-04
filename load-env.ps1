@@ -1,7 +1,8 @@
 # Load the repo-root .env into the current process's environment.
 #
-# Dot-sourced by run-scan.ps1, send-report.ps1, and report-site/run-site.ps1
-# so all three share one KAKAO_REPORT_URL without duplicating it per script.
+# Dot-sourced by send-report.ps1 and report-site/run-site.ps1 so both share
+# one KAKAO_REPORT_URL without duplicating it per script. The Python scanner
+# reads the same file itself through api_client.py.
 # Real secrets (kakao-notifier/.env, report-site/.env) stay in their own
 # directories; this file only carries the shared, non-secret report URL.
 

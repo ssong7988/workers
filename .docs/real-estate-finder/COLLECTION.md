@@ -2,7 +2,7 @@
 
 ## 브라우저 연결 방식
 
-기본 주소는 `http://127.0.0.1:9222`다. `run-scan.ps1`은 이 주소의
+기본 주소는 `http://127.0.0.1:9222`다. `runtime.ensure_edge_debugging()`은 이 주소의
 `/json/version`을 먼저 확인한다. 열려 있지 않으면 Microsoft Edge를 다음과
 같은 개념의 인자로 시작한다.
 
