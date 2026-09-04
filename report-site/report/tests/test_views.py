@@ -60,8 +60,8 @@ class ReportViewTests(TestCase):
         self.assertEqual(response.context["total"], 2)
         self.assertEqual(len(response.context["urgent"]), 1)
         self.assertContains(response, "26억 이하 · 전용 83~86㎡")
-        self.assertContains(response, "101동 · 전용 84.9㎡")
-        self.assertContains(response, "전용 84.9㎡")
+        self.assertContains(response, "84A · 10/30층 · 101동 · 남향")
+        self.assertContains(response, "84A · 10/30층 · 남향")
         self.assertNotIn("fin.land.naver.com/articles/3", html)
 
     def test_non_article_and_non_numeric_listings_stay_out_of_report(self) -> None:

@@ -71,9 +71,9 @@ def build_report_payload(
                 "listings": [
                     {
                         "price": price_text(item.price_won),
-                        "area": _area_text(item.exclusive_area_m2),
-                        "building": item.building,
+                        "type": item.type_name,
                         "floor": item.floor_text,
+                        "building": item.building,
                         "direction": item.direction,
                         "urgent": item.is_urgent,
                         "url": item.url,
