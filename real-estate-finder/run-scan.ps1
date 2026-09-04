@@ -1,10 +1,10 @@
-# 매물 조회 한 번에 실행하기.
+# Run one property scan.
 #
-# 1) 디버깅 포트로 열린 Edge가 없으면 전용 프로필로 띄운다
-# 2) 네이버 로그인을 확인한다 (안 돼 있으면 로그인 화면을 열고 기다린다)
-# 3) 매물을 조회하고 결과를 카카오톡으로 보낸다
+# 1) Start Edge with a dedicated profile if the debugging port is unavailable.
+# 2) Check the Naver login and wait for the user to sign in when necessary.
+# 3) Scan listings and send the result to KakaoTalk.
 #
-# run-scan.bat을 더블클릭하면 이 스크립트가 실행된다.
+# Double-click run-scan.bat to launch this script.
 
 $ErrorActionPreference = 'Stop'
 
@@ -13,8 +13,8 @@ Set-Location $Root
 
 $Port = 9222
 $Endpoint = "http://127.0.0.1:$Port"
-# Chrome 136(Edge 동일)부터 기본 프로필에서는 --remote-debugging-port가 무시된다.
-# 반드시 별도 프로필이어야 하며, 저장소 밖에 둔다.
+# Modern Edge ignores --remote-debugging-port for the default profile.
+# Use a dedicated profile outside the repository.
 $EdgeProfile = Join-Path $env:LOCALAPPDATA 'naver-land-edge'
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 
@@ -30,7 +30,7 @@ function Find-Edge {
     }
     $command = Get-Command msedge.exe -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
-    throw "Edge를 찾지 못했습니다. msedge.exe 경로를 확인하세요."
+    throw "Microsoft Edge was not found. Check the msedge.exe installation path."
 }
 
 function Test-DebugPort {
@@ -43,14 +43,14 @@ function Test-DebugPort {
 }
 
 if (-not (Test-Path $Python)) {
-    throw "가상환경이 없습니다: $Python`n먼저 README의 설치 절차를 실행하세요."
+    throw "Python virtual environment not found: $Python`nComplete the installation steps in README.md first."
 }
 
 if (Test-DebugPort) {
-    Write-Host "[1/3] 디버깅 포트로 열린 Edge를 찾았습니다 ($Endpoint)." -ForegroundColor Green
+    Write-Host "[1/3] Found Edge on the debugging endpoint ($Endpoint)." -ForegroundColor Green
 } else {
-    Write-Host "[1/3] Edge를 전용 프로필로 실행합니다..." -ForegroundColor Cyan
-    Write-Host "      프로필: $EdgeProfile"
+    Write-Host "[1/3] Starting Edge with the dedicated profile..." -ForegroundColor Cyan
+    Write-Host "      Profile: $EdgeProfile"
     $edgeExe = Find-Edge
     Start-Process $edgeExe -ArgumentList @(
         "--remote-debugging-port=$Port",
@@ -64,20 +64,20 @@ if (Test-DebugPort) {
     }
     if (-not (Test-DebugPort)) {
         throw @"
-Edge를 띄웠지만 디버깅 포트가 열리지 않았습니다.
-이미 실행 중인 Edge가 있으면 새 창만 열리고 포트는 열리지 않습니다.
-Edge 창을 모두 닫고 이 파일을 다시 실행하세요.
+Edge started, but the debugging port did not open.
+If Edge was already running, it may have opened only a new window without the port.
+Close every Edge window and run this file again.
 "@
     }
-    Write-Host "      포트가 열렸습니다." -ForegroundColor Green
+    Write-Host "      The debugging port is ready." -ForegroundColor Green
 }
 
-Write-Host "[2/3] 네이버 로그인 확인..." -ForegroundColor Cyan
+Write-Host "[2/3] Checking the Naver login..." -ForegroundColor Cyan
 & $Python -m real_estate_finder browser-login
-if ($LASTEXITCODE -ne 0) { throw "네이버 로그인에 실패했습니다." }
+if ($LASTEXITCODE -ne 0) { throw "Naver login failed." }
 
-Write-Host "[3/3] 매물 조회 및 카카오톡 전송..." -ForegroundColor Cyan
+Write-Host "[3/3] Scanning listings and sending the KakaoTalk message..." -ForegroundColor Cyan
 & $Python -m real_estate_finder scan-once
-if ($LASTEXITCODE -ne 0) { throw "매물 조회에 실패했습니다." }
+if ($LASTEXITCODE -ne 0) { throw "The property scan failed." }
 
-Write-Host "완료했습니다." -ForegroundColor Green
+Write-Host "Completed." -ForegroundColor Green

@@ -37,7 +37,7 @@ class FinderService:
         self.store = store
         self.notifier = notifier
         self.use_cards = use_cards
-        # Kept for API compatibility. UI builds are now an explicit local task;
+        # Kept for API compatibility. UI builds are an explicit deployment task;
         # scans only refresh app/report-data.json.
         self.build_report = build_report
 
@@ -223,19 +223,19 @@ class FinderService:
         self._safe_send(batch_listing_message(alerts or items), REPORT_URL)
 
     def _publish_report(self, observed_at: str) -> str | None:
-        """Link the report only when the local UI already serves this scan.
+        """Link the report only when the hosted UI already serves this scan.
 
-        The scanner writes the JSON but never builds or deploys the UI. Next.js
-        development mode notices the changed file by itself. A stopped or stale
-        local server simply means the Kakao card has no report button.
+        The scanner writes the JSON but never builds or deploys the UI. A stale
+        hosted page simply means the Kakao card has no report button until an
+        explicit Codex Sites build and deployment is completed.
         """
         try:
             if is_live(observed_at, REPORT_URL):
                 return REPORT_URL
-            print("이번 결과는 아직 로컬 UI에 반영되지 않았습니다.")
+            print("이번 결과는 아직 Codex Sites에 반영되지 않았습니다.")
             print(MANUAL_STEPS)
         except Exception as exc:
-            print(f"로컬 UI 확인 실패: {exc}")
+            print(f"Codex Sites 확인 실패: {exc}")
         print("전체 매물 보기 버튼 없이 카드만 보냅니다.")
         return None
 
