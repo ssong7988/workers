@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (Airflow 스케줄 이관: Django 조회 화면·`send_alert`/`scan_status`·`ensure-site.ps1` 작성 및 테스트 통과, WSL·Airflow 설치는 아직, 매물 리포트에서 면적 표시를 지우고 타입 표시로 교체, 통계·리포트 화면에 지역/단지 필터 추가, 매물에 동(building) 필드 추가, 스캔 진단 로그 추가, 백그라운드 Edge 탭 로그인 오탐 완화)
+마지막 갱신: 2026-09-04 (Airflow 스케줄 이관: DAG 3개까지 코드 전부 작성 완료, VT-x 펌웨어 비활성화로 WSL 설치는 물리 접근까지 보류, 매물 리포트에서 면적 표시를 지우고 타입 표시로 교체, 통계·리포트 화면에 지역/단지 필터 추가, 매물에 동(building) 필드 추가, 스캔 진단 로그 추가, 백그라운드 Edge 탭 로그인 오탐 완화)
 
 ## Current Architecture
 
@@ -64,7 +64,7 @@
 
 ## Planned Work: Airflow로 스케줄 이관 (2026-09-04 설계, Django·helper 코드 작성 완료, Airflow 자체는 미착수)
 
-**상태: 설계 문서 아래 "새로 필요한 코드" 표에 있던 작은 코드 전부와 Django 조회 화면을 작성하고 테스트까지 통과했다. Airflow 설치, DAG 작성, WSL interop 검증은 아직 하지 않았다** — 지금 이 PC에 WSL이 없다.
+**상태: 설계 문서 아래 "새로 필요한 코드" 표에 있던 작은 코드 전부와 Django 조회 화면, DAG 3개까지 전부 작성했다. Airflow 설치 자체와 WSL interop 검증은 아직 하지 않았다** — 지금 이 PC에 WSL이 없다(아래 "막힌 지점" 참고). **DAG 코드는 실제 Airflow에 한 번도 물려 보지 않은 상태다** — WSL을 못 쓰는 동안 미리 짜 둔 것이고, 여기 적힌 것 자체가 "다음에 검증할 목록"이다.
 
 ### 이번에 실제로 끝난 것 (2026-09-04)
 
@@ -75,10 +75,45 @@
 - `report-site/ensure-site.ps1` 신설. `run-site.ps1`은 waitress로 끝나 블로킹되므로 그대로 스케줄러 태스크로 못 쓴다 — 이 스크립트는 `check-api`로 먼저 확인하고, 죽어 있을 때만 `run-site.bat`을 `Start-Process`로 분리 실행한 뒤 최대 60초 폴링한다. **서버가 이미 떠 있는 상태에서 실제로 실행해 정상 종료(exit 0)를 확인했다** — 서버가 죽은 상태에서의 기동 분기는 아직 실행해 보지 않았다.
 - 새 테스트 19개(`report/tests/test_airflow_client.py`, `report/tests/test_airflow_view.py`, `properties/tests/test_scan_status_command.py`, `properties/tests/test_delivery.py`에 추가한 `send_alert` 테스트 2개) 전부 통과. 전체 Django 테스트 112개 중 111개 통과 — 나머지 1개(`test_urgent_section_respects_region_filter`)는 이 작업 이전부터 있던 무관한 실패임을 stash로 재확인했다. `manage.py check`, `makemigrations --check --dry-run` 통과.
 - Airflow REST API의 정확한 필드명은 **아직 실제 응답으로 확인하지 못했다.** `airflow_client.py`는 2.x/3.x 필드명 차이를 방어적으로 읽지만(`_text()`가 여러 후보 키를 시도), Airflow를 실제로 세운 뒤 `/api/v2/dags`·`/api/v2/dags/~/dagRuns` 응답을 한 번 찍어보고 필드명이 맞는지 재확인해야 한다.
+- `ensure-site.ps1`을 고쳤다 — 원래 서버가 죽어 있을 때 `run-site.bat`을 띄웠는데, **모든 `.bat` 래퍼는 `pause >nul`로 끝난다.** 사람이 더블클릭할 땐 결과를 읽으라고 있는 배려지만, 무인 실행 중 실패 경로를 타면 아무도 키를 누르지 않는 창이 숨겨진 채(`-WindowStyle Hidden`) 영원히 떠 있게 된다. `run-site.bat` 대신 `run-site.ps1`을 `powershell.exe -File`로 직접 띄우도록 고쳐 이 함정을 없앴다. **DAG를 쓰다가 발견한 버그라 여기 같이 적는다 — `run-scan.bat`/`send-report.bat`도 같은 구조라 DAG는 처음부터 `.ps1`을 직접 부르도록 짰다(아래 `_common.py`의 `run_ps1` 설명 참고).**
+- **DAG 3개를 `airflow/dags/`에 작성했다** (요청 4가지와의 대응은 위 "DAG 설계" 절 참고):
+  - `airflow/dags/_common.py` — 공용 헬퍼. `run_ps1()`은 `.ps1`을 `-File`로 직접 실행(위 버그 설명대로 `.bat`을 절대 부르지 않는다), `run_manage()`는 `manage.py` 명령을 `-Command`로 실행하되 **`; exit $LASTEXITCODE`를 반드시 붙인다** — PowerShell이 `-Command`로 부른 네이티브 명령의 종료 코드를 자기 프로세스 종료 코드로 자동 전달하지 않기 때문이다(`-File`은 스크립트 안의 `throw`/`exit`가 그대로 전달되므로 다르다). 둘 다 WSL의 `/mnt/c/...` 경로를 `wslpath -w`로 `C:\...`로 바꿔서 넘긴다 — interop이 인자 안의 경로를 자동 변환해 주지 않기 때문이다. `alert_on_failure()`가 `on_failure_callback`으로 모든 태스크에 공통으로 걸리며 실패를 요약해 `send_alert`를 부른다.
+  - `airflow/dags/site_watchdog.py` — `0 * * * *`, `ensure-site.ps1` 한 태스크.
+  - `airflow/dags/scan.py` — `0 7,12,17 * * *`, `ensure_site` → `run_scan`(`run-scan.ps1`, 20분 타임아웃 — 네이버 로그인 대기가 여기서 매달릴 수 있다).
+  - `airflow/dags/morning_digest.py` — `0 8 * * *`, `ensure_fresh_scan`(`scan_status --since=07:00`가 실패하면 `||`로 `run-scan.ps1` 재실행) → `send_digest`(`send-report.ps1`).
+  - **Airflow 3.x Task SDK 기준으로 작성했다** — `from airflow.sdk import DAG, Variable` + `from airflow.providers.standard.operators.bash import BashOperator` (Airflow 2.x의 `from airflow import DAG`/`from airflow.operators.bash import BashOperator`가 아니다). `Variable.get(key, default=...)`도 SDK 쪽 인자명(`default_var`이 아니라 `default`)을 썼다. **전부 문서 조사로 짠 것이라 실제 Airflow 인스턴스로 한 번도 검증하지 못했다** — `py_compile`로 문법 오류만 확인했다(4개 파일 전부 통과). 특히 `on_failure_callback`의 `context["task_instance"]`/`context["exception"]` 키가 Airflow 3.x에서 그대로 유효한지, `Variable.get`의 실제 동작이 문서와 같은지는 **Airflow를 세운 뒤 DAG를 한 번 수동 트리거해서 반드시 재확인해야 한다.**
 
-### 다음에 할 일 (WSL 설치부터)
+### 막힌 지점 — VT-x가 펌웨어에서 꺼져 있고 지금 물리 접근이 안 된다 (2026-09-04)
 
-아래 "단계" 절의 1~3번이 남아 있다: WSL2 설치, Airflow 3.x 설치(WSL 안 자체 venv), **interop으로 `powershell.exe`가 Windows 세션에서 실제로 뜨는지 검증**(1순위 — 여기서 막히면 나머지가 무의미하다고 설계 시점에 이미 적어 뒀다). 그다음 DAG 3개(`site_watchdog`/`scan`/`morning_digest`) 작성.
+**이 계획은 현재 보류다.** `systeminfo`로 실측한 결과 `Virtualization Enabled In Firmware: No`다. CPU 자체는 지원한다(`VM Monitor Mode Extensions: Yes`).
+
+- 보드는 **ASUSTeK H310M-C/HDMI R2.0**(자가조립용 컨슈머 보드, BIOS 벤더 American Megatrends). Dell/HP/Lenovo 같은 기업용 PC와 달리 **Windows 안에서 BIOS 설정을 바꿀 수 있는 공식 벤더 도구가 없다.** `bcdedit`은 하이퍼바이저 실행 여부만 다룰 뿐 VT-x 자체를 켜지 못한다. **소프트웨어·명령으로는 켤 방법이 없다는 결론이다** — BIOS/UEFI 화면(POST 단계, OS 네트워크 스택이 뜨기 전)에 물리적으로 들어가야 한다. RDP 등 일반 원격 프로그램은 이 화면에 닿지 못하고, 이 PC에는 iDRAC·iLO·vPro 같은 원격관리(KVM-over-IP)도 없다.
+- 사용자가 지금 물리 접근이 안 되는 상태라 **"물리 접근 가능할 때까지 보류"를 선택했다.** WSL1(가상화 불필요, syscall 변환 방식) 대체안과 Windows 작업 스케줄러로 완전히 대체하는 안도 검토했지만 채택하지 않았다 — 후자를 나중에 다시 고려하려면 이유를 남긴다: WSL1은 `/mnt` 파일 I/O가 느리고 systemd가 없어 Airflow와 궁합이 나쁘고, 작업 스케줄러 대체는 Airflow UI·DAG 의존성 그래프 없이 완전히 새 방식이라 이 설계 문서 대부분이 무의미해진다.
+- **재개 조건: 물리 접근이 가능해지면** 아래 1번(가상화 확인)에서 이미 "사용 안 함"으로 확인됐으니 곧장 BIOS에서 Intel VT-x를 켜고 2번부터 이어간다.
+
+### 다음에 할 일 (BIOS에서 VT-x를 켠 뒤부터)
+
+아래 "단계" 절의 1~3번이 남아 있다: WSL2 설치, Airflow 3.x 설치(WSL 안 자체 venv), **interop으로 `powershell.exe`가 Windows 세션에서 실제로 뜨는지 검증**(1순위 — 여기서 막히면 나머지가 무의미하다고 설계 시점에 이미 적어 뒀다). **DAG 3개는 이미 `airflow/dags/`에 작성돼 있다** — Airflow가 서면 그 디렉터리를 `AIRFLOW_HOME/dags`에 심볼릭 링크하고(`ln -s /mnt/c/.../airflow/dags ~/airflow/dags`), DAG를 하나씩 수동 트리거해 위 "이번에 실제로 끝난 것" 절에 적힌 미검증 항목들(Task SDK 임포트 경로, `Variable.get` 동작, 콜백 컨텍스트 키, `run_ps1`/`run_manage`의 경로 변환·종료 코드 전달)을 확인하는 게 다음 작업이다.
+
+**WSL2 설치는 관리자 권한과 재부팅이 필요해 에이전트가 대신 할 수 없다 — 사용자가 직접 한다.** 이 PC는 Windows 10 Pro 22H2(빌드 19045, 19041 이상)라 단일 명령 설치가 된다. 절차(2026-09-04에 안내함):
+
+1. **가상화 확인.** 작업 관리자(Ctrl+Shift+Esc) → 성능 탭 → CPU → "가상화"가 "사용"인지 확인. 원격 세션이라 작업 관리자가 잘 안 보이면 명령으로도 된다: `systeminfo | Select-String "Hyper-V|Virtualization"` (PowerShell). "Virtualization Enabled In Firmware: No"면 재부팅해 BIOS/UEFI(보통 F2/F10/Del)에서 Intel VT-x 또는 AMD-V(SVM)를 켠다. **이 PC는 이미 No로 확인됐다 — 위 "막힌 지점" 참고.**
+2. PowerShell을 관리자 권한으로 실행(시작 메뉴 검색 → 우클릭 → "관리자 권한으로 실행").
+3. `wsl --install` 한 줄 실행 — WSL 기능·가상 머신 플랫폼·최신 리눅스 커널·기본 배포판(Ubuntu)을 한 번에 설치한다. C 드라이브 여유 공간 1GB 이상 필요.
+4. 재부팅.
+5. 재부팅 후 Ubuntu가 자동으로 열리며 유닉스 사용자명·비밀번호를 물어본다(Windows 계정과 별개). 아무 값이나 정하면 된다.
+6. 확인: 관리자 PowerShell에서 `wsl -l -v` → `Ubuntu`가 `VERSION 2`로 나오면 정상.
+7. **interop 검증(1순위).** Ubuntu 터미널에서:
+   ```bash
+   powershell.exe -Command "Get-Date"
+   ```
+   Windows 쪽 날짜가 출력되면 interop이 된다. 이어서 실제로 쓸 스크립트도 확인한다:
+   ```bash
+   powershell.exe -File "/mnt/c/Users/userpc/Documents/Codex/2026-09-01/d/outputs/report-site/ensure-site.ps1"
+   ```
+   리포트 서버가 켜져 있는 상태라면 "리포트 서버가 이미 실행 중입니다"가 뜨고 조용히 끝나야 성공이다.
+
+이 7단계가 끝나면(=WSL 설치 완료 + interop 검증 통과) 이어서 WSL 안에 Airflow 3.x 설치로 넘어간다.
 
 ### 사용자 요청 (원문 요지)
 

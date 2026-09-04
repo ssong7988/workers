@@ -40,8 +40,16 @@ if (Test-Site) {
     exit 0
 }
 
-Write-Host "리포트 서버가 응답하지 않습니다. run-site.bat을 새로 띄웁니다..." -ForegroundColor Yellow
-Start-Process -FilePath (Join-Path $Root 'run-site.bat') -WindowStyle Hidden
+Write-Host "리포트 서버가 응답하지 않습니다. run-site.ps1을 새로 띄웁니다..." -ForegroundColor Yellow
+# run-site.bat, not run-site.ps1, is what a person double-clicks - and .bat
+# ends in `pause >nul` so the console stays readable. Started unattended,
+# that means any failure path (bad migration, missing .env, ...) leaves a
+# hidden process waiting forever for a keypress nobody will send, instead of
+# exiting. Launching run-site.ps1 directly skips that trap entirely.
+$RunSitePs1 = Join-Path $Root 'run-site.ps1'
+Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$RunSitePs1`""
+)
 
 $deadline = (Get-Date).AddSeconds(60)
 while ((Get-Date) -lt $deadline) {
