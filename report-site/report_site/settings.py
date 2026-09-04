@@ -79,6 +79,20 @@ try:
 except ValueError:
     AIRFLOW_TIMEOUT_SECONDS = 5.0
 
+# Dagster (dagster_project/, its own venv) drives the schedule natively on
+# this machine while the Airflow/WSL2 plan above stays parked - see
+# .agent/PROJECT_STATE.md, "Active Work: Dagster로 스케줄 구동". Unlike
+# Airflow's, this address has one predictable local default: `dagster dev`
+# always binds 127.0.0.1:3000 the way run-dagster.ps1 starts it, so no .env
+# entry is required for the common case, only to override it.
+DAGSTER_GRAPHQL_URL = os.environ.get(
+    "DAGSTER_GRAPHQL_URL", "http://127.0.0.1:3000/graphql"
+).strip()
+try:
+    DAGSTER_TIMEOUT_SECONDS = float(os.environ.get("DAGSTER_TIMEOUT_SECONDS", "5"))
+except ValueError:
+    DAGSTER_TIMEOUT_SECONDS = 5.0
+
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY", "django-insecure-report-site-local-only-not-public"
 )

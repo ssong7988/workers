@@ -22,7 +22,9 @@ from properties.statistics import (
     table_rows,
 )
 
-from .airflow_client import fetch_status
+from .airflow_client import fetch_status as fetch_airflow_status
+from .dagster_client import JOBS as DAGSTER_JOBS
+from .dagster_client import fetch_status as fetch_dagster_status
 from .stats_params import resolve_range, resolve_scope
 
 
@@ -184,7 +186,7 @@ def airflow(request) -> HttpResponse:
     Read-only, and it never 500s on Airflow's account: when the scheduler is
     down the point of this page is to say so, which a stack trace does not.
     """
-    status = fetch_status()
+    status = fetch_airflow_status()
     timezone_name = _timezone_name()
     latest_scan = Scan.objects.order_by("-started_at").first()
 
@@ -193,6 +195,37 @@ def airflow(request) -> HttpResponse:
         "report/airflow.html",
         {
             "status": status,
+            "failed_runs": status.failed_runs,
+            "latest_scan_at": _display_time(
+                latest_scan.started_at if latest_scan else None, timezone_name
+            ),
+            "report_url": reverse("report-index"),
+            "stats_url": reverse("report-stats"),
+        },
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@staff_member_required
+def dagster(request) -> HttpResponse:
+    """Show what the Dagster schedule has been doing, for operators only.
+
+    Read-only, and it never 500s on Dagster's account: when the scheduler is
+    down the point of this page is to say so, which a stack trace does not.
+    Dagster drives the schedule for now; Airflow's equivalent screen at
+    r/<TOKEN>/airflow/ stays in place but parked (see PROJECT_STATE.md).
+    """
+    status = fetch_dagster_status()
+    timezone_name = _timezone_name()
+    latest_scan = Scan.objects.order_by("-started_at").first()
+
+    response = render(
+        request,
+        "report/dagster.html",
+        {
+            "status": status,
+            "jobs": DAGSTER_JOBS,
             "failed_runs": status.failed_runs,
             "latest_scan_at": _display_time(
                 latest_scan.started_at if latest_scan else None, timezone_name

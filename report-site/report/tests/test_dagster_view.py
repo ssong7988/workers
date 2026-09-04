@@ -7,13 +7,13 @@ from django.test import Client, TestCase
 from django.utils import timezone
 
 from properties.models import GlobalRule, Scan
-from report.airflow_client import AirflowStatus, Dag, DagRun
+from report.dagster_client import DagsterStatus, Run
 
 
-class AirflowViewTests(TestCase):
+class DagsterViewTests(TestCase):
     def setUp(self) -> None:
         GlobalRule.objects.create(timezone="Asia/Seoul")
-        self.url = f"/r/{settings.REPORT_PATH_TOKEN}/airflow/"
+        self.url = f"/r/{settings.REPORT_PATH_TOKEN}/dagster/"
         self.client = Client()
 
     def test_anonymous_visitor_is_redirected_to_admin_login(self) -> None:
@@ -33,15 +33,18 @@ class AirflowViewTests(TestCase):
         )
         self.client.force_login(staff)
         with mock.patch(
-            "report.views.fetch_airflow_status",
-            return_value=AirflowStatus(error="AIRFLOW_API_URL이 설정되지 않았습니다."),
+            "report.views.fetch_dagster_status",
+            return_value=DagsterStatus(error="DAGSTER_GRAPHQL_URL이 설정되지 않았습니다."),
         ):
             response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "AIRFLOW_API_URL")
+        self.assertContains(response, "DAGSTER_GRAPHQL_URL")
         self.assertEqual(response["Cache-Control"], "no-store")
+        # The static job list renders regardless of whether Dagster itself
+        # answered - it's the whole point of not depending on a live query.
+        self.assertContains(response, "매물 수집")
 
-    def test_staff_sees_dags_and_runs_and_latest_scan(self) -> None:
+    def test_staff_sees_runs_and_latest_scan(self) -> None:
         staff = get_user_model().objects.create_user(
             username="ops", password="pw", is_staff=True
         )
@@ -49,42 +52,31 @@ class AirflowViewTests(TestCase):
         observed_at = timezone.make_aware(datetime(2026, 9, 4, 7, 0))
         Scan.objects.create(started_at=observed_at, finished_at=observed_at, success=True)
 
-        status = AirflowStatus(
-            base_url="http://127.0.0.1:8080",
+        status = DagsterStatus(
+            base_url="http://127.0.0.1:3000/graphql",
             configured=True,
             reachable=True,
-            dags=[
-                Dag(
-                    dag_id="scan",
-                    description="매물 수집",
-                    schedule="0 7,12,17 * * *",
-                    paused=False,
-                    next_run="2026-09-05T07:00:00+09:00",
-                )
-            ],
             runs=[
-                DagRun(
-                    dag_id="scan",
-                    run_id="scheduled__2026-09-04T07:00:00",
-                    state="success",
-                    run_type="scheduled",
-                    start="2026-09-04T07:00:00+09:00",
-                    end="2026-09-04T07:04:00+09:00",
+                Run(
+                    run_id="ce42589c-3c6a-4cbd-a558-0b789fc5fdcf",
+                    job_name="site_watchdog_job",
+                    status="SUCCESS",
+                    start="2026-09-04T01:39:23+00:00",
+                    end="2026-09-04T01:39:30+00:00",
                 ),
-                DagRun(
-                    dag_id="morning_digest",
-                    run_id="scheduled__2026-09-04T08:00:00",
-                    state="failed",
-                    run_type="scheduled",
-                    start="2026-09-04T08:00:00+09:00",
-                    end="2026-09-04T08:01:00+09:00",
+                Run(
+                    run_id="a1b2c3",
+                    job_name="morning_digest_job",
+                    status="FAILURE",
+                    start="2026-09-04T00:00:00+00:00",
+                    end="2026-09-04T00:00:10+00:00",
                 ),
             ],
         )
-        with mock.patch("report.views.fetch_airflow_status", return_value=status):
+        with mock.patch("report.views.fetch_dagster_status", return_value=status):
             response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "매물 수집")
-        self.assertContains(response, "scheduled__2026-09-04T08:00:00")
+        self.assertContains(response, "ce42589c-3c6a-4cbd-a558-0b789fc5fdcf")
+        self.assertContains(response, "morning_digest_job")
         self.assertContains(response, "2026.09.04 07:00")

@@ -1,0 +1,8 @@
+# Deliberately its own virtual environment, not shared with
+# real-estate-finder/.venv - Dagster's dependency tree (grpcio, sqlalchemy,
+# alembic, pydantic, ...) has nothing to do with running the scan or serving
+# the Django app, and pulling it into that shared venv would risk version
+# conflicts for no benefit. See .agent/PROJECT_STATE.md, "Planned Work:
+# Dagster로 스케줄 구동".
+dagster>=1.13,<2
+dagster-webserver>=1.13,<2

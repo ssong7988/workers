@@ -24,6 +24,9 @@ urlpatterns = [
     # machine is idle and what failed, so this one needs an admin login on top
     # of the path token.
     path(f"{_PRIVATE}airflow/", views.airflow, name="report-airflow"),
+    # Dagster runs the schedule for now (Airflow above stays parked - see
+    # PROJECT_STATE.md); same admin-login requirement and reasoning.
+    path(f"{_PRIVATE}dagster/", views.dagster, name="report-dagster"),
     path(f"{_PRIVATE}admin/", admin.site.urls),
 ]
 

@@ -35,5 +35,8 @@ report-site/db.sqlite3
 report-site/staticfiles/
 report-site/data/
 
+# dagster_project/ - DAGSTER_HOME (run history, its own SQLite metadata db)
+dagster_project/data/
+
 # Browser profiles left behind by screenshot tooling
 **/edge-shot-profile*/

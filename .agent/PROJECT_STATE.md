@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (Airflow 스케줄 이관: DAG 3개까지 코드 전부 작성 완료, VT-x 펌웨어 비활성화로 WSL 설치는 물리 접근까지 보류, 매물 리포트에서 면적 표시를 지우고 타입 표시로 교체, 통계·리포트 화면에 지역/단지 필터 추가, 매물에 동(building) 필드 추가, 스캔 진단 로그 추가, 백그라운드 Edge 탭 로그인 오탐 완화)
+마지막 갱신: 2026-09-04 (**Dagster로 스케줄 구동 전환 — WSL 없이 이 PC에서 네이티브로 실제 설치·실행·검증까지 완료**. Airflow/WSL 계획은 VT-x 블로커로 계속 보류, 매물 리포트에서 면적 표시를 지우고 타입 표시로 교체, 통계·리포트 화면에 지역/단지 필터 추가, 매물에 동(building) 필드 추가, 스캔 진단 로그 추가, 백그라운드 Edge 탭 로그인 오탐 완화)
 
 ## Current Architecture
 
@@ -62,7 +62,61 @@
 - **매물 리포트에서 매물별 면적 표시를 지우고 타입(`type_name`, 예: `84A`)으로 교체했다(2026-09-04).** 조사 조건이 사실상 84㎡ 하나로 고정돼 있어 매물마다 면적을 다시 보여줄 필요가 없다는 지적이었다. `type_name`은 `building`과 달리 최초 마이그레이션(`0001_initial`)부터 존재했고 finder의 실제 수집 경로(`collector.py`의 `_parse_favorite_listing_text`)가 처음부터 채워 왔으므로 스키마·수집 변경은 없었다 — `properties/report.py`의 `build_report_payload()`와 `report/templates/report/index.html` 두 곳(급매 카드, 단지별 매물)만 고쳐 표시 순서를 `타입 · 층 · 동 · 향`으로 맞췄다. `properties/admin.py`의 두 `list_display`에도 `type_name`을 추가해 `building`과 나란히 보이게 했다(전에는 상세 화면에만 보이고 목록에는 빠져 있었다). 조건 설명 문구("전용 83~86㎡ 이하")는 그대로 둔다 — 지운 것은 매물별 면적 표시뿐이다.
 - **통계·리포트 화면에 지역/단지 선택 필터를 추가했다(2026-09-04).** 통계 화면은 이미 단지를 고르면 서버가 정확한 지역을 계산했지만 "조회"를 눌러야 화면에 반영됐다 — 두 select에 `onchange` 자동 제출을 붙여 즉시 반영되게 했고, 지역을 바꿀 때 단지 선택을 같이 지워 이전엔 조용히 무시되던 "단지 선택 중 지역 변경"도 실제로 먹히게 고쳤다. 리포트 화면(`report/views.py`의 `index()`)에는 이 선택 기능이 아예 없었는데, 통계와 같은 UI를 추가하되 **기본값은 통계처럼 과천으로 좁히지 않고 전체를 그대로 보여준다** — 카카오 "전체 매물 보기" 링크 등 기존 동작을 깨지 않기 위한 의도적 결정. `resolve_scope()`에 `default_region` 매개변수를 추가해 재사용했다(`stats()`는 기존 기본값 유지, `index()`는 `default_region=""`).
 
-## Planned Work: Airflow로 스케줄 이관 (2026-09-04 설계, Django·helper 코드 작성 완료, Airflow 자체는 미착수)
+## Active Work: Dagster로 스케줄 구동 (2026-09-04, 실제 설치·실행·검증 완료)
+
+**상태: 설계가 아니라 실제로 설치하고 돌려서 검증까지 끝났다.** Airflow/WSL2 계획(아래 절)이 VT-x 펌웨어 블로커로 보류되자, 사용자가 "WSL2가 필요한지 다시 보자, 필요해지면 그때 Airflow로 가고 그 전까지는 Dagster로 간다"고 결정했다. **Dagster는 순수 Python이라 WSL 없이 이 PC에서 네이티브로 돈다** — 그게 이 전환의 핵심 이유다. `airflow/dags/`는 지우지 않고 그대로 남겨 뒀다("향후에 필요하면 airflow로 전환하던지 할게").
+
+### 왜 이번엔 "검증됨"이라고 말할 수 있는가
+
+Airflow 작업 때는 WSL이 없어 전부 문서 조사만으로 코드를 짰고 그렇게 명시했다. 이번엔 막힌 게 없어서 실제로 했다:
+
+- `dagster_project/.venv`(Python 3.11 — Dagster 문서가 "3.13 권장"이라 하고, 검색된 Windows gRPC 크래시 리포트가 구버전 wheel 쪽이라 3.14 대신 안정적인 3.11을 골랐다)에 `dagster==1.13.21`, `dagster-webserver==1.13.21`을 실제로 `pip install`했다.
+- `definitions.py`를 실제로 `python -c "import definitions"`로 로드해 잡·스케줄 구성에 오류가 없음을 확인했다.
+- `dagster dev -f definitions.py --host 127.0.0.1 --port 3000`을 실제로 띄워 **gRPC 크래시 없이** 정상 기동함을 확인했다(검색 당시 Windows에서 `cygrpc` 관련 크래시 리포트가 있었던 부분이라 특히 이걸 확인해야 했다).
+- `runsOrError` GraphQL 쿼리를 curl로 실제 호출해 응답 형태를 확인했다. **`status` 필드는 대문자(`"SUCCESS"`, `"FAILURE"`)이고 `startTime`/`endTime`은 ISO 문자열이 아니라 float epoch seconds다** — 둘 다 추측이 아니라 실측이다.
+- `dagster job execute -f definitions.py -j site_watchdog_job`으로 **`site_watchdog_job`을 실제로 한 번 실행**했다(안전한 잡이다 — 리포트 서버가 이미 떠 있어서 `ensure-site.ps1`이 그냥 "이미 실행 중입니다"를 출력하고 끝난다). `RUN_SUCCESS`, `ensure_site` 옵의 `Nothing` 의존성 배선, `HOOK_SKIPPED`(실패가 아니므로 훅이 건너뜀)까지 로그로 확인했다.
+- **`alert_on_failure` 훅이 실제로 실패 시 발동하는지**는 별도 스텁 스크립트로 검증했다 — `_run_manage`를 가짜 함수로 바꿔치기하고 일부러 실패하는 옵을 하나 만들어 `execute_in_process()`로 돌린 뒤, 훅이 정확히 `"doomed_job/doomed_op 실패: boom - deliberate test failure"` 형태로 `send_alert`를 호출했음을 어서션으로 확인했다. **실제 카카오 메시지는 보내지 않았다** — `_run_manage`를 스텁으로 바꿨기 때문에 진짜 `manage.py send_alert`가 호출되지 않았다.
+- `run-dagster.ps1`도 실제로 실행해 `data/dagster.yaml`이 생성되고(telemetry 끔) 서버가 뜨는 것까지 확인했다.
+- `report/dagster_client.py`의 `fetch_status()`를 report-site venv에서 **실제 Django 설정과 실제로 뜬 Dagster 웹서버**를 상대로 호출해 `reachable=True`가 나오는 것까지 확인했다(모킹이 아니라 진짜 HTTP 왕복).
+- **실행하지 않은 것(의도적으로):** `scan_job`과 `morning_digest_job`은 네이버 스캔·카카오 전송이라는 실제 부작용이 있어 smoke test로 돌리지 않았다. 이 두 잡의 옵 자체(`run-scan.ps1`/`send-report.ps1` 호출)는 이미 각 스크립트가 독립적으로 검증돼 있으므로(run-scan.ps1은 실제 스캔 종단 확인 완료 — 위 "종단 확인 결과" 절 참고) 여기선 Dagster 쪽 배선만 구조적으로 확인했다.
+- 스모크 테스트에 쓴 프로세스는 전부 PID로 찾아 종료했고, `.dagster_home`/로그 파일도 지웠다. 커밋에는 소스 파일 4개(`definitions.py`, `requirements.txt`, `run-dagster.ps1`, `run-dagster.bat`)만 들어간다 — `.venv`와 `data/`는 `.gitignore`에 있다.
+
+### 아키텍처 — Airflow 버전과의 결정적 차이
+
+Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Django)을 interop(`wslpath`, `powershell.exe -Command "...; exit $LASTEXITCODE"`)으로 건너가야 했다. **Dagster는 이 PC에서 직접 네이티브 Windows 프로세스로 돌기 때문에 그 경계 자체가 없다:**
+
+- `.ps1` 실행: `subprocess.run(["powershell.exe", "-File", str(path)])` — WSL 경로 변환 불필요.
+- `manage.py` 실행: `subprocess.run([str(python_exe), str(manage_py), *args])` — PowerShell `-Command` 레이어도, `exit $LASTEXITCODE` 트릭도 불필요. `subprocess`의 `returncode`가 곧 `manage.py`의 실제 종료 코드다.
+
+이 단순함이 Dagster를 고른 실질적인 이유다 — WSL이 없어도 된다는 것뿐 아니라, 있었어도 코드가 훨씬 단순했을 것이다.
+
+### 요청 4가지 매핑 (Airflow 설계와 동일한 대응, 구현만 다름)
+
+`dagster_project/definitions.py` 하나에 전부 있다.
+
+1. `site_watchdog_job` — `0 * * * *`, `ensure_site` 옵 하나. `ensure-site.ps1` 호출.
+2. `scan_job` — `0 7,12,17 * * *`, `ensure_site` → `run_scan`(`Nothing` 타입으로 순서만 강제, 데이터는 안 넘긴다). 급매 카톡은 Airflow 설계 때와 같은 이유로 Dagster가 할 일이 없다 — `record_scan()`이 트랜잭션 안에서 알아서 보낸다.
+3. `morning_digest_job` — `0 8 * * *`, `ensure_fresh_scan`(`manage.py scan_status --since=07:00`이 실패하면 그 자리에서 `run-scan.ps1` 재실행) → `send_digest`.
+4. `alert_on_failure` — `@dg.failure_hook`, 세 잡 모두에 `hooks={alert_on_failure}`로 걸려 있다. 재시도(`RetryPolicy(max_retries=1, delay=300)`)를 다 쓴 뒤에만 발동해 `manage.py send_alert`를 부른다.
+
+### Django에서 Dagster 보기 — `r/<TOKEN>/dagster/`
+
+Airflow 화면(`r/<TOKEN>/airflow/`)과 나란히 새로 추가했다. **Airflow 화면은 지우지 않고 그대로 뒀다** — `AIRFLOW_API_URL`이 비어 있으면 여전히 "설정되지 않았습니다"를 보여줄 뿐 죽지 않는다.
+
+- `report/dagster_client.py` — `runsOrError` GraphQL 쿼리 하나만 쓴다(위에서 실측 확인). **작업/스케줄 목록은 GraphQL로 조회하지 않는다** — Dagster 공식 문서가 스케줄 관련 스키마를 "여전히 변하는 중이고 주로 웹서버 내부용"이라고 명시하고 있어, 그 부분만큼은 `airflow_client.py`의 DAG 목록처럼 실시간 조회를 시도하는 대신 `definitions.py`와 손으로 맞추는 짧은 정적 목록(`JOBS` 상수)으로 대체했다 — 얕은 확신으로 깨지기 쉬운 쿼리를 짜느니 정직하게 정적 목록을 쓰는 쪽을 택했다.
+- `report/views.py`의 `dagster()` 뷰, `report_site/urls.py`의 라우팅, `report_site/settings.py`의 `DAGSTER_GRAPHQL_URL`/`DAGSTER_TIMEOUT_SECONDS`(둘 다 기본값이 있어 `.env` 설정 없이도 동작 — `run-dagster.ps1`이 항상 `127.0.0.1:3000`에 뜨기 때문). `@staff_member_required`로 admin 로그인을 추가로 요구하는 것도 Airflow 화면과 동일.
+- 화면 아래에 실제 Dagster 웹서버(`127.0.0.1:3000`, 이 PC에서만 열림) 링크를 달아 자세한 로그는 거기서 보게 했다.
+- 새 테스트 15개(`test_dagster_client.py` 6개, `test_dagster_view.py` 5개, 기존 `test_airflow_view.py`는 import 리네임에 맞춰 패치 대상만 수정) 전부 통과. 전체 Django 테스트 122개 중 121개 통과 — 나머지 1개는 이 작업 전부터 있던 무관한 실패(`test_urgent_section_respects_region_filter`). `manage.py check`, `makemigrations --check --dry-run` 통과.
+
+### 아직 검증하지 못한 것 (다음에 확인할 목록)
+
+- **무인 상태로 며칠 돌려본 적이 없다.** 오늘 한 것은 수동 실행과 짧은 smoke test뿐이다. Windows gRPC 이슈 리포트들이 언급한 크래시가 장시간 실행에서는 나타날 수도 있다 — 실제 스케줄을 붙이고 최소 하루 이상 지켜봐야 한다.
+- **스케줄러 데몬이 실제로 정시에 잡을 틱하는지는 안 봤다** — `SchedulerDaemon`이 떠 있는 것만 로그로 확인했지, 한 시간을 기다려 `site_watchdog_job`이 저절로 실행되는 것까지는 보지 못했다.
+- `scan_job`/`morning_digest_job`은 위에서 적었듯 실제로 실행해 보지 않았다 — 특히 `run-scan.ps1`이 Dagster의 서브프로세스 격리 환경(멀티프로세스 executor가 각 옵을 별도 프로세스로 띄운다)에서도 Edge CDP·데스크톱 세션에 정상적으로 접근하는지는 실제 스캔으로 한 번 더 확인해야 한다.
+- **컴퓨트 로그가 기본적으로 꺼져 있다** — 시작 로그에 `PYTHONLEGACYWINDOWSSTDIO`를 설정해야 옵의 stdout/stderr가 Dagster UI에 잡힌다는 경고가 떴다. 지금은 콘솔에만 보인다. 필요해지면 `run-dagster.ps1`에 그 환경변수를 추가한다.
+- **부팅 시 자동 시작이 없다.** 지금은 `run-dagster.bat`을 사람이 띄워야 한다 — Windows 작업 스케줄러에 등록하는 문제는 아직 다루지 않았다(Airflow 계획의 "Airflow 자신이 죽으면 아무도 깨우지 않는다" 위험과 동일하게 적용된다).
+
+## Planned Work: Airflow로 스케줄 이관 (2026-09-04 설계, Django·helper 코드 작성 완료, Airflow 자체는 미착수 — **현재 보류, 아래 Dagster 절 참고**)
 
 **상태: 설계 문서 아래 "새로 필요한 코드" 표에 있던 작은 코드 전부와 Django 조회 화면, DAG 3개까지 전부 작성했다. Airflow 설치 자체와 WSL interop 검증은 아직 하지 않았다** — 지금 이 PC에 WSL이 없다(아래 "막힌 지점" 참고). **DAG 코드는 실제 Airflow에 한 번도 물려 보지 않은 상태다** — WSL을 못 쓰는 동안 미리 짜 둔 것이고, 여기 적힌 것 자체가 "다음에 검증할 목록"이다.
 
