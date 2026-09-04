@@ -1,0 +1,7 @@
+interface:
+  display_name: "Update All"
+  short_description: "검증된 변경을 문서화하고 의미 있는 커밋으로 정리"
+  default_prompt: "$update-all로 현재 저장소 변경을 검토하고 문서화한 뒤 커밋해 주세요."
+
+policy:
+  allow_implicit_invocation: false
