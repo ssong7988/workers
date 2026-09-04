@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Airflow 운영 현황</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f5f7f6; color: #0f172a; font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  .header { background: #102f25; color: #fff; }
+  .header-inner { max-width: 56rem; margin: 0 auto; padding: 2rem 1.25rem; }
+  @media (min-width: 640px) { .header-inner { padding: 2.75rem 2rem; } }
+  .eyebrow { display: flex; align-items: center; gap: .5rem; font-size: .875rem; font-weight: 600; color: #a7f3d0; }
+  .title { margin: .75rem 0 0; font-size: 1.875rem; font-weight: 700; letter-spacing: -0.01em; }
+  @media (min-width: 640px) { .title { font-size: 2.25rem; } }
+  .observed { margin-top: .75rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .875rem; color: rgba(209, 250, 229, .75); }
+  .back { margin-left: auto; border: 1px solid rgba(167, 243, 208, .4); border-radius: 999px; padding: .3rem .75rem; font-weight: 600; color: #a7f3d0; }
+  .back:hover { background: rgba(167, 243, 208, .12); }
+  .body { max-width: 56rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+  @media (min-width: 640px) { .body { padding: 2rem 2rem; } }
+  .panel { border-radius: 1rem; border: 1px solid #e2e8f0; background: #fff; padding: 1.25rem; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .notice { border-radius: .5rem; border: 1px solid #fde68a; background: #fffbeb; padding: .75rem .9rem; font-size: .875rem; color: #92400e; }
+  .notice.error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+  .summary { margin-top: 1.25rem; display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; }
+  @media (min-width: 640px) { .summary { grid-template-columns: repeat(3, 1fr); } }
+  .tile { border-radius: 1rem; border: 1px solid; padding: 1rem; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .tile-value { font-size: 1.375rem; font-weight: 800; }
+  @media (min-width: 640px) { .tile-value { font-size: 1.625rem; } }
+  .tile-label { margin-top: .25rem; font-size: 11px; font-weight: 600; }
+  .tile-green { color: #065f46; background: #ecfdf5; border-color: #d1fae5; }
+  .tile-navy { color: #1e293b; background: #fff; border-color: #e2e8f0; }
+  .tile-red { color: #991b1b; background: #fef2f2; border-color: #fecaca; }
+  .section-title { margin-top: 1.75rem; display: flex; align-items: center; gap: .5rem; padding: 0 .25rem; font-size: 1.125rem; font-weight: 700; }
+  .table-wrap { margin-top: 1rem; overflow-x: auto; border-radius: 1rem; border: 1px solid #e2e8f0; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  table { border-collapse: collapse; width: 100%; min-width: 32rem; font-size: .875rem; }
+  th, td { padding: .6rem .75rem; text-align: left; border-top: 1px solid #f1f5f9; white-space: nowrap; }
+  th { background: #f8fafc; font-size: 12px; color: #475569; border-top: none; }
+  .state { display: inline-block; border-radius: 999px; padding: .15rem .6rem; font-size: 11px; font-weight: 700; }
+  .state-success { color: #065f46; background: #ecfdf5; }
+  .state-failed { color: #991b1b; background: #fef2f2; }
+  .state-running { color: #1e40af; background: #eff6ff; }
+  .state-queued { color: #92400e; background: #fffbeb; }
+  .state-other { color: #475569; background: #f1f5f9; }
+  .paused { color: #94a3b8; }
+  .empty { padding: 3rem 1rem; text-align: center; color: #64748b; }
+  .footer { padding: 1.75rem .5rem; text-align: center; font-size: 12px; line-height: 1.5; color: #94a3b8; }
+  .icon { display: inline-block; vertical-align: -3px; }
+</style>
+</head>
+<body>
+<header class="header"><div class="header-inner">
+  <div class="eyebrow">
+    <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    운영 현황
+  </div>
+  <h1 class="title">Airflow 스케줄</h1>
+  <div class="observed">
+    <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-5"/></svg>
+    마지막 수집: {{ latest_scan_at }}
+    <a class="back" href="{{ report_url }}">매물 리포트 &rarr;</a>
+    <a class="back" href="{{ stats_url }}">가격 통계 &rarr;</a>
+  </div>
+</div></header>
+
+<div class="body">
+  {% if status.error %}
+  <div class="notice error">{{ status.error }}</div>
+  {% elif not status.reachable %}
+  <div class="notice">Airflow 상태를 아직 읽지 못했습니다.</div>
+  {% endif %}
+
+  {% if status.reachable %}
+  <section class="summary">
+    <div class="tile tile-green"><div class="tile-value">{{ status.dags|length }}</div><div class="tile-label">등록된 DAG</div></div>
+    <div class="tile tile-navy"><div class="tile-value">{{ status.runs|length }}</div><div class="tile-label">최근 실행</div></div>
+    <div class="tile{% if failed_runs %} tile-red{% else %} tile-navy{% endif %}"><div class="tile-value">{{ failed_runs|length }}</div><div class="tile-label">실패한 실행</div></div>
+  </section>
+
+  <div class="section-title">
+    <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#047857" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    DAG
+  </div>
+  {% if status.dags %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>DAG</th><th>일정</th><th>상태</th><th>다음 실행</th></tr></thead>
+      <tbody>
+        {% for dag in status.dags %}
+        <tr>
+          <td>{{ dag.description|default:dag.dag_id }}</td>
+          <td>{{ dag.schedule|default:"-" }}</td>
+          <td>{% if dag.paused %}<span class="paused">일시중지</span>{% else %}사용 중{% endif %}</td>
+          <td>{{ dag.next_run|default:"-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="panel empty">등록된 DAG가 없습니다.</div>
+  {% endif %}
+
+  <div class="section-title">
+    <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#047857" stroke-width="2"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+    최근 실행
+  </div>
+  {% if status.runs %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>DAG</th><th>실행 ID</th><th>구분</th><th>상태</th><th>시작</th><th>종료</th></tr></thead>
+      <tbody>
+        {% for run in status.runs %}
+        <tr>
+          <td>{{ run.dag_id }}</td>
+          <td>{{ run.run_id }}</td>
+          <td>{{ run.run_type|default:"-" }}</td>
+          <td>
+            <span class="state
+              {% if run.state == 'success' %} state-success
+              {% elif run.state == 'failed' %} state-failed
+              {% elif run.state == 'running' %} state-running
+              {% elif run.state == 'queued' %} state-queued
+              {% else %} state-other{% endif %}">{{ run.state|default:"-" }}</span>
+          </td>
+          <td>{{ run.start|default:"-" }}</td>
+          <td>{{ run.end|default:"-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="panel empty">최근 실행 기록이 없습니다.</div>
+  {% endif %}
+  {% endif %}
+
+  <p class="footer">
+    이 화면은 Airflow에서 읽기만 합니다 &mdash; 여기서 DAG를 실행하거나 멈출 수 없습니다.<br>
+    실제 조작은 Airflow 웹서버(WSL) 또는 이 PC에서 직접 합니다.
+  </p>
+</div>
+</body>
+</html>

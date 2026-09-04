@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (매물 리포트에서 면적 표시를 지우고 타입 표시로 교체, 통계·리포트 화면에 지역/단지 필터 추가, 매물에 동(building) 필드 추가, 스캔 진단 로그 추가, 백그라운드 Edge 탭 로그인 오탐 완화)
+마지막 갱신: 2026-09-04 (Airflow 스케줄 이관: Django 조회 화면·`send_alert`/`scan_status`·`ensure-site.ps1` 작성 및 테스트 통과, WSL·Airflow 설치는 아직, 매물 리포트에서 면적 표시를 지우고 타입 표시로 교체, 통계·리포트 화면에 지역/단지 필터 추가, 매물에 동(building) 필드 추가, 스캔 진단 로그 추가, 백그라운드 Edge 탭 로그인 오탐 완화)
 
 ## Current Architecture
 
@@ -61,6 +61,120 @@
 - **`Observation`/`Listing`에 `building`(동) 필드를 추가했다(2026-09-04, 마이그레이션 `0004`).** 관심부동산 카드 파서는 이미 동을 읽고 있었지만 finder의 `Listing` 데이터클래스가 버렸다 — 층만으로는 몇 동인지 알 수 없다는 지적으로 finder → API → DB → admin → 리포트 화면까지 이어지도록 연결했다. 통계 화면은 건물을 가로질러 집계하므로 의도적으로 제외했다. **기존에 저장된 매물·관측은 전부 이 기능 이전에 수집된 것이라 동 값이 비어 있다** — 새 스캔이 한 번 돌아야 화면에 동이 나타난다.
 - **매물 리포트에서 매물별 면적 표시를 지우고 타입(`type_name`, 예: `84A`)으로 교체했다(2026-09-04).** 조사 조건이 사실상 84㎡ 하나로 고정돼 있어 매물마다 면적을 다시 보여줄 필요가 없다는 지적이었다. `type_name`은 `building`과 달리 최초 마이그레이션(`0001_initial`)부터 존재했고 finder의 실제 수집 경로(`collector.py`의 `_parse_favorite_listing_text`)가 처음부터 채워 왔으므로 스키마·수집 변경은 없었다 — `properties/report.py`의 `build_report_payload()`와 `report/templates/report/index.html` 두 곳(급매 카드, 단지별 매물)만 고쳐 표시 순서를 `타입 · 층 · 동 · 향`으로 맞췄다. `properties/admin.py`의 두 `list_display`에도 `type_name`을 추가해 `building`과 나란히 보이게 했다(전에는 상세 화면에만 보이고 목록에는 빠져 있었다). 조건 설명 문구("전용 83~86㎡ 이하")는 그대로 둔다 — 지운 것은 매물별 면적 표시뿐이다.
 - **통계·리포트 화면에 지역/단지 선택 필터를 추가했다(2026-09-04).** 통계 화면은 이미 단지를 고르면 서버가 정확한 지역을 계산했지만 "조회"를 눌러야 화면에 반영됐다 — 두 select에 `onchange` 자동 제출을 붙여 즉시 반영되게 했고, 지역을 바꿀 때 단지 선택을 같이 지워 이전엔 조용히 무시되던 "단지 선택 중 지역 변경"도 실제로 먹히게 고쳤다. 리포트 화면(`report/views.py`의 `index()`)에는 이 선택 기능이 아예 없었는데, 통계와 같은 UI를 추가하되 **기본값은 통계처럼 과천으로 좁히지 않고 전체를 그대로 보여준다** — 카카오 "전체 매물 보기" 링크 등 기존 동작을 깨지 않기 위한 의도적 결정. `resolve_scope()`에 `default_region` 매개변수를 추가해 재사용했다(`stats()`는 기존 기본값 유지, `index()`는 `default_region=""`).
+
+## Planned Work: Airflow로 스케줄 이관 (2026-09-04 설계, Django·helper 코드 작성 완료, Airflow 자체는 미착수)
+
+**상태: 설계 문서 아래 "새로 필요한 코드" 표에 있던 작은 코드 전부와 Django 조회 화면을 작성하고 테스트까지 통과했다. Airflow 설치, DAG 작성, WSL interop 검증은 아직 하지 않았다** — 지금 이 PC에 WSL이 없다.
+
+### 이번에 실제로 끝난 것 (2026-09-04)
+
+- `report/airflow_client.py` + `report/templates/report/airflow.html` + `report/views.py`의 `airflow()` 뷰 + `report_site/urls.py`의 `r/<TOKEN>/airflow/` 라우팅. `@staff_member_required`로 admin 로그인을 추가로 요구한다. Airflow가 꺼져 있거나 설정이 없으면 사유를 적은 화면을 돌려준다(테스트로 확인).
+- `report_site/settings.py`에 `AIRFLOW_API_URL`/`AIRFLOW_USERNAME`/`AIRFLOW_PASSWORD`/`AIRFLOW_API_TOKEN`/`AIRFLOW_TIMEOUT_SECONDS` 추가, 전부 선택값. `.env.example`에 문서화.
+- `properties/delivery.py`에 `DeliveryService.send_alert(text)` 추가 — `⚠️ ` 접두사를 붙이고 200자로 자른 뒤 기존 `_send_text` 경로로 보낸다. 새 관리 명령 `send_alert`(`properties/management/commands/send_alert.py`)가 이것을 감싼다.
+- 새 관리 명령 `scan_status`(`properties/management/commands/scan_status.py`) — `--since HH:MM` 이후 성공한 `Scan`이 있으면 종료 코드 0, 없으면 1(과 `CommandError`). Airflow가 아니라 **DB의 `Scan` 테이블을 진실의 원천으로 삼는다**는 설계 결정을 그대로 구현했다.
+- `report-site/ensure-site.ps1` 신설. `run-site.ps1`은 waitress로 끝나 블로킹되므로 그대로 스케줄러 태스크로 못 쓴다 — 이 스크립트는 `check-api`로 먼저 확인하고, 죽어 있을 때만 `run-site.bat`을 `Start-Process`로 분리 실행한 뒤 최대 60초 폴링한다. **서버가 이미 떠 있는 상태에서 실제로 실행해 정상 종료(exit 0)를 확인했다** — 서버가 죽은 상태에서의 기동 분기는 아직 실행해 보지 않았다.
+- 새 테스트 19개(`report/tests/test_airflow_client.py`, `report/tests/test_airflow_view.py`, `properties/tests/test_scan_status_command.py`, `properties/tests/test_delivery.py`에 추가한 `send_alert` 테스트 2개) 전부 통과. 전체 Django 테스트 112개 중 111개 통과 — 나머지 1개(`test_urgent_section_respects_region_filter`)는 이 작업 이전부터 있던 무관한 실패임을 stash로 재확인했다. `manage.py check`, `makemigrations --check --dry-run` 통과.
+- Airflow REST API의 정확한 필드명은 **아직 실제 응답으로 확인하지 못했다.** `airflow_client.py`는 2.x/3.x 필드명 차이를 방어적으로 읽지만(`_text()`가 여러 후보 키를 시도), Airflow를 실제로 세운 뒤 `/api/v2/dags`·`/api/v2/dags/~/dagRuns` 응답을 한 번 찍어보고 필드명이 맞는지 재확인해야 한다.
+
+### 다음에 할 일 (WSL 설치부터)
+
+아래 "단계" 절의 1~3번이 남아 있다: WSL2 설치, Airflow 3.x 설치(WSL 안 자체 venv), **interop으로 `powershell.exe`가 Windows 세션에서 실제로 뜨는지 검증**(1순위 — 여기서 막히면 나머지가 무의미하다고 설계 시점에 이미 적어 뒀다). 그다음 DAG 3개(`site_watchdog`/`scan`/`morning_digest`) 작성.
+
+### 사용자 요청 (원문 요지)
+
+지금은 수집·서버 운용·카카오 전송이 각각 따로 도는 프로그램이다. 이것을 Airflow로 묶는다.
+
+1. 매 1시간마다 리포트 서버가 살아 있는지 확인하고, 죽어 있으면 띄운다.
+2. 아침 7시·낮 12시·오후 5시에 수집을 돌린다. 급매가 있으면 카카오톡을 보낸다.
+3. 아침 8시에 리포트를 보낸다. 7시 수집이 끝나지 않았으면 그것을 다시 시도한 뒤에 보낸다.
+4. 에러가 나면 내용을 요약해 카카오톡으로 보낸다.
+
+### 먼저 확인한 환경 사실 (다시 조사할 필요 없음)
+
+- **이 PC에 WSL도 Docker도 설치돼 있지 않다.** `wsl -l -v`는 사용법만 출력하고 `docker`는 명령 자체가 없다(2026-09-04 실측).
+- **Airflow는 Windows에서 네이티브로 돌지 않는다.** POSIX 전용이며 공식 문서가 Windows에서는 WSL2 또는 리눅스 컨테이너를 쓰라고 안내한다. 따라서 **WSL2 설치가 이 계획의 전제 조건**이다(관리자 권한과 재부팅이 필요하다).
+- Airflow 3.2부터 Python 3.10~3.14를 지원한다. 저장소의 공유 venv는 3.14지만 그것은 Windows 쪽 것이고, Airflow는 WSL 안에 자기 venv를 따로 갖는다. **두 파이썬을 섞지 않는다.**
+- 현재 자동 스케줄은 **하나도 없다.** 8단계에서 `scheduled-run`을 지웠고 Windows 작업 스케줄러에도 등록된 항목이 없음을 확인했다. 지금은 사람이 `.bat`을 더블클릭한다.
+- `/api/health/`는 `@bearer_required`다. 무인증 헬스 경로는 없다.
+
+### 핵심 설계 결정: Airflow는 스케줄만 잡고, 일은 전부 지금처럼 Windows에서 한다
+
+수집은 Windows의 Edge를 CDP로 붙잡고 네이버 로그인 세션을 쓴다. PostgreSQL·Django·waitress도 전부 Windows에 있다. **이것을 리눅스로 옮기거나 다시 구현하지 않는다.** Airflow는 WSL2 안에서 스케줄러·오케스트레이터 역할만 하고, 각 태스크는 WSL interop으로 `powershell.exe`를 불러 **기존 `.ps1` 스크립트를 그대로 실행한다.** 그러면 실제 작업 프로세스는 오늘과 똑같이 Windows 사용자 세션에서 돈다.
+
+방향에 따라 난이도가 다르다는 점이 이 설계의 근거다.
+
+| 방향 | 방법 | 난이도 |
+|---|---|---|
+| Airflow(WSL) → Windows 작업 | interop으로 `powershell.exe` 실행 | 쉬움 |
+| Django(Windows) → Airflow API | `http://127.0.0.1:8080` (WSL2가 자동 포워딩) | 쉬움 |
+| WSL → Windows HTTP·DB 직접 접속 | 호스트 IP + 방화벽 필요 | **피한다** |
+
+Windows 10에는 WSL2 미러 네트워킹이 없다(Windows 11 22H2+ 기능). 그래서 **헬스체크조차 HTTP로 WSL에서 건너가지 않고**, interop으로 Windows 쪽에서 실행한다. 네트워크 경계를 넘는 것은 Django가 Airflow를 읽는 한 방향뿐이다.
+
+### DAG 설계 — 요청 4가지 매핑
+
+**1) `site_watchdog` — `0 * * * *` (매시 정각, Asia/Seoul)**
+
+태스크 하나. 새 스크립트 `report-site/ensure-site.ps1`을 interop으로 부른다. 그 스크립트가 하는 일:
+
+- `real_estate_finder check-api`로 서버 확인 — 토큰 로딩과 사람이 읽을 수 있는 실패 메시지가 이미 그 명령에 있으므로 재사용한다.
+- 죽어 있으면 `Start-Process`로 `run-site.bat`을 **분리 실행**한다. `run-site.ps1`은 마지막 줄이 waitress라 블로킹이므로, 그냥 부르면 Airflow 태스크가 영원히 안 끝난다.
+- 30초쯤 헬스를 폴링하고, 그래도 안 뜨면 0이 아닌 코드로 종료한다(→ 4번 실패 알림).
+
+**2) `scan` — `0 7,12,17 * * *`**
+
+`ensure_site` → `run_scan` 두 태스크. `run_scan`은 기존 `run-scan.bat`을 그대로 부른다. `execution_timeout`은 20분쯤, `retries=1`.
+
+**급매 카카오 전송을 위해 Airflow가 할 일은 없다.** `scan-once`가 `POST /api/scans/`로 넘기면 Django가 급매·신규를 판정해 그 자리에서 보낸다. 요청 2번의 "급매 있으면 카톡"은 **이미 구현돼 있는 동작**이고, Airflow는 스캔을 제때 돌리기만 하면 된다.
+
+**3) `morning_digest` — `0 8 * * *`**
+
+- `ensure_fresh_scan`: 오늘 07:00 이후 성공한 스캔이 있는지 확인하고, 없으면 그 자리에서 `run-scan.bat`을 돌린다.
+- `send_digest`: 기존 `send-report.bat`(= `manage.py send_digest`)을 부른다.
+
+**판단 근거를 Airflow 메타데이터가 아니라 DB에서 본다.** `ExternalTaskSensor`로 7시 DAG런 상태를 보는 방법도 있지만, 정작 중요한 것은 "DAG가 돌았는가"가 아니라 **"보낼 수집 결과가 있는가"**다. `Scan` 모델에 `started_at`·`success`·`successful_conditions`가 이미 있으므로 그것이 진실의 원천이다. 7시 런이 성공 표시여도 조건이 전부 실패했을 수 있고, 반대로 사람이 손으로 돌린 수집이 있으면 다시 돌릴 필요가 없다.
+
+**4) 실패 알림 — `on_failure_callback`**
+
+세 DAG의 `default_args`에 공통 콜백을 건다. 콜백은 DAG id·태스크 id·시도 횟수·로그 꼬리를 200자 예산에 맞게 요약해 interop으로 `manage.py send_alert "<요약>"`을 부른다. **카카오 인증·전송 경로를 WSL에서 다시 만들지 않기 위해** Django 명령을 통한다.
+
+### 새로 필요한 코드 (작다)
+
+| 무엇 | 어디 | 왜 |
+|---|---|---|
+| `ensure-site.ps1` | `report-site/` | 분리 실행 + 헬스 폴링. `run-site.ps1`은 블로킹이라 그대로 못 쓴다 |
+| `send_alert` 명령 + `DeliveryService.send_alert(text)` | `report-site/properties/` | 지금 `DeliveryService`는 `CardItem` 목록만 받는다. 임의 텍스트 1통을 보낼 공개 경로가 없어 `_send_text`가 private로 막혀 있다 |
+| `scan_status` 명령 | `report-site/properties/` | "오늘 N시 이후 성공 스캔이 있는가"를 종료 코드로 답한다. 3번 DAG가 쓴다 |
+| DAG 3개 | `airflow/dags/` (WSL에서 심볼릭 링크) | |
+
+기존 `run-scan.bat`·`send-report.bat`·`check-api`는 **고치지 않고 그대로 재사용한다.**
+
+### 위험 (실제로 이 계획을 깨뜨릴 것들)
+
+- **네이버 로그인 만료가 최대 약점이다.** `run-scan.ps1`의 3단계 `browser-login`은 사람이 로그인할 때까지 기다린다. 무인 실행 중 세션이 끊기면 그 태스크는 타임아웃까지 매달린다. 자동화할 수 없는 지점이므로 **타임아웃 → 실패 → 카톡 알림 → 사람이 로그인**이 유일한 경로다. 이것을 "가끔 있는 일"로 받아들일 수 있어야 이 계획이 성립한다.
+- **Windows 세션이 잠기거나 로그아웃되면 Edge 자동화가 깨진다.** 이 PC는 켜져서 로그인된 상태로 있어야 한다.
+- **Airflow 자신이 죽으면 아무도 깨우지 않는다.** 감시자의 감시자가 없다. WSL과 Airflow를 부팅 시 자동 기동하도록 Windows 작업 스케줄러에 등록하는 것으로 최소한만 막는다.
+- WSL2 설치는 관리자 권한과 재부팅을 요구한다.
+
+### 단계
+
+1. WSL2 + Ubuntu 설치, 부팅 시 자동 시작 설정.
+2. WSL 안에 Airflow 3.x 설치(자체 venv, constraints 파일 사용), simple auth manager, 8080 포트.
+3. interop 확인 — WSL에서 `powershell.exe -File "C:\...\run-site.ps1"`이 Windows 세션에서 실제로 뜨는지 먼저 확인한다. **여기서 막히면 나머지가 전부 무의미하므로 1순위로 검증한다.**
+4. Django 쪽 작은 명령 2개(`send_alert`, `scan_status`)와 `ensure-site.ps1` 작성 + 테스트.
+5. DAG 3개 작성, 각각 수동 트리거로 1회씩 확인.
+6. 스케줄 활성화. 첫 하루는 결과를 사람이 확인한다.
+7. `RUNBOOK.md`에 "Airflow가 돌리는 것 / 사람이 여전히 해야 하는 것"을 적는다.
+
+### Django에서 Airflow 보기 (작업 중)
+
+운영 화면을 `r/<TOKEN>/airflow/`에 붙인다. **공개 리포트와 같은 토큰 경로 아래지만 `@staff_member_required`를 걸어 admin 로그인을 추가로 요구한다** — 스케줄 상태는 이 PC가 언제 비어 있는지와 무엇이 실패했는지를 알려주므로 카카오 링크를 받은 사람에게까지 보일 내용이 아니다.
+
+- `report/airflow_client.py`: stdlib `urllib`로 Airflow REST API v2를 읽는다(`POST /auth/token`으로 JWT → `GET /api/v2/dags`, `GET /api/v2/dags/~/dagRuns`). `real-estate-finder/api_client.py`와 같은 이유로 HTTP 의존성을 새로 넣지 않는다. **읽기 전용이다 — DAG를 트리거·중지·삭제하는 경로를 두지 않는다.**
+- Airflow가 꺼져 있거나 설정이 없으면 500이 아니라 사유를 적은 화면을 돌려준다. 스케줄러가 죽었을 때 그 사실을 보여주는 것이 이 화면의 목적이므로 스택 트레이스로 죽으면 안 된다.
+- 필드 이름은 방어적으로 읽는다. Airflow 2.x와 3.x가 DAG 런 필드명을 여러 개 바꿨고 아직 붙일 인스턴스가 없어 실제 응답을 확인하지 못했다. **Airflow를 세운 뒤 실제 payload로 반드시 재확인한다.**
+- 설정은 전부 선택값이다(`AIRFLOW_API_URL`, `AIRFLOW_USERNAME`/`AIRFLOW_PASSWORD` 또는 `AIRFLOW_API_TOKEN`, `AIRFLOW_TIMEOUT_SECONDS`). 비어 있으면 화면이 "설정되지 않았다"고 말한다.
+- **현재 상태:** `report/airflow_client.py`와 뷰·URL·설정 배선까지 작성했고, **템플릿(`report/templates/report/airflow.html`)과 테스트가 아직 없다.** 그 상태로는 화면이 열리지 않는다.
 
 ## Completed Work: 관심 단지 추가 + 슈르·에코팰리스 표기 수정 (2026-09-03 완료)
 

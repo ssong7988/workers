@@ -6,6 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -21,6 +22,7 @@ from properties.statistics import (
     table_rows,
 )
 
+from .airflow_client import fetch_status
 from .stats_params import resolve_range, resolve_scope
 
 
@@ -169,6 +171,34 @@ def stats(request) -> HttpResponse:
             "period_max": eok_text(period.maximum) if period.samples else "-",
             "latest_mean": eok_text(period.latest.mean) if period.latest else "-",
             "report_url": reverse("report-index"),
+        },
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@staff_member_required
+def airflow(request) -> HttpResponse:
+    """Show what the Airflow schedule has been doing, for operators only.
+
+    Read-only, and it never 500s on Airflow's account: when the scheduler is
+    down the point of this page is to say so, which a stack trace does not.
+    """
+    status = fetch_status()
+    timezone_name = _timezone_name()
+    latest_scan = Scan.objects.order_by("-started_at").first()
+
+    response = render(
+        request,
+        "report/airflow.html",
+        {
+            "status": status,
+            "failed_runs": status.failed_runs,
+            "latest_scan_at": _display_time(
+                latest_scan.started_at if latest_scan else None, timezone_name
+            ),
+            "report_url": reverse("report-index"),
+            "stats_url": reverse("report-stats"),
         },
     )
     response["Cache-Control"] = "no-store"

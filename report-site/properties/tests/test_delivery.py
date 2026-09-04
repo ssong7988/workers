@@ -145,3 +145,18 @@ class DeliveryTests(TestCase):
         result = DeliveryService(self.notifier(calls)).send_digest()
         self.assertIn("0건", result)
         self.assertEqual(calls[0][0], "text")
+
+    def test_send_alert_prefixes_and_truncates(self) -> None:
+        calls: list = []
+        result = DeliveryService(self.notifier(calls)).send_alert("x" * 250)
+        self.assertIn("오류 알림", result)
+        self.assertEqual(calls[0][0], "text")
+        message = calls[0][1]
+        self.assertTrue(message.startswith("⚠️ "))
+        self.assertLessEqual(len(message), 200)
+
+    def test_send_alert_failure_is_recorded_and_raised(self) -> None:
+        with self.assertRaises(DeliveryError):
+            DeliveryService(self.notifier([], fail=True)).send_alert("문제 발생")
+        failure = NotificationFailure.objects.get()
+        self.assertIn("send", failure.error)

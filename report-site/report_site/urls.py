@@ -20,6 +20,10 @@ urlpatterns = [
     path("api/", include("api.urls")),
     path(_PRIVATE, views.index, name="report-index"),
     path(f"{_PRIVATE}stats/", views.stats, name="report-stats"),
+    # Operations, not a public screen: the schedule's state says when the
+    # machine is idle and what failed, so this one needs an admin login on top
+    # of the path token.
+    path(f"{_PRIVATE}airflow/", views.airflow, name="report-airflow"),
     path(f"{_PRIVATE}admin/", admin.site.urls),
 ]
 

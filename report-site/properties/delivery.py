@@ -26,6 +26,7 @@ from .statistics import default_summary
 
 STATS_BUTTON = "통계 보기"
 REPORT_BUTTON = "전체 매물 보기"
+ALERT_PREFIX = "⚠️ "
 
 
 class DeliveryError(RuntimeError):
@@ -159,6 +160,17 @@ class DeliveryService:
         decision.scan.notification = notification
         decision.scan.save(update_fields=("notification",))
         return notification
+
+    def send_alert(self, text: str) -> str:
+        """Send a plain-text alert - e.g. an Airflow task failure summary.
+
+        Airflow (WSL) shells out to `manage.py send_alert` instead of talking
+        to Kakao itself, so the token and `NotificationFailure` bookkeeping
+        stay in this one place rather than being duplicated on the Linux side.
+        """
+        message = f"{ALERT_PREFIX}{text}"[:TEXT_LIMIT]
+        self._send_text(message)
+        return "카카오 전송 완료(텍스트): 오류 알림"
 
     def send_digest(self) -> str:
         listings = list(

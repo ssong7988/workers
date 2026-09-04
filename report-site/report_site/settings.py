@@ -67,6 +67,18 @@ REPORT_STATS_URL = (
     f"{REPORT_PUBLIC_URL.rstrip('/')}/stats/" if REPORT_PUBLIC_URL else ""
 )
 
+# Airflow runs the schedule from WSL2 and drives this machine through interop.
+# Django only reads its status for the operations screen, so every value here
+# is optional: unset simply means the screen says it is not configured yet.
+AIRFLOW_API_URL = os.environ.get("AIRFLOW_API_URL", "").strip()
+AIRFLOW_USERNAME = os.environ.get("AIRFLOW_USERNAME", "").strip()
+AIRFLOW_PASSWORD = os.environ.get("AIRFLOW_PASSWORD", "").strip()
+AIRFLOW_API_TOKEN = os.environ.get("AIRFLOW_API_TOKEN", "").strip()
+try:
+    AIRFLOW_TIMEOUT_SECONDS = float(os.environ.get("AIRFLOW_TIMEOUT_SECONDS", "5"))
+except ValueError:
+    AIRFLOW_TIMEOUT_SECONDS = 5.0
+
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY", "django-insecure-report-site-local-only-not-public"
 )
