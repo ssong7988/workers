@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-04 (**개발 브랜치를 `kakao-image-card`에서 `dev`로 옮기고, 저장소 루트 `VERSION` 파일(`devX.Y.Z`, `dev` 푸시마다 마지막 숫자 +1, 현재 `dev1.1.1`)로 버전을 관리하기 시작했다. report-site 재시작을 손으로 하지 않도록 Dagster에 `restart_report_site_job`을 추가했다(스케줄 없음, 코드를 바꾼 뒤 Dagster UI에서 수동 트리거).** 그 전에는 앱별 날짜 로그(`.logs/`)를 추가하고 Dagster 저장소를 SQLite에서 PostgreSQL의 `dagster` schema로 옮겼다. 공개 경로는 `/report/`, `/statistics/`, `/dagster/`이고 네이티브 Dagster UI는 `/dagster/console/`이다.)
+마지막 갱신: 2026-09-04 (**개발 브랜치를 `kakao-image-card`에서 `dev`로 옮기고, 저장소 루트 `VERSION` 파일(`devX.Y.Z`, `dev` 푸시마다 마지막 숫자 +1, 현재 `dev1.1.1`)로 버전을 관리하기 시작했다. report-site와 Dagster 둘 다 코드를 바꾼 뒤 재시작하는 절차를 자동화했다 — report-site는 Dagster job `restart_report_site_job`(수동 트리거), Dagster 자신은 독립 스크립트 `dagster_project/restart-dagster.bat`(자기 자신을 끄는 job은 불가능해서).** 그 전에는 앱별 날짜 로그(`.logs/`)를 추가하고 Dagster 저장소를 SQLite에서 PostgreSQL의 `dagster` schema로 옮겼다. 공개 경로는 `/report/`, `/statistics/`, `/dagster/`이고 네이티브 Dagster UI는 `/dagster/console/`이다.)
 
 ## Current Architecture
 
@@ -104,6 +104,8 @@ Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Djan
 3. `morning_report_schedule` — `0 8 * * *`. 서버 확인 후 DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다.
 4. `alert_on_failure` — 두 잡 모두에 걸려 있고 재시도(`RetryPolicy(max_retries=1, delay=300)`)를 다 쓴 뒤 `manage.py send_alert`를 부른다.
 5. `restart_report_site_job` — `report-site/restart-site.ps1`을 실행한다. 8000번 포트를 듣는 `python` 프로세스를 찾아 종료(다른 이름의 프로세스면 건너뛰고 경고만 남긴다)하고, 포트가 풀릴 때까지 최대 20초 기다린 뒤 `run-site.ps1`을 hidden으로 새로 띄우고 `check-api`로 최대 60초 재확인한다. `real-estate-finder`는 스캔·리포트 전송이 매번 새 subprocess로 돌기 때문에 이런 재시작 잡이 필요 없다.
+
+**Dagster 자신(`definitions.py`)의 재시작은 job으로 만들 수 없다** — 자기 자신을 실행 중인 프로세스를 자기 job이 끄면 그 실행 자체가 중단된다. 대신 독립 스크립트 `dagster_project/restart-dagster.bat`(→ `restart-dagster.ps1`)을 추가했다(2026-09-04). 3000번 포트의 기존 `python` 프로세스를 종료 → 포트 해제 대기(최대 20초) → `run-dagster.ps1`을 hidden으로 새로 띄움 → GraphQL(`{__typename}`)로 최대 60초 재확인, 구조는 `restart-site.ps1`과 동일하다. `run-dagster.bat`도 기존 프로세스를 자동으로 끄지 않으므로(포트 3000이 이미 쓰이면 새 프로세스가 바인딩 실패), `definitions.py`를 고친 뒤에는 이 스크립트로 직접 재시작해야 한다.
 
 ### Dagster 웹 UI — 요약 `/dagster/`, 네이티브 `/dagster/console/`
 

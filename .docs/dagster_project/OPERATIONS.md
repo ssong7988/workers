@@ -131,6 +131,29 @@ ops:
 이 모드는 데이터가 최신인지 검사하지 않는다. 최신성까지 보장하려면 바로 위의
 `ensure_fresh + enabled` 구성을 사용한다.
 
+## 코드를 바꾼 뒤 재시작하기
+
+`dagster dev`와 waitress 둘 다 `run-*.bat`을 다시 실행해도 기존 프로세스를
+자동으로 끄지 않는다 - 이미 포트를 쓰는 프로세스가 있으면 새 프로세스가
+바인딩에 실패할 뿐이다. 무엇을 고쳤는지에 따라 재시작 방법이 다르다.
+
+- **`report-site/` 코드(뷰·템플릿 등)를 바꿨을 때** — `restart_report_site_job`
+  (2026-09-04 추가, 스케줄 없음)을 `/dagster/console/`에서 Launch Run 한다.
+  `restart_report_site_job`은 `report-site/restart-site.ps1`을 실행해 8000번
+  포트의 기존 프로세스를 종료하고 `run-site.ps1`을 새로 띄운 뒤
+  `check-api`로 재확인한다. 직접 손으로 프로세스를 찾아 끄고 `run-site.bat`을
+  다시 켜도 결과는 같다.
+- **`dagster_project/definitions.py`(job·schedule·op 정의 자체)를 바꿨을 때** —
+  Dagster가 이 파일을 프로세스 시작 시 한 번만 읽어서 메모리에 올려두므로,
+  Dagster job으로는 고칠 수 없다(자기 자신을 실행 중인 프로세스를 자기 job이
+  끄면 그 실행 자체가 중단된다). 대신 독립 스크립트
+  `dagster_project/restart-dagster.bat`을 더블클릭한다 -
+  `restart-dagster.ps1`이 3000번 포트의 기존 Dagster를 종료하고
+  `run-dagster.ps1`을 새로 띄운 뒤 GraphQL(`{__typename}`)로 재확인한다.
+- **`real-estate-finder/` 코드를 바꿨을 때** — 재시작이 필요 없다. 스캔·리포트
+  전송 op는 매번 새 subprocess로 `run-scan.ps1`/`send-report.ps1`을 실행하므로
+  다음 트리거부터 디스크의 최신 코드를 그대로 읽는다.
+
 ## 재시도와 실패 알림
 
 세 op 모두 다음 정책을 사용한다.
