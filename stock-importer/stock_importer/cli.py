@@ -50,12 +50,31 @@ def run_lock() -> Iterator[None]:
         LOCK_PATH.unlink(missing_ok=True)
 
 
+def hide_own_console() -> None:
+    """우리 콘솔 창을 숨긴다.
+
+    작업 스케줄러가 이 프로그램을 띄우면 cmd 콘솔이 화면 한가운데 뜬다. 그 창이
+    H-able을 덮으면 우리 클릭이 H-able에 닿지 않는다 - 실제로 그 때문에 한참
+    헛돌았다. 출력은 어차피 로그 파일로 가므로 창은 필요 없다.
+    """
+    import ctypes
+
+    window = ctypes.windll.kernel32.GetConsoleWindow()
+    if window:
+        ctypes.windll.user32.ShowWindow(window, 0)  # SW_HIDE
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="KB증권 금융자산 수집기")
     parser.add_argument(
         "--api-base",
         default=None,
         help="리포트 서버 주소 (기본값: STOCK_API_BASE 또는 http://127.0.0.1:8000)",
+    )
+    parser.add_argument(
+        "--hide-console",
+        action="store_true",
+        help="콘솔 창을 숨긴다 (작업 스케줄러 실행용 - 창이 H-able을 덮으면 클릭이 막힌다)",
     )
     parser.add_argument(
         "--edge-cdp",
@@ -173,6 +192,8 @@ def _web_collector(edge_cdp: str):
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    if args.hide_console:
+        hide_own_console()
     try:
         if args.command == "check-api":
             _check_api(StockApiClient(args.api_base))

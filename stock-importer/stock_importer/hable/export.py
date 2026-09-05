@@ -15,7 +15,17 @@ import ctypes
 import time
 from pathlib import Path
 
-from .extract import BorrowedCursor, ExtractionError, focus, guard_target
+from .extract import (
+    BorrowedCursor,
+    ExtractionError,
+    MenuItem,
+    click_menu_item,
+    close_popup_menus,
+    focus,
+    ensure_clickable,
+    open_context_menu,
+    read_menu_items,
+)
 from .window import Pane, class_name, descendants, process_id, rect, top_level_windows, window_text
 
 # 1285 창(854x645)에서 실측한 자리. 툴바는 그리드 판의 위쪽 테두리에 붙어 있고
@@ -34,6 +44,70 @@ WM_SETTEXT = 0x000C
 BM_CLICK = 0x00F5
 
 
+# 우클릭 메뉴에서 무엇을 고를지. 가벼운 것이 먼저다 - CSV와 TXT는 텍스트 파일
+# 하나만 남기고 Excel 프로그램을 열지 않는다. 엑셀은 마지막이다.
+EXPORT_PREFERENCE = (
+    ("csv", ("csv",)),
+    ("txt", ("txt", "텍스트", "text")),
+    ("excel", ("excel", "엑셀", "xls")),
+)
+
+
+def pick_export_item(names: list[str]) -> str | None:
+    """메뉴 항목 이름들 중 내보내기에 쓸 것 하나를 고른다.
+
+    '저장'이나 '내보내기'가 붙은 항목만 후보로 본다 - '복사'나 '인쇄'를 잘못
+    누르면 엉뚱한 일이 벌어진다.
+    """
+    candidates = [
+        name
+        for name in names
+        if any(word in name for word in ("저장", "내보내기", "Save", "Export"))
+    ]
+    for _kind, needles in EXPORT_PREFERENCE:
+        for name in candidates:
+            lowered = name.lower()
+            if any(needle in lowered for needle in needles):
+                return name
+    return None
+
+
+def export_via_menu(
+    main_handle: int, screen_handle: int, pane: Pane, folder: Path, stem: str
+) -> tuple[list[str], list[list[str]], str] | None:
+    """우클릭 메뉴로 내보낸다. 메뉴를 못 읽거나 쓸 항목이 없으면 None.
+
+    이 길이 되면 Excel은 열리지 않는다.
+    """
+    menus = open_context_menu(main_handle, screen_handle, pane)
+    if not menus:
+        return None
+    items: list[MenuItem] = []
+    for handle in menus:
+        items.extend(read_menu_items(handle))
+    names = [item.name for item in items]
+    chosen = pick_export_item(names)
+    if chosen is None:
+        close_popup_menus()
+        return None
+    target = next(item for item in items if item.name == chosen)
+    if not click_menu_item(target):
+        close_popup_menus()
+        return None
+
+    since = time.time()
+    process = process_id(main_handle)
+    try:
+        dialog = wait_for_save_dialog(process, timeout=10.0)
+    except ExtractionError:
+        close_popup_menus()
+        return None
+    save_as(dialog, folder / stem)
+    exported = wait_for_export(folder, since)
+    headers, rows = read_table(exported)
+    return headers, rows, f"우클릭 메뉴 '{chosen}' ({exported.name})"
+
+
 def click_toolbar(main_handle: int, screen_handle: int, pane: Pane, button: str) -> None:
     """그리드 판의 오른쪽 끝을 기준으로 툴바 버튼 하나를 누른다."""
     if button not in TOOLBAR_FROM_RIGHT:
@@ -42,7 +116,7 @@ def click_toolbar(main_handle: int, screen_handle: int, pane: Pane, button: str)
     left, top, _width, _height = rect(screen_handle)
     x = left + pane.x + pane.width - TOOLBAR_FROM_RIGHT[button]
     y = top + pane.y + TOOLBAR_Y_IN_PANE
-    guard_target(x, y, process_id(main_handle))
+    ensure_clickable(main_handle, screen_handle, x, y)
     with BorrowedCursor() as cursor:
         cursor.click(x, y, settle=0.8)
 
@@ -163,16 +237,93 @@ def read_table(path: Path) -> tuple[list[str], list[list[str]]]:
     raise ExtractionError(f"읽을 줄 모르는 파일 형식입니다: {path.name}")
 
 
+def read_open_workbook(*, close: bool = True) -> tuple[list[str], list[list[str]]] | None:
+    """H-able이 Excel을 직접 열었다면 그 표를 읽고 Excel을 닫는다.
+
+    이 화면의 내보내기 버튼은 저장 대화상자 대신 Excel을 띄우기도 한다. 그때는
+    파일을 찾아 헤맬 것 없이 열려 있는 통합 문서를 그대로 읽는 편이 정확하다.
+    다 읽으면 저장하지 않고 닫는다 - 우리가 연 것이니 우리가 치운다.
+    """
+    try:
+        import pythoncom
+        import win32com.client
+    except ImportError:  # pragma: no cover - 설치 안내
+        return None
+
+    pythoncom.CoInitialize()
+    try:
+        try:
+            excel = win32com.client.GetActiveObject("Excel.Application")
+        except Exception:
+            return None
+        try:
+            workbook = excel.ActiveWorkbook
+            if workbook is None:
+                return None
+            values = workbook.ActiveSheet.UsedRange.Value
+        except Exception:
+            return None
+
+        rows = [
+            ["" if cell is None else str(cell).strip() for cell in row]
+            for row in (values or ())
+            if any(cell is not None for cell in row)
+        ]
+        if close:
+            try:
+                workbook.Close(SaveChanges=False)
+                if excel.Workbooks.Count == 0:
+                    excel.Quit()
+            except Exception:
+                pass
+        if not rows:
+            return None
+        return rows[0], rows[1:]
+    finally:
+        pythoncom.CoUninitialize()
+
+
 def export_grid(
     main_handle: int, screen_handle: int, pane: Pane, folder: Path, stem: str = "hable-1285"
-) -> tuple[list[str], list[list[str]], Path]:
-    """엑셀 버튼 → 저장 대화상자 → 파일 읽기까지 한 번에."""
-    process = process_id(main_handle)
+) -> tuple[list[str], list[list[str]], str]:
+    """표를 파일로 꺼낸다. 가벼운 방법부터 차례로 시도한다.
+
+    1. 우클릭 메뉴의 CSV/TXT 저장 - 텍스트 파일 하나만 남고 Excel이 열리지 않는다.
+    2. 툴바 엑셀 버튼 → 저장 대화상자 - 파일만 생기고 Excel은 열리지 않는다.
+    3. 그래도 Excel이 열렸다면 그 통합 문서를 읽고 저장하지 않고 닫는다.
+
+    되는 것이 없으면 지어내지 않고 멈춘다.
+    """
     folder.mkdir(parents=True, exist_ok=True)
+    process = process_id(main_handle)
+
+    through_menu = export_via_menu(main_handle, screen_handle, pane, folder, stem)
+    if through_menu is not None:
+        return through_menu
+
     since = time.time()
     click_toolbar(main_handle, screen_handle, pane, "excel")
-    dialog = wait_for_save_dialog(process)
-    save_as(dialog, folder / stem)
-    exported = wait_for_export(folder, since)
-    headers, rows = read_table(exported)
-    return headers, rows, exported
+
+    deadline = time.monotonic() + 20.0
+    while time.monotonic() < deadline:
+        for handle in top_level_windows():
+            if (
+                class_name(handle) == SAVE_DIALOG_CLASS
+                and process_id(handle) == process
+                and _looks_like_save_dialog(handle)
+            ):
+                save_as(handle, folder / stem)
+                exported = wait_for_export(folder, since)
+                headers, rows = read_table(exported)
+                return headers, rows, f"툴바 엑셀 저장({exported.name})"
+        opened = read_open_workbook()
+        if opened is not None:
+            headers, rows = opened
+            return headers, rows, "Excel 통합 문서(읽고 닫음)"
+        time.sleep(0.5)
+
+    raise ExtractionError(
+        "내보내기를 세 방법으로 시도했지만 아무것도 나오지 않았습니다.\n"
+        "  1) 우클릭 메뉴의 저장 항목  2) 툴바 엑셀 버튼 → 저장 대화상자  3) 열린 Excel\n"
+        "`hable-probe`가 남긴 화면 그림에서 버튼 위치를 다시 재 주세요."
+    )

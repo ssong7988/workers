@@ -16,6 +16,7 @@ import ctypes.wintypes as w
 import struct
 import time
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
 
 from .window import Pane, process_id, rect, visible_popup_menus
@@ -28,6 +29,12 @@ VK_CONTROL, VK_C, VK_ESCAPE, VK_MENU = 0x11, 0x43, 0x1B, 0x12
 KEYEVENTF_KEYUP = 0x0002
 MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
 MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP = 0x0008, 0x0010
+HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+MN_GETHMENU = 0x01E1
+MF_BYPOSITION = 0x0400
+OBJID_CLIENT = 0xFFFFFFFC
+GA_ROOT = 2
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
 SRCCOPY = 0x00CC0020
 
 
@@ -117,23 +124,127 @@ def close_popup_menus() -> None:
     time.sleep(0.3)
 
 
-def read_menu_items(handle: int) -> list[str]:
-    """뜬 팝업 메뉴의 항목 이름들. 못 읽으면 빈 목록.
+@dataclass(frozen=True)
+class MenuItem:
+    """팝업 메뉴의 항목 하나. 좌표를 알면 이름 대신 그 자리를 누르면 된다."""
 
-    메뉴는 그려진 그림이 아니라 접근성 트리에 이름이 있다. 여기서 '복사'나
-    '엑셀 저장' 같은 항목이 보이면 그 경로를 쓸 수 있다.
+    name: str
+    left: int = 0
+    top: int = 0
+    width: int = 0
+    height: int = 0
+
+    @property
+    def clickable(self) -> bool:
+        return self.width > 0 and self.height > 0
+
+    @property
+    def centre(self) -> tuple[int, int]:
+        return self.left + self.width // 2, self.top + self.height // 2
+
+
+def _menu_items_via_win32(handle: int) -> list[MenuItem]:
+    """`MN_GETHMENU`로 HMENU를 얻어 항목 이름을 읽는다.
+
+    HMENU는 만든 프로세스의 것이라 남의 메뉴에서는 실패하는 편이다. 성공하면
+    제일 싸므로 먼저 해 본다.
+    """
+    menu = user32.SendMessageW(handle, MN_GETHMENU, 0, 0)
+    if not menu:
+        return []
+    count = user32.GetMenuItemCount(menu)
+    if count <= 0:
+        return []
+    items: list[MenuItem] = []
+    for index in range(count):
+        length = user32.GetMenuStringW(menu, index, None, 0, MF_BYPOSITION)
+        if length <= 0:
+            continue
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetMenuStringW(menu, index, buffer, length + 1, MF_BYPOSITION)
+        name = buffer.value.strip()
+        if name:
+            items.append(MenuItem(name=name))
+    return items
+
+
+def _menu_items_via_msaa(handle: int) -> list[MenuItem]:
+    """MSAA로 읽는다. 메뉴는 MSAA가 가장 잘 지원하는 객체다.
+
+    좌표까지 나오므로 이름으로 찾은 항목을 그 자리에서 바로 누를 수 있다.
     """
     try:
-        from pywinauto import Desktop
-
-        window = Desktop(backend="uia").window(handle=handle)
-        names = [
-            item.window_text().strip()
-            for item in window.descendants(control_type="MenuItem")
-        ]
-        return [name for name in names if name]
+        import comtypes.client
+        from comtypes import COMError
+        from comtypes.automation import VARIANT
+    except ImportError:  # pragma: no cover - 설치 안내
+        return []
+    try:
+        comtypes.client.GetModule("oleacc.dll")
+        from comtypes.gen.Accessibility import IAccessible
     except Exception:
         return []
+
+    oleacc = ctypes.oledll.oleacc
+    accessible = ctypes.POINTER(IAccessible)()
+    guid = comtypes.GUID("{618736E0-3C3D-11CF-810C-00AA00389B71}")  # IID_IAccessible
+    try:
+        oleacc.AccessibleObjectFromWindow(
+            handle, OBJID_CLIENT, ctypes.byref(guid), ctypes.byref(accessible)
+        )
+    except OSError:
+        return []
+
+    items: list[MenuItem] = []
+    try:
+        count = accessible.accChildCount
+    except COMError:
+        return []
+    for index in range(1, count + 1):
+        child = VARIANT()
+        child.vt = 3  # VT_I4
+        child.value = index
+        try:
+            name = accessible.accName(child)
+        except COMError:
+            continue
+        if not name or not name.strip():
+            continue  # 구분선은 이름이 없다
+        left = top = width = height = 0
+        try:
+            left, top, width, height = accessible.accLocation(child)
+        except COMError:
+            pass
+        items.append(
+            MenuItem(name=name.strip(), left=left, top=top, width=width, height=height)
+        )
+    return items
+
+
+def read_menu_items(handle: int) -> list[MenuItem]:
+    """뜬 팝업 메뉴의 항목들. 못 읽으면 빈 목록.
+
+    여기서 '복사'나 'CSV 저장' 같은 항목이 보이면 Excel을 열지 않고도 표를
+    꺼낼 수 있다. 그게 이 함수가 있는 이유다.
+    """
+    for reader in (_menu_items_via_msaa, _menu_items_via_win32):
+        try:
+            items = reader(handle)
+        except Exception:
+            continue
+        if items:
+            return items
+    return []
+
+
+def click_menu_item(item: MenuItem) -> bool:
+    """메뉴 항목을 그 자리에서 누른다. 좌표를 모르면 누르지 않는다."""
+    if not item.clickable:
+        return False
+    x, y = item.centre
+    with BorrowedCursor() as cursor:
+        cursor.click(x, y, settle=1.0)
+    return True
 
 
 def point_in(screen_handle: int, pane: Pane, dx: int, dy: int) -> tuple[int, int]:
@@ -143,23 +254,24 @@ def point_in(screen_handle: int, pane: Pane, dx: int, dy: int) -> tuple[int, int
 
 
 def focus(main_handle: int, *, wait_seconds: float = 2.0) -> bool:
-    """H-able을 맨 앞으로 올려 본다. 올렸으면 True.
+    """H-able을 클릭이 닿는 자리로 올린다. 활성화까지 됐으면 True.
 
-    실패해도 멈추지 않는다. 클릭이 어디로 가는지를 정하는 것은 포그라운드가
-    아니라 그 지점의 z-order이고, 그건 `guard_target()`이 실제로 확인한다.
-    Windows는 포그라운드 창을 가진 프로세스가 아니면 `SetForegroundWindow`를
-    자주 거절하므로(최소화된 콘솔에서 시작하면 특히), 여기서 실패를 이유로
-    수집을 포기하면 될 일도 안 된다.
+    **매번 z-order를 다시 올린다.** 항상 위에 뜨는 창(광고 오버레이 같은 것)이
+    있으면 한 번 올려둔 것으로는 부족하다 - topmost끼리는 나중에 올린 쪽이
+    위로 가므로, 누르기 직전에 다시 올려야 우리 클릭이 닿는다.
 
-    스레드 입력을 잠깐 붙였다 떼는 것은 그 거절을 우회하는 표준 방법이다.
+    활성화(`SetForegroundWindow`)는 실패해도 넘어간다. Windows는 포그라운드 창을
+    가진 프로세스가 아니면 자주 거절하고(작업 스케줄러가 띄운 프로세스는 특히),
+    클릭이 어디로 갈지 정하는 것은 활성 창이 아니라 z-order다.
     """
     process = process_id(main_handle)
-    # Windows는 최근에 입력을 받은 프로세스에만 포그라운드 전환을 허용한다.
-    # ALT를 살짝 눌렀다 떼면 그 조건을 만족한다 - 널리 쓰는 우회다.
+    pin_to_top(main_handle)
+
+    # 최근에 입력을 받은 프로세스에만 포그라운드 전환이 허용된다. ALT를 살짝
+    # 눌렀다 떼면 그 조건을 만족한다 - 널리 쓰는 우회다.
     user32.keybd_event(VK_MENU, 0, 0, 0)
     user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
     time.sleep(0.05)
-    user32.BringWindowToTop(main_handle)
     user32.SetForegroundWindow(main_handle)
 
     front = user32.GetForegroundWindow()
@@ -168,7 +280,6 @@ def focus(main_handle: int, *, wait_seconds: float = 2.0) -> bool:
         their_thread = user32.GetWindowThreadProcessId(main_handle, None)
         if user32.AttachThreadInput(our_thread, their_thread, True):
             try:
-                user32.BringWindowToTop(main_handle)
                 user32.SetForegroundWindow(main_handle)
             finally:
                 user32.AttachThreadInput(our_thread, their_thread, False)
@@ -180,7 +291,108 @@ def focus(main_handle: int, *, wait_seconds: float = 2.0) -> bool:
             time.sleep(0.3)
             return True
         time.sleep(0.2)
+    time.sleep(0.3)
     return False
+
+
+def belongs_to_screen(handle: int, screen: int) -> bool:
+    """그 창이 대상 화면(1285) 안의 것인지."""
+    return bool(handle) and (handle == screen or bool(user32.IsChild(screen, handle)))
+
+
+def ensure_clickable(main_handle: int, screen_handle: int, x: int, y: int) -> None:
+    """그 점이 대상 화면의 것이 될 때까지 가리는 것을 치우고 올린다.
+
+    **'H-able의 창인가'로는 부족하다.** H-able은 자기 화면을 여러 개 겹쳐 띄우고,
+    로그인할 때마다 이벤트·공지 화면이 대상 화면 위를 덮는다. 그것도 H-able의
+    창이라 프로세스만 보면 통과해 버리고, 클릭은 툴바가 아니라 이벤트 화면으로
+    간다. 실제로 그렇게 한참 헛돌았다.
+    """
+    from .window import clear_covering_dialogs, clear_notice_screens
+
+    for attempt in range(3):
+        if belongs_to_screen(user32.WindowFromPoint(w.POINT(x, y)), screen_handle):
+            return
+        if attempt == 0:
+            clear_covering_dialogs(main_handle, screen_handle)
+            clear_notice_screens(main_handle, screen_handle, rounds=2)
+        pin_to_top(main_handle)
+        user32.BringWindowToTop(screen_handle)
+        time.sleep(0.5 * (attempt + 1))
+
+    under = user32.WindowFromPoint(w.POINT(x, y))
+    raise ExtractionError(
+        f"({x},{y})가 [{window_title(screen_handle)}]의 자리가 아닙니다. "
+        f"덮고 있는 창: {describe_window(under)}\n"
+        "그 창을 닫거나 최소화한 뒤 다시 실행하세요."
+    )
+
+
+def window_title(handle: int) -> str:
+    from .window import window_text
+
+    return window_text(handle)
+
+
+def pin_to_top(handle: int) -> None:
+    """창을 다른 창들 위로 올린다(활성화는 하지 않는다).
+
+    `SetForegroundWindow`는 포그라운드 창을 가진 프로세스가 아니면 Windows가
+    자주 거절한다 - 작업 스케줄러가 띄운 프로세스는 특히 그렇다. 그런데 클릭이
+    어디로 갈지 정하는 것은 활성 창이 아니라 z-order다. 그래서 활성화를 포기하고
+    z-order만 올린다. 이건 거절당하지 않는다.
+
+    끝나면 `unpin()`으로 되돌린다. 사용자 화면에 H-able이 계속 맨 위로 떠 있으면
+    곤란하다.
+    """
+    user32.SetWindowPos(
+        handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+    )
+
+
+def unpin(handle: int) -> None:
+    user32.SetWindowPos(
+        handle, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+    )
+
+
+def describe_window(handle: int) -> str:
+    """가림 원인을 사람이 알아볼 수 있게 적는다."""
+    if not handle:
+        return "(창 없음)"
+    from .window import class_name, process_id, window_text
+
+    pid = process_id(handle)
+    name = ""
+    try:
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.restype = w.HANDLE
+        kernel32.OpenProcess.argtypes = [w.DWORD, w.BOOL, w.DWORD]
+        process = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+        if process:
+            size = w.DWORD(1024)
+            buffer = ctypes.create_unicode_buffer(1024)
+            if kernel32.QueryFullProcessImageNameW(process, 0, buffer, ctypes.byref(size)):
+                name = Path(buffer.value).name
+    except Exception:
+        pass
+    return f"{name or 'pid ' + str(pid)} [{class_name(handle)}] {window_text(handle)[:40]!r}"
+
+
+def owned_by(handle: int, process: int) -> bool:
+    """그 창이 결국 누구 것인지. 최상위 창까지 올라가 판단한다.
+
+    H-able의 광고 팝업은 안에 WebView2를 띄우는데, 그 자식 창은 별도 프로세스
+    (msedgewebview2.exe) 소유다. 자식만 보면 남의 창으로 오해한다.
+    """
+    if not handle:
+        return False
+    from .window import process_id
+
+    if process_id(handle) == process:
+        return True
+    root = user32.GetAncestor(handle, GA_ROOT)
+    return bool(root) and process_id(root) == process
 
 
 def guard_target(x: int, y: int, process: int) -> None:
@@ -188,13 +400,15 @@ def guard_target(x: int, y: int, process: int) -> None:
 
     없는데도 누르면 위에 떠 있는 남의 창을 클릭하게 된다. 한 번 겪었다 -
     캡처에 편집기가 찍혔고 클립보드는 비어 있었다. 눈감고 클릭하지 않는다.
+    무엇이 가리는지 이름까지 적어야 사람이 치울 수 있다.
     """
-    point = w.POINT(x, y)
-    under = user32.WindowFromPoint(point)
-    if not under or process_id(under) != process:
+    from .window import process_id
+
+    under = user32.WindowFromPoint(w.POINT(x, y))
+    if not owned_by(under, process):
         raise ExtractionError(
-            f"({x},{y}) 위에 H-able이 없습니다(다른 창이 가리고 있습니다). "
-            "H-able 창을 앞으로 꺼내 놓고 다시 실행하세요."
+            f"({x},{y}) 위에 H-able이 아니라 다른 창이 있습니다: {describe_window(under)}"
+            "\n그 창을 치우거나 최소화한 뒤 다시 실행하세요."
         )
 
 
@@ -212,7 +426,7 @@ def copy_grid(
     clear_clipboard()
     focus(main_handle)
     x, y = point_in(screen_handle, pane, pane.width // 3, min(40, pane.height // 3))
-    guard_target(x, y, process_id(main_handle))
+    ensure_clickable(main_handle, screen_handle, x, y)
     with BorrowedCursor() as cursor:
         cursor.click(x, y)
         press_copy()
@@ -229,7 +443,7 @@ def open_context_menu(main_handle: int, screen_handle: int, pane: Pane) -> list[
     """그리드에서 우클릭하고 뜬 팝업 메뉴 창들을 돌려준다(없으면 빈 목록)."""
     focus(main_handle)
     x, y = point_in(screen_handle, pane, pane.width // 3, min(40, pane.height // 3))
-    guard_target(x, y, process_id(main_handle))
+    ensure_clickable(main_handle, screen_handle, x, y)
     with BorrowedCursor() as cursor:
         cursor.click(x, y, right=True, settle=1.2)
     return visible_popup_menus()
@@ -331,7 +545,7 @@ def capture(main_handle: int, handle: int, destination: Path) -> Path:
     left, top, width, height = rect(handle)
     if width <= 0 or height <= 0:
         raise ExtractionError("창 크기를 읽지 못했습니다. 최소화돼 있지 않은지 확인하세요.")
-    guard_target(left + width // 2, top + height // 2, process_id(main_handle))
+    ensure_clickable(main_handle, handle, left + width // 2, top + height // 2)
     destination.parent.mkdir(parents=True, exist_ok=True)
     _write_png(destination, width, height, _grab_pixels(left, top, width, height))
     return destination

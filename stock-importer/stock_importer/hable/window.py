@@ -44,6 +44,10 @@ WM_CLOSE = 0x0010
 # 로그인할 때마다 뜨는 안내 화면들. 대상 화면을 덮으면 클릭이 그쪽으로 간다.
 # 제목으로만 고른다 - 사용자가 열어 둔 조회 화면을 함부로 닫지 않기 위해서다.
 NOTICE_SCREEN_WORDS = ("공지", "이벤트", "안내", "알림")
+# 광고·공지 팝업은 창 안에 WebView2로 웹 내용을 띄운다. 제목은 직접 그려서
+# GetWindowText로는 안 잡히므로, 이 구조를 보고 알아본다. 저장 대화상자 같은
+# 기능 창은 WebView2를 품지 않는다.
+WEB_CONTENT_CLASS = "Chrome_RenderWidgetHostHWND"
 
 
 class HableError(RuntimeError):
@@ -320,4 +324,53 @@ def clear_notice_screens(main: int, screen: int, *, rounds: int = 4) -> list[str
             "안내 화면을 닫았는데도 대상 화면이 가려 있습니다: "
             + ", ".join(sorted(remaining.values()))
         )
+    return closed
+
+
+def _intersects(first: tuple[int, int, int, int], second: tuple[int, int, int, int]) -> bool:
+    ax, ay, aw, ah = first
+    bx, by, bw, bh = second
+    return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
+
+
+def hosts_web_content(handle: int) -> bool:
+    return any(class_name(child) == WEB_CONTENT_CLASS for child in descendants(handle))
+
+
+def covering_dialogs(main: int, screen: int) -> dict[int, str]:
+    """대상 화면을 덮은 H-able의 최상위 팝업들을 {핸들: 설명}으로.
+
+    MDI 자식이 아니라 별도 최상위 창이라 `clear_notice_screens()`가 놓친다.
+    광고 팝업이 딱 이 모양이다 - always-on-top이라 z-order를 아무리 올려도
+    그 아래로 안 내려간다. 닫는 수밖에 없다.
+    """
+    process = process_id(main)
+    box = rect(screen)
+    found: dict[int, str] = {}
+    for handle in top_level_windows():
+        if handle == main or not user32.IsWindowVisible(handle):
+            continue
+        if process_id(handle) != process:
+            continue
+        if not _intersects(box, rect(handle)):
+            continue
+        labels = " ".join(dialog_labels(handle))
+        if hosts_web_content(handle):
+            found[handle] = f"웹 팝업 {rect(handle)}"
+        elif any(word in labels for word in NOTICE_SCREEN_WORDS):
+            found[handle] = labels[:60]
+    return found
+
+
+def clear_covering_dialogs(main: int, screen: int, *, rounds: int = 3) -> list[str]:
+    """그 팝업들을 닫는다. 닫은 것들의 설명을 돌려준다."""
+    closed: list[str] = []
+    for _round in range(rounds):
+        covering = covering_dialogs(main, screen)
+        if not covering:
+            break
+        for handle, description in covering.items():
+            user32.PostMessageW(handle, WM_CLOSE, 0, 0)
+            closed.append(description)
+        time.sleep(0.8)
     return closed

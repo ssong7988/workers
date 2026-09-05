@@ -29,10 +29,12 @@ from .export import click_toolbar, export_grid
 from .extract import (
     ExtractionError,
     capture,
+    pin_to_top,
     close_popup_menus,
     copy_grid,
     open_context_menu,
     read_menu_items,
+    unpin,
 )
 
 
@@ -57,7 +59,14 @@ class HableCollector:
         window.ensure_input_allowed(main)
         if window.ensure_restored(main):
             print("H-able 창이 최소화돼 있어 복원했습니다.")
+        # 클릭이 닿으려면 H-able이 z-order 위에 있어야 한다. 활성화는 자주
+        # 거절당하지만 z-order를 올리는 것은 거절되지 않는다. 끝나면 되돌린다.
+        pin_to_top(main)
         screen = window.find_screen(main, self.SCREEN)
+        # 광고·공지 팝업이 always-on-top이라 z-order로는 못 이긴다. 먼저 치운다.
+        popups = window.clear_covering_dialogs(main, screen)
+        if popups:
+            print("가리고 있던 팝업을 닫았습니다: " + ", ".join(popups))
         closed = window.clear_notice_screens(main, screen)
         if closed:
             print("로그인 안내 화면을 닫았습니다: " + ", ".join(closed))
@@ -104,13 +113,12 @@ class HableCollector:
             headers, rows = parse_delimited_table(clipboard)
             if rows:
                 return headers, rows, "클립보드 복사"
-        headers, rows, exported = export_grid(main, screen, grid, self.data_dir / "hable")
+        headers, rows, how = export_grid(main, screen, grid, self.data_dir / "hable")
         if not rows:
             raise ExtractionError(
-                f"내보낸 파일에 행이 없습니다: {exported}\n"
-                "[1285]에서 조회가 된 상태인지 확인하세요."
+                "내보낸 표에 행이 없습니다. [1285]에서 조회가 된 상태인지 확인하세요."
             )
-        return headers, rows, f"엑셀 내보내기({exported.name})"
+        return headers, rows, how
 
     # ------------------------------------------------------------------ 공개
 
@@ -120,6 +128,14 @@ class HableCollector:
         여기서 나온 것으로 어느 방법(복사/우클릭/내보내기)이 먹히는지 정한다.
         """
         main, screen = self._open_screen()
+        try:
+            return self._probe(main, screen)
+        finally:
+            # 클릭을 닿게 하려고 창을 맨 위로 올렸다. 사용자 화면에 그대로
+            # 두면 곤란하니 무슨 일이 있어도 되돌린다.
+            unpin(main)
+
+    def _probe(self, main: int, screen: int) -> dict[str, Any]:
         left, top, width, height = window.rect(screen)
         process = window.process_id(main)
 
@@ -143,11 +159,11 @@ class HableCollector:
         # 존재 이유다. 실패해도 probe 자체는 끝까지 간다.
         export: dict[str, Any] = {"tried": True}
         try:
-            export_headers, export_rows, exported = export_grid(
+            export_headers, export_rows, how = export_grid(
                 main, screen, grid, self.data_dir / "hable"
             )
             export.update(
-                file=str(exported),
+                how=how,
                 headers=export_headers,
                 columns=map_columns(export_headers),
                 missing_fields=missing_fields(map_columns(export_headers)),
@@ -169,7 +185,9 @@ class HableCollector:
             "grid_pane": {"handle": hex(grid.handle), "x": grid.x, "y": grid.y,
                           "width": grid.width, "height": grid.height},
             "context_menu_windows": [hex(handle) for handle in menus],
-            "context_menu_items": [item for handle in menus for item in read_menu_items(handle)],
+            "context_menu_items": [
+                item.name for handle in menus for item in read_menu_items(handle)
+            ],
             "clipboard_characters": len(clipboard),
             "clipboard_headers": headers,
             "clipboard_columns": map_columns(headers),
@@ -183,7 +201,12 @@ class HableCollector:
     def collect_holdings(self) -> dict[str, Any]:
         """1285에서 보유 종목을 읽어 계좌별로 묶는다."""
         main, screen = self._open_screen()
+        try:
+            return self._collect(main, screen)
+        finally:
+            unpin(main)
 
+    def _collect(self, main: int, screen: int) -> dict[str, Any]:
         notice = self._logged_out_notice(main)
         if notice:
             raise ExtractionError(
