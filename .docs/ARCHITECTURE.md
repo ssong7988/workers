@@ -17,11 +17,19 @@ real-estate-finder            수집 전용. 판정하지 않는다
         +-- GET  /api/conditions/   어느 단지가 어느 조건인지
         +-- POST /api/scans/        수집한 매물 전량
         |
+stock-importer                수집 전용. 판정하지 않는다
+  H-able 데스크톱 [1285] 총자산현황 -> 엑셀 내보내기
+  (web/ 는 mable 웹 경로. 6시간 로그아웃 때문에 재워 뒀다)
+        |
+        +-- GET  /stock/api/status/       계좌별 수집 상태
+        +-- POST /stock/api/import-runs/  계좌별 잔고 전량
+        |
         v
 report-site                   애플리케이션 (Django + PostgreSQL)
   properties/  도메인: 모델, 판정, 통계, 카카오 전송, admin, 관리 명령
+  portfolio/   도메인: 금융자산 모델, 수집 경계, 비중·리밸런싱, 성과·MDD
   api/         경계:   finder 전용 JSON (Bearer 토큰)
-  report/      화면:   공개 HTML 리포트 + 가격 통계
+  report/      화면:   공개 HTML 리포트 + 가격 통계 + 금융자산 두 화면
         |
         +--> PostgreSQL (원본 관측 전량 + 현재 매물 상태)
         +--> kakao-notifier -> 카카오톡 메시지 (통계/매물 버튼 2개)
@@ -43,7 +51,8 @@ outputs/
 │   ├── README.md              # 문서 색인
 │   └── RUNBOOK.md             # 사람이 실행하는 운영 절차
 ├── .logs/                     # 앱별 날짜 로그 (Git 제외, 30일 보관). RUNBOOK "로그 보기" 참고
-├── real-estate-finder/        # 수집기 (Python, Playwright/Edge CDP)
+├── real-estate-finder/        # 매물 수집기 (Python, Playwright/Edge CDP 9222)
+├── stock-importer/           # 금융자산 수집기 (Python, H-able 창 자동화). venv는 real-estate-finder 것을 쓴다
 ├── report-site/               # 애플리케이션 (Django + PostgreSQL)
 ├── dagster_project/           # 스캔 스케줄 실행기. run 이력은 PostgreSQL의 dagster schema에 저장
 ├── kakao-notifier/            # 독립 실행 가능한 카카오 API 모듈
@@ -138,12 +147,12 @@ cli.main (scan-once)
 
 경로: `report-site/`
 
-Django + PostgreSQL + waitress. 앱 세 개로 b/e와 f/e를 나눈다.
+Django + PostgreSQL + waitress. 도메인 앱 둘(`properties/` 부동산, `portfolio/` 금융자산), 수집기 경계 앱 하나(`api/`), 화면 앱 하나(`report/`)로 나눈다. 두 도메인은 모델·계산·URL namespace가 서로 분리돼 있고 DB와 admin만 공유한다.
 
 | 파일/경로 | 책임 |
 |---|---|
 | `report_site/settings.py` | PostgreSQL, admin 배선, whitenoise, 필수 API 토큰과 선택 경로 토큰, 루트 `.env`까지 로드 |
-| `report_site/urls.py` | `/property/report/` 리포트, `/property/statistics/` 가격 통계, `/property/admin/` admin, `/common/dagster/` 공통 운영 요약. `REPORT_PATH_TOKEN`을 채우면 namespace 앞에 `/<TOKEN>/`이 붙는다. `api/` 수집기 API는 별도 |
+| `report_site/urls.py` | `/property/report/` 리포트, `/property/statistics/` 가격 통계, `/property/admin/` admin, `/stock/allocation/`·`/stock/performance/` 금융자산, `/common/dagster/` 공통 운영 요약. `REPORT_PATH_TOKEN`을 채우면 namespace 앞에 `/<TOKEN>/`이 붙는다. 수집기 API 둘(`/api/`, `/stock/api/`)은 namespace 밖에 각자의 Bearer 토큰으로 있다 |
 | `run-site.ps1`, `run-site.bat` | `check` → `migrate --check` → `collectstatic` → waitress `127.0.0.1:8000` |
 
 ### properties — 도메인 (b/e)
@@ -234,6 +243,17 @@ OAuth와 토큰 수명주기, 함수별 메시지 계약, 운영 장애 대응�
 | 통계 수치가 이상함 | `properties/statistics.py`, `Observation.exclusion_code` | `properties/tests/test_statistics.py` |
 | 통계 화면·차트 | `report/stats_params.py`, `templates/report/stats.html` | `report/tests/test_stats_view.py` |
 | 리포트 표시 로직 | `properties/report.py` | `report/tests/test_views.py` |
+| 금융자산 비중·리밸런싱 | `portfolio/allocation.py` | `portfolio/tests/test_allocation.py` |
+| 금융자산 수익률·MDD | `portfolio/performance.py` | `portfolio/tests/test_performance.py` |
+| 주식 수집 자료를 받아들이는 규칙 | `portfolio/importing.py`, `portfolio/api.py` | `portfolio/tests/test_importing.py`, `portfolio/tests/test_api.py` |
+| 금융자산 금액·비율 표기 | `portfolio/display.py` | `portfolio/tests/test_allocation.py` |
+| 금융자산 화면 | `report/stock_views.py`, `templates/report/stock_*.html` | `portfolio/tests/test_views.py` |
+| 계좌번호로 계좌 찾기 | `portfolio/importing.py`의 `_resolve_account` | `portfolio/tests/test_account_resolution.py` |
+| H-able 창·화면 찾기 | `stock-importer/stock_importer/hable/window.py` | 창이 필요해 단위 테스트 없음. `hable-probe`로 확인 |
+| H-able 표 꺼내기(복사·엑셀 내보내기) | `stock-importer/stock_importer/hable/extract.py`, `hable/export.py` | 같음 |
+| 재워 둔 웹 경로 | `stock-importer/stock_importer/web/` | 쓰지 않는다. 6시간 자동 로그아웃 |
+| 화면 글자 → 서버 값 변환 | `stock-importer/stock_importer/parsing.py` | `stock-importer/tests/test_parsing.py`, `tests/test_hable_table.py` |
+| 주식 수집 요청 조립·멱등성 키 | `stock-importer/stock_importer/payload.py` | `stock-importer/tests/test_payload.py` |
 | 웹 리포트 화면 디자인 | `report/templates/report/index.html` | `manage.py test`, 육안 확인 |
 | 라우팅/토큰/설정 | `report_site/settings.py`, `urls.py`, `.env` | `manage.py check` |
 | 수집기 API 호출 문제 | `real_estate_finder/api_client.py`, `cli.py` | `tests/test_api_client.py`, `check-api` |
