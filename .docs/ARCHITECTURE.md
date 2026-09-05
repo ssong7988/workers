@@ -58,7 +58,8 @@ outputs/
 ├── kakao-notifier/            # 독립 실행 가능한 카카오 API 모듈
 ├── .env                        # KAKAO_REPORT_URL (공유, Git 제외)
 ├── load-env.ps1                # 위 .env를 여러 PS 스크립트가 공유하는 헬퍼
-├── start-logging.ps1            # 앱별 .logs/ 기록을 시작하는 헬퍼 (load-env.ps1과 같은 방식으로 dot-source)
+├── start-logging.ps1            # 단기 명령 transcript 및 재시작/복구 control 로그
+├── run-logged.py                # 리포트·Dagster stdout/stderr 실시간 기록, 생존/HTTP 확인, 종료 코드
 ├── AGENTS.md                   # 모든 코딩 에이전트의 공통 규칙
 └── README.md                   # 사용자용 짧은 소개
 ```

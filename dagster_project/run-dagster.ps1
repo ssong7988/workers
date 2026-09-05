@@ -11,16 +11,22 @@
 #
 # Double-click run-dagster.bat to launch this script.
 
+param([switch]$LoggedChild)
+
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
-# This project's own venv, so unlike the other run-*.ps1 scripts it does not
-# dot-source load-env.ps1 - but the logging helper lives at the repo root
-# the same way.
-. (Join-Path $Root '..\start-logging.ps1')
-Start-AppLog -App 'dagster_project'
+if (-not $LoggedChild) {
+    $LogPython = Join-Path $Root '.venv\Scripts\python.exe'
+    & $LogPython (Join-Path $Root '..\run-logged.py') --app dagster_project --health-port 3000 --health-path /common/dagster/console/graphql -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $MyInvocation.MyCommand.Path -LoggedChild
+    exit $LASTEXITCODE
+}
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$OutputEncoding = [Console]::OutputEncoding
+
+# The outer run-logged.py captures startup checks and server output live.
 
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 if (-not (Test-Path $Python)) {

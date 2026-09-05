@@ -11,18 +11,26 @@
 #
 # Double-click run-site.bat to launch this script.
 
+param([switch]$LoggedChild)
+
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+if (-not $LoggedChild) {
+    $LogPython = Join-Path $Root '..\real-estate-finder\.venv\Scripts\python.exe'
+    & $LogPython (Join-Path $Root '..\run-logged.py') --app report-site --health-port 8000 --health-path /property/report/ -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $MyInvocation.MyCommand.Path -LoggedChild
+    exit $LASTEXITCODE
+}
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$OutputEncoding = [Console]::OutputEncoding
+
 # Share KAKAO_REPORT_URL so this window can print the same public link Kakao
 # cards use.
 . (Join-Path $Root '..\load-env.ps1')
 
-# So a hidden/detached start (ensure-site.ps1) still leaves a readable record.
-. (Join-Path $Root '..\start-logging.ps1')
-Start-AppLog -App 'report-site'
+# The outer run-logged.py captures startup checks and server output live.
 
 $Python = Join-Path $Root '..\real-estate-finder\.venv\Scripts\python.exe'
 if (-not (Test-Path $Python)) {

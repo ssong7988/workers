@@ -208,6 +208,24 @@ cd report-site
 
 ## 로그 보기
 
+리포트 서버와 Dagster는 `run-logged.py`가 실행 전체를 감싸 실시간 로그를 남긴다(2026-09-05 변경). 아래의 기존 transcript 설명은 수집기 등 단기 스크립트와 이전 로그에만 해당한다.
+
+- `.logs/report-site/<날짜>-<시작시각>-<감시PID>.log`, `.logs/dagster_project/<날짜>-<시작시각>-<감시PID>.log`: 기동 검사, stdout/stderr, Python traceback을 즉시 UTF-8로 기록한다. 날짜가 바뀌면 새 파일로 이어 쓰고 30일 지난 로그는 다음 실행 때 정리한다.
+- `[lifecycle]`의 `launcher_start`/`process_start`: 시작 시각, 감시 프로세스·부모·자식 PID. `process_exit`: 종료 코드(10진/16진), 정상/비정상 구분, 실행 시간. `interrupt_received`: Ctrl+C 수신.
+- 30초마다 `heartbeat`와 `health_check`를 남긴다. 리포트는 DB를 사용하는 실제 리포트 URL, Dagster는 GraphQL을 5초 제한으로 확인한다. `child_alive=true`인데 `healthy=false`이면 프로세스 생존과 서비스 응답이 다르다는 뜻이다. 이 확인은 기록만 하며 서버를 자동 종료하지 않는다. Dagster GraphQL 정상은 모든 job/daemon 정상까지 보장하지 않는다.
+- `<날짜>-control-<PID>.log`: `restart-site.ps1`/`restart-dagster.ps1`이 실행된 시각·호출 PID·종료 대상 PID·종료 요청 이유와 결과, 복구 성공/실패. `ensure-site.ps1`의 서버 확인 실패와 복구 시도도 이 파일에 남는다. Dagster에서 재시작 job을 눌러도 같은 경로를 사용한다.
+- 콘솔과 감시 프로세스까지 강제 종료되거나 전원이 끊기면 마지막 종료 이벤트를 쓸 수 없다. `launcher_exit` 없이 생존 기록이 끊겼다면 Windows System 이벤트(1074/6006/6005/41)와 대조한다. 외부 프로그램이 강제 종료한 주체까지 이 로거가 알아내지는 못한다.
+
+최신 실행 로그 실시간 확인(PowerShell):
+
+```powershell
+$latestLog = Get-ChildItem .logs/report-site/*.log | Where-Object Name -Match '^\d{4}-\d{2}-\d{2}-\d{6}-\d+\.log$' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Get-Content -LiteralPath $latestLog.FullName -Encoding UTF8 -Wait -Tail 50
+# Dagster는 위 경로를 .logs/dagster_project/*.log로 바꾼다.
+```
+
+### 기존 transcript 로그
+
 네 진입점 모두 `start-logging.ps1`(저장소 루트)을 통해 그날 콘솔 출력 전체를 `.logs/<앱>/<yyyy-MM-dd>.log`에 남긴다. 창을 닫아도, `ensure-site.ps1`이 서버를 숨겨서 띄웠어도 사라지지 않는다.
 
 ```text

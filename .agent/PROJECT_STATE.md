@@ -19,13 +19,16 @@
 - `is_live()`(`report-site/properties/publish.py`)는 리포트 서버(그리고 Tailscale Funnel)가 살아있고 이번 조회를 서빙 중인지만 확인한다.
 - 외부 공개는 Tailscale Funnel로 `report-site/`의 8000번 포트를 노출해 고정 HTTPS 주소(`https://<pc>.<tailnet>.ts.net`)를 얻는 방식이다. 현재 경로 토큰은 비워 두었다.
 - `KAKAO_REPORT_URL`은 루트 `.env`에, 선택 경로 토큰 `REPORT_PATH_TOKEN`은 `report-site/.env`에 둔다. 토큰을 비우면 `/property/`·`/common/` namespace를 쓰고, 채우면 둘 앞에 `/<TOKEN>`이 붙는다. 둘 다 Git에서 제외한다.
-- 네 진입점(`run-site.ps1`, `run-scan.ps1`, `send-report.ps1`, `run-dagster.ps1`)은 저장소 루트 `start-logging.ps1`을 통해 그날 콘솔 출력을 `.logs/<앱>/<날짜>.log`에 남긴다(30일 보관). 네이티브 프로세스 출력은 그 프로세스가 끝나는 시점에 기록되므로 크래시 진단에는 쓸 수 있지만 건강한 상태의 실시간 tail 용도는 아니다. 자세한 내용은 `.docs/RUNBOOK.md`의 "로그 보기" 참고.
+- 리포트·Dagster 진입점은 `run-logged.py`로 기동 검사·stdout/stderr·생존/HTTP 상태·종료를 `.logs/<앱>/<날짜>-<시작시각>-<PID>.log`에 실시간 기록한다(30일 보관). 재시작/복구 스크립트는 `start-logging.ps1`의 `Write-AppLifecycle`로 별도 control 로그를 남긴다. 수집기 등 단기 명령은 기존 날짜별 transcript를 유지한다. 자세한 내용은 `.docs/RUNBOOK.md`의 "로그 보기" 참고.
 - Dagster의 run/event-log/schedule 이력은 `property_report` DB의 `dagster` schema에 있다(Django는 `public`). SQLite로 떨어지지 않도록 `dagster_project/data/dagster.yaml`을 `run-dagster.ps1`이 매 실행마다 다시 쓴다. 연결 옵션은 `-c search_path=dagster -c timezone=UTC`이며 타임존 지정은 필수다(아래 Known Issues 참고).
 
 위 구조는 2026-09-03에 끝난 역할 분리 이관의 결과다. 그 배경과 단계별 이력은 아래 "Completed Migration" 절에 있다.
 
 ## Current State
 
+- **2026-09-06 로깅 작업 인계 검증 정리.** 실시간 출력 저장·기동 실패·정상/비정상 종료·HTTP 오류/시간 초과 테스트 4개와 PowerShell 문법 검사를 통과했다. 09-05 실제 두 서버 재시작에서 control 로그의 종료 대상 PID와 `process_exit` 코드 `0xffffffff`가 함께 남았고, 새 실행의 HTTP 상태 기록 및 공개 리포트·통계·Dagster HTTP 200을 확인했다. 네이버 로그인 사전 점검 관련 별도 변경은 이번 로깅 커밋과 분리해 둔다.
+- **2026-09-05 리포트·Dagster 실시간 장애/종료 로깅 추가.** `run-site.ps1`·`run-dagster.ps1`의 기존 진입점을 `run-logged.py`로 감싸 기동 검사와 실행 중 stdout/stderr를 즉시 날짜별·실행별 UTF-8 로그에 쓴다. 시작/부모/자식 PID, 종료 코드·실행 시간, Ctrl+C 수신, 30초 생존 기록과 HTTP 확인(리포트 DB 조회/GraphQL, 5초 제한)을 남긴다. 재시작 스크립트는 종료 요청 전에 호출 PID·대상 PID·이유를 별도 control 로그에 기록하며 `ensure-site.ps1`도 확인 실패/복구를 기록한다. 강제 종료·전원 차단은 종료 이벤트가 없을 수 있어 Windows 이벤트와 대조한다. 재부팅은 23:31 이후 미기동의 원인이며, 그 이전 PostgreSQL 응답 정지의 원인까지 설명하지는 못한다. 상세 로그 경로와 읽는 방법은 `.docs/RUNBOOK.md`의 로그 보기 절을 따른다.
+- **2026-09-05 23:40 KST 카카오 링크 접속 장애 복구.** Windows System 이벤트 1074/6006/6005와 `LastBootUpTime`으로 23:31 재부팅을 확인했다. 조사 시 PostgreSQL·Tailscale 서비스만 실행 중이고 리포트(8000)·Dagster(3000)는 listener가 없었다. 자동 시작 미등록으로 재부팅 뒤 두 앱이 돌아오지 않은 것이 당시 접속 실패의 직접 원인이다. `report-site/ensure-site.ps1`, `dagster_project/restart-dagster.ps1`로 숨김 재기동했고 공개 리포트·통계·주식 두 화면·Dagster runs가 모두 HTTP 200이다. `check_report`도 DB와 공개 기준 시각(09-05 12:10:36 KST) 일치로 통과했다. Dagster daemon 6개 healthy, 스케줄 4개 RUNNING을 GraphQL로 확인했다. 기존 결정에 따라 부팅 자동 시작은 추가하지 않았다. 재부팅 전 PostgreSQL 응답 정지의 최초 원인은 미확정이며 아래 Known Issues에 기록한다.
 - 검색 조건은 과천 6개·광교 4개·판교 4개, 총 14개가 활성 상태다. 새 8개 조건은 DB까지 반영됐지만 아직 첫 실제 스캔 전이라 새 단지의 `Observation`·`Listing`은 없다.
 - **Tailscale Funnel 전환은 완료됐고 종단 확인까지 끝났다.** 공개 리포트는 Funnel 주소로 서빙되며, 실제 카카오톡 카드에 `전체 매물 보기` 버튼이 새 주소로 포함되는 것까지 확인했다.
 - 공개 리포트: `https://desktop-477.tailf8d9d1.ts.net/property/report/` (Tailscale Funnel → 로컬 `127.0.0.1:8000` 프록시). 가격 통계는 `/property/statistics/`, Dagster 요약은 `/common/dagster/`, 네이티브 UI는 `/common/dagster/console/`다.
@@ -1062,8 +1065,8 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 
 ## Known Issues
 
-- **2026-09-05 15:29 KST부터 PostgreSQL이 포트와 Windows 서비스는 살아 있으면서 쿼리에 응답하지 않는 상태다.** PostgreSQL 로그는 이후 매분 `autovacuum 작업자가 너무 오래전에 시작되어 중지됨` 경고를 남긴다. DB를 읽는 `/property/report/`과 Dagster 시작이 함께 멈추고, DB 전에 인증을 거부하는 `/api/health/`의 잘못된 토큰 요청만 즉시 401을 돌려 공통 원인이 DB임을 확인했다. 현재 사용자 권한으로는 `postgresql-x64-18` 서비스를 중지할 수 없어 관리자 권한 서비스 재시작이 필요하다. Dagster 자체 재시작도 DB에서 멈추므로 DB 복구 후 다시 실행해야 한다.
-- **기존 `restart-dagster.ps1`은 3000번 listener 자식만 종료해 `dagster dev` supervisor·daemon·code-server를 남겼다.** 장애 진단 중 중복 트리가 생기는 것을 재현해, 이제 프로젝트 venv의 `-m dagster` 루트를 찾고 모든 자식을 leaf-first로 종료하도록 수정했다. PostgreSQL 장애가 남아 있어 새 로직의 실제 재기동 성공은 DB 복구 후 확인해야 한다.
+- **2026-09-05 오후 PostgreSQL 응답 정지 — 현재 복구, 최초 원인은 미확정.** 당시 포트·서비스는 살아 있었지만 쿼리가 응답하지 않았고 로그에 `autovacuum 작업자가 너무 오래전에 시작되어 중지됨` 경고가 23:30까지 반복됐다. 23:31 PC 재부팅 및 이후 DB 서비스 재기동 뒤 쿼리가 정상화됐다. 23:40 리포트 DB 조회와 Dagster 저장소 연결까지 확인했다. autovacuum 경고만으로 응답 정지의 근본 원인을 단정하지 않는다.
+- **기존 `restart-dagster.ps1`은 3000번 listener 자식만 종료해 `dagster dev` supervisor·daemon·code-server를 남겼다.** 장애 진단 중 중복 트리가 생기는 것을 재현해, 이제 프로젝트 venv의 `-m dagster` 루트를 찾고 모든 자식을 leaf-first로 종료하도록 수정했다. 23:40 DB 복구 후 해당 스크립트의 기동 및 GraphQL 확인 성공을 검증했다. 당시 기존 트리는 없었으므로 살아 있는 트리 종료 분기까지 검증한 것은 아니다.
 
 - **`report.tests.test_views.ReportViewTests.test_urgent_section_respects_region_filter`가 실패한다(2026-09-05 관측, 주식 작업 이전부터).** 지역 필터를 걸면 `urgent` 목록이 비어 나온다. 해당 커밋(`0cb96bc`) 상태로 되돌려도 같은 실패라 이번 주식 작업과는 무관하다. 급매 섹션이 지역 필터를 안 따르는 실제 버그인지 테스트의 기대값이 낡은 것인지는 아직 확인하지 않았다.
 - **주식 도메인은 아직 수집기가 없다.** `/stock/allocation/`과 `/stock/performance/`는 배선이 끝났지만 `POST /stock/api/import-runs/`로 들어온 자료가 없으면 "수집 결과 없음" 화면만 보여준다. `STOCK_API_TOKEN`도 비어 있어 그 API는 지금 503을 돌려준다.
@@ -1083,7 +1086,7 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 - **Edge 창을 최소화하거나 백그라운드에 두면 스캔이 "네이버 로그인 상태가 만료되었습니다"로 오탐 실패할 수 있다(2026-09-04).** Chromium이 비활성 탭의 렌더링을 늦춰, `page.goto()` 직후 로그인 헤더가 아직 안 그려진 상태를 로그아웃으로 오인했다. `_raise_if_blocked()`에 짧은 재시도와 `page.bring_to_front()`를 추가해 완화했지만, OS 창이 완전히 최소화된 경우까지는 보장하지 못한다 — 스캔 중에는 Edge 창을 보이는 상태로 두는 것이 가장 확실하다(`.docs/RUNBOOK.md` 참고).
 - **PostgreSQL DB 기본 타임존이 `Asia/Seoul`이라 Dagster 실행 시각이 9시간 미래로 기록됐다(2026-09-04, 원인 규명·수정 완료).** `pg_settings`의 `TimeZone.reset_val`이 `Asia/Seoul`이다. Dagster가 **파이썬에서 UTC로 직접 채우는** 값(`event_logs.timestamp`, `runs.start_time/end_time` — float epoch)은 멀쩡했지만, **PostgreSQL이 `CURRENT_TIMESTAMP` 기본값으로 채우는** 컬럼(`runs.create_timestamp/update_timestamp`, `job_ticks.*`)에는 KST 벽시계가 들어갔고 Dagster는 그걸 UTC로 읽어 +9시간이 됐다. 결과적으로 **Dagster UI의 Overview 타임라인이 텅 비고**(모든 실행이 시간창 바깥 미래로 밀림) `Runs` 목록만 정상으로 보여 원인을 찾기 어려웠다. SQLite는 `CURRENT_TIMESTAMP`가 항상 UTC라 PostgreSQL 이관(`fcf3105`) 때 딸려 들어온 문제다. `run-dagster.ps1`이 쓰는 연결 옵션에 `-c timezone=UTC`를 넣어 고쳤고, 기존 `runs` 11행·`job_ticks` 5행은 `- interval '9 hours'`로 한 번 보정했다. **Django는 세션마다 UTC를 지정하므로 영향이 없었다** — 더 넓게 막고 싶으면 `ALTER DATABASE property_report SET timezone TO 'UTC';`도 가능하다.
 - **`.ps1`에서 네이티브 CLI를 부를 때 `$ErrorActionPreference='Stop'`과 stderr가 충돌한다(2026-09-04, 실증 확인).** Windows PowerShell 5.1은 스트림이 리다이렉트된(`*> $null` 등) 네이티브 명령이 stderr에 한 줄이라도 쓰면 종료 코드가 0이어도 terminating error로 바꾼다. `check-api`는 서버에 닿지 못할 때 `실행 실패: ...`를 stderr로 내므로, `Test-Site`가 "아직 안 뜸"을 `$false`로 돌려주는 대신 스크립트째 exit 1로 죽었다 — `restart_report_site_job` 실패와 `ensure-site.ps1`이 정작 서버가 죽었을 때 복구하지 못하던 원인이 모두 이것이다. 두 스크립트의 `Test-Site`는 호출 구간만 `$ErrorActionPreference='Continue'`로 낮추고 `catch`에서 `$false`를 돌려주도록 고쳤다. **이 저장소는 `.ps1`이 파이썬 CLI를 부르는 패턴을 계속 쓰므로 새 스크립트에서도 같은 함정을 조심한다.**
-- **`.logs/`는 건강한 상태에서 계속 도는 서버의 실시간 로그가 아니다(2026-09-04, 검증됨).** `Start-Transcript`는 네이티브 프로세스 출력을 그 프로세스가 끝날 때 한꺼번에 기록한다 — 크래시·정상 종료는 잡히지만, waitress나 Dagster가 몇 주째 멀쩡히 떠 있는 동안의 요청 로그를 `Get-Content -Wait`로 실시간 추적할 수는 없다. 필요해지면 `Start-Process -RedirectStandardOutput`으로 구조를 바꿔야 하는데, 스크립트가 블로킹 호출을 직접 하는 대신 자식 프로세스를 추적해야 해서 이번 범위에서는 하지 않았다.
+- **서버 실시간 로그 누락은 2026-09-05 개선했다.** 리포트·Dagster는 `run-logged.py`가 출력 즉시 flush하며 `Get-Content -Wait`로 볼 수 있다. 외부 강제 종료가 감시 프로세스까지 없애면 종료 이벤트를 기록할 수 없으므로 마지막 heartbeat와 Windows 이벤트를 함께 확인한다. HTTP 검사는 30초 주기라 그 사이의 짧은 장애는 놓칠 수 있다.
 
 ## Key Decisions
 

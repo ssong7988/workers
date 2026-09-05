@@ -14,6 +14,7 @@
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $Root '..\start-logging.ps1')
 $FinderDir = Join-Path $Root '..\real-estate-finder'
 $Python = Join-Path $FinderDir '.venv\Scripts\python.exe'
 
@@ -46,11 +47,13 @@ function Test-Site {
 }
 
 if (Test-Site) {
+    Write-AppLifecycle -App 'report-site' -Event 'health_check_ok' -Details @{ source = 'ensure-site.ps1' }
     Write-Host "Report server is already running." -ForegroundColor Green
     exit 0
 }
 
 Write-Host "Report server is not responding. Starting run-site.ps1..." -ForegroundColor Yellow
+Write-AppLifecycle -App 'report-site' -Event 'health_check_failed' -Details @{ source = 'ensure-site.ps1'; action = 'start server' }
 # run-site.bat, not run-site.ps1, is what a person double-clicks - and .bat
 # ends in `pause >nul` so the console stays readable. Started unattended,
 # that means any failure path (bad migration, missing .env, ...) leaves a
@@ -65,10 +68,12 @@ $deadline = (Get-Date).AddSeconds(60)
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 3
     if (Test-Site) {
+        Write-AppLifecycle -App 'report-site' -Event 'recovery_healthy'
         Write-Host "Report server is up." -ForegroundColor Green
         exit 0
     }
 }
 
 Write-Host "Report server did not come up within 60 seconds." -ForegroundColor Red
+Write-AppLifecycle -App 'report-site' -Event 'recovery_failed' -Details @{ reason = 'health check timeout' }
 exit 1

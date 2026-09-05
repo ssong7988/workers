@@ -15,6 +15,8 @@
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $Root '..\start-logging.ps1')
+Write-AppLifecycle -App 'report-site' -Event 'restart_requested' -Details @{ source = 'restart-site.ps1' }
 $FinderDir = Join-Path $Root '..\real-estate-finder'
 $Python = Join-Path $FinderDir '.venv\Scripts\python.exe'
 
@@ -55,7 +57,9 @@ foreach ($processId in $processIds) {
         continue
     }
     Write-Host "Stopping existing report server (PID $processId)..." -ForegroundColor Yellow
+    Write-AppLifecycle -App 'report-site' -Event 'stop_requested' -Details @{ target_pid = $processId; reason = 'explicit restart'; source = 'restart-site.ps1' }
     Stop-Process -Id $processId -Force
+    Write-AppLifecycle -App 'report-site' -Event 'stop_completed' -Details @{ target_pid = $processId }
 }
 
 $deadline = (Get-Date).AddSeconds(20)
@@ -80,10 +84,12 @@ $deadline = (Get-Date).AddSeconds(60)
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 3
     if (Test-Site) {
+        Write-AppLifecycle -App 'report-site' -Event 'restart_healthy'
         Write-Host "Report server is back up with the new code." -ForegroundColor Green
         exit 0
     }
 }
 
 Write-Host "Report server did not come back within 60 seconds." -ForegroundColor Red
+Write-AppLifecycle -App 'report-site' -Event 'restart_failed' -Details @{ reason = 'health check timeout' }
 exit 1

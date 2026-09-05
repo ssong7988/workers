@@ -27,6 +27,17 @@
 $LogsRoot = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '.logs'
 $LogRetentionDays = 30
 
+# Short-lived control scripts use their own PID file, never a server's handle.
+function Write-AppLifecycle {
+    param([string]$App, [string]$Event, [hashtable]$Details = @{})
+    $appDir = Join-Path $LogsRoot $App
+    New-Item -ItemType Directory -Path $appDir -Force | Out-Null
+    $record = @{ timestamp = (Get-Date).ToString('o'); event = $Event; caller_pid = $PID }
+    foreach ($key in $Details.Keys) { $record[$key] = $Details[$key] }
+    $path = Join-Path $appDir "$(Get-Date -Format 'yyyy-MM-dd')-control-$PID.log"
+    $record | ConvertTo-Json -Compress | Add-Content -LiteralPath $path -Encoding UTF8
+}
+
 function Start-AppLog {
     param(
         [Parameter(Mandatory)]

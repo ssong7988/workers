@@ -16,6 +16,8 @@
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $Root '..\start-logging.ps1')
+Write-AppLifecycle -App 'dagster_project' -Event 'restart_requested' -Details @{ source = 'restart-dagster.ps1' }
 
 # Same path-prefix computation as run-dagster.ps1, needed to poll the right
 # GraphQL URL below (report_site/settings.py: DAGSTER_GRAPHQL_URL =
@@ -53,17 +55,50 @@ function Test-Dagster {
     }
 }
 
-$listeners = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue
-$processIds = $listeners | Select-Object -ExpandProperty OwningProcess -Unique
-foreach ($processId in $processIds) {
-    $proc = Get-Process -Id $processId -ErrorAction SilentlyContinue
-    if ($null -eq $proc) { continue }
-    if ($proc.ProcessName -notmatch '^python') {
-        Write-Host "Process on port 3000 ($($proc.ProcessName), PID $processId) is not python - skipping. Check it manually." -ForegroundColor Yellow
-        continue
+# `dagster dev` is a process tree (dev supervisor, webserver, daemon, code
+# server, gRPC server). Killing only the process listening on port 3000 leaves
+# the supervisor alive; it can retain PostgreSQL connections and race the new
+# tree for the port. Stop every Python process whose command line both points
+# at this project and invokes a Dagster module. The exact root path keeps an
+# unrelated Dagster instance on this PC out of scope.
+$allProcesses = @(Get-CimInstance Win32_Process)
+$escapedVenv = [regex]::Escape((Join-Path $Root '.venv\Scripts\python.exe'))
+$roots = @($allProcesses | Where-Object {
+    $_.Name -match '^python(\.exe)?$' -and
+    ($_.ExecutablePath -match $escapedVenv -or $_.CommandLine -match $escapedVenv) -and
+    $_.CommandLine -match '(?i)-m\s+dagster'
+})
+$dagsterProcesses = @($roots)
+$knownIds = @($roots | Select-Object -ExpandProperty ProcessId)
+do {
+    $children = @($allProcesses | Where-Object {
+        $knownIds -contains $_.ParentProcessId -and
+        $knownIds -notcontains $_.ProcessId
+    })
+    if ($children.Count -gt 0) {
+        $dagsterProcesses += $children
+        $knownIds += @($children | Select-Object -ExpandProperty ProcessId)
     }
-    Write-Host "Stopping existing Dagster (PID $processId)..." -ForegroundColor Yellow
-    Stop-Process -Id $processId -Force
+} while ($children.Count -gt 0)
+
+# Children first avoids letting a still-running supervisor recreate one while
+# the tree is being stopped. Process depth is small, so repeated leaf removal
+# is clearer and safer than taskkill /T against a guessed root PID.
+$remaining = @($dagsterProcesses)
+while ($remaining.Count -gt 0) {
+    $ids = @($remaining | Select-Object -ExpandProperty ProcessId)
+    $parents = @($remaining | Select-Object -ExpandProperty ParentProcessId)
+    $leaves = @($remaining | Where-Object { $parents -notcontains $_.ProcessId })
+    if ($leaves.Count -eq 0) { $leaves = @($remaining) }
+    foreach ($proc in $leaves) {
+        Write-Host "Stopping Dagster process (PID $($proc.ProcessId))..." -ForegroundColor Yellow
+        Write-AppLifecycle -App 'dagster_project' -Event 'stop_requested' -Details @{ target_pid = $proc.ProcessId; reason = 'explicit restart'; source = 'restart-dagster.ps1' }
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+        $stillRunning = Get-Process -Id $proc.ProcessId -ErrorAction SilentlyContinue
+        Write-AppLifecycle -App 'dagster_project' -Event 'stop_result' -Details @{ target_pid = $proc.ProcessId; still_running = ($null -ne $stillRunning) }
+    }
+    $leafIds = @($leaves | Select-Object -ExpandProperty ProcessId)
+    $remaining = @($remaining | Where-Object { $leafIds -notcontains $_.ProcessId })
 }
 
 $deadline = (Get-Date).AddSeconds(20)
@@ -88,10 +123,12 @@ $deadline = (Get-Date).AddSeconds(60)
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 3
     if (Test-Dagster) {
+        Write-AppLifecycle -App 'dagster_project' -Event 'restart_healthy'
         Write-Host "Dagster is back up with the new code." -ForegroundColor Green
         exit 0
     }
 }
 
 Write-Host "Dagster did not come back within 60 seconds." -ForegroundColor Red
+Write-AppLifecycle -App 'dagster_project' -Event 'restart_failed' -Details @{ reason = 'GraphQL health check timeout' }
 exit 1
