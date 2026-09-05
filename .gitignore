@@ -34,3 +34,6 @@ dagster_project/data/
 
 # Browser profiles left behind by screenshot tooling
 **/edge-shot-profile*/
+
+# stock-importer/ - browser dumps, run lock, collected JSON
+stock-importer/data/

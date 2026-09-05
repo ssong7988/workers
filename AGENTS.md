@@ -54,6 +54,7 @@
 
 - 사용자용 메인 엔트리 포인트: `report-site\run-site.bat`을 먼저 켠 뒤 `real-estate-finder\run-scan.bat` 더블클릭
 - 수집기 테스트: `real-estate-finder/`에서 `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`
+- 주식 수집기 테스트: `stock-importer/`에서 `..\real-estate-finder\.venv\Scripts\python.exe -m unittest discover -s tests -t . -v` (브라우저 불필요)
 - 수집기 ↔ 서버 연결 확인: `real-estate-finder/`에서 `.\.venv\Scripts\python.exe -m real_estate_finder check-api` (읽기 전용)
 - 애플리케이션 설정 검사: `report-site/`에서 `..\real-estate-finder\.venv\Scripts\python.exe manage.py check`
 - 마이그레이션 누락 검사: `report-site/`에서 `..\real-estate-finder\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run`
