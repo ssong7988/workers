@@ -9,10 +9,12 @@ posts what it scraped to the API here.
 Configuration comes from `report-site/.env` and is never committed:
 
 * `REPORT_PATH_TOKEN` - optional leading path segment. Empty uses the explicit
-  namespaces `/property/` and `/common/`; a value prepends `/<TOKEN>` to both.
+  namespaces `/property/`, `/stock/` and `/common/`; a value prepends
+  `/<TOKEN>` to all three.
 * `FINDER_API_TOKEN` - the bearer token `real-estate-finder` sends. The site is
   published to the internet through Tailscale Funnel, so `/api/` is reachable
   from outside and must not be open.
+* `STOCK_API_TOKEN` - the same for the KB stock importer's `/stock/api/`.
 
 See `.docs/RUNBOOK.md` for how this is run and tunneled.
 """
@@ -58,13 +60,21 @@ if "/" in REPORT_PATH_TOKEN or "\\" in REPORT_PATH_TOKEN:
     raise RuntimeError("REPORT_PATH_TOKEN에는 경로 구분자를 사용할 수 없습니다.")
 ROUTE_PREFIX = f"{REPORT_PATH_TOKEN}/" if REPORT_PATH_TOKEN else ""
 PROPERTY_ROUTE_PREFIX = f"{ROUTE_PREFIX}property/"
+STOCK_ROUTE_PREFIX = f"{ROUTE_PREFIX}stock/"
 COMMON_ROUTE_PREFIX = f"{ROUTE_PREFIX}common/"
 REPORT_URL_PATH = f"/{PROPERTY_ROUTE_PREFIX}report"
 STATISTICS_URL_PATH = f"/{PROPERTY_ROUTE_PREFIX}statistics"
+ALLOCATION_URL_PATH = f"/{STOCK_ROUTE_PREFIX}allocation"
+PERFORMANCE_URL_PATH = f"/{STOCK_ROUTE_PREFIX}performance"
 DAGSTER_SUMMARY_PATH = f"/{COMMON_ROUTE_PREFIX}dagster"
 DAGSTER_PATH_PREFIX = f"{DAGSTER_SUMMARY_PATH}/console"
 # The scanner authenticates with `Authorization: Bearer <FINDER_API_TOKEN>`.
 FINDER_API_TOKEN = _required("FINDER_API_TOKEN", "<추측 불가 문자열>")
+# The stock importer carries its own token so one leaked collector does not
+# open the other domain. Optional on purpose: an install that has not started
+# collecting KB data yet should not fail to boot, and `/stock/api/` answers
+# 503 until it is set rather than degrading into an open endpoint.
+STOCK_API_TOKEN = os.environ.get("STOCK_API_TOKEN", "").strip()
 
 # Where the Kakao card links to. Falls back to the local address only so a
 # misconfigured setup fails visibly rather than sending a broken link; the
@@ -162,6 +172,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "api",
     "properties",
+    "portfolio",
     "report",
 ]
 MIDDLEWARE = [

@@ -1,0 +1,108 @@
+# 금융자산 포트폴리오 초기 시드.
+#
+# 운영 소스가 아니다. 여기 있는 값은 첫 실행에서 빈 DB를 채우기 위한 출발점일
+# 뿐이고, 이후 수정은 전부 Django admin에서 한다 - 검색 조건에 대해
+# `properties/seed/searches.yaml`이 그런 것과 같다.
+#
+# 출처:
+#   - 계좌 별칭과 자산분류: stock_management/test/data/my_etf_list.csv
+#   - 국민연금 기준 비중: stock_management/test/data/국민연금 포트폴리오.xlsx (Sheet1!A1:B6)
+#
+# 보유수량·매입금액은 옮기지 않는다. 그 숫자는 H-able에서 수집한 것이 진짜이고,
+# 오래된 사본을 Git에 남길 이유가 없다.
+
+asset_classes:
+  - id: korea-stock
+    name: 한국 주식
+    benchmark_category: domestic_stock
+    display_order: 10
+  - id: us-stock
+    name: 미국 주식
+    benchmark_category: foreign_stock
+    display_order: 20
+  - id: other-stock
+    name: 기타 주식
+    benchmark_category: foreign_stock
+    display_order: 30
+  - id: bond
+    name: 채권
+    benchmark_category: bond
+    display_order: 40
+  - id: gold
+    name: 금
+    benchmark_category: alternative
+    display_order: 50
+  - id: crypto
+    name: 코인
+    benchmark_category: alternative
+    display_order: 60
+  # 예수금과 현금성 자산의 초기 자리. 국민연금 공통분류로는 채권으로 본다.
+  - id: safe-asset
+    name: 안전자산
+    benchmark_category: bond
+    display_order: 70
+  # 처음 보는 종목이 들어오는 곳. 공통분류가 비어 있어 국민연금 비교에서 빠지고,
+  # 화면에는 제외 금액으로 표시된다.
+  - id: unclassified
+    name: 미분류
+    benchmark_category: ""
+    display_order: 999
+
+# KB증권 계좌만 넣는다. 업비트 등 KB 밖 자산은 첫 버전의 범위 밖이다.
+# 마스킹 계좌번호는 수집기가 실제 값으로 채운다.
+accounts:
+  - id: kb-brokerage
+    alias: 종합위탁
+    account_type: brokerage
+  - id: kb-isa
+    alias: ISA
+    account_type: isa
+  - id: kb-pension-1
+    alias: 개인연금
+    account_type: pension
+  - id: kb-pension-2
+    alias: 개인연금2
+    account_type: pension
+  - id: kb-retirement
+    alias: 퇴직연금
+    account_type: retirement
+
+# 원본 합계는 99.8%다. 그대로 보존하고 비교 차트에서만 100%로 정규화한다.
+benchmark:
+  as_of: 2026-09-05
+  source: "국민연금 포트폴리오.xlsx Sheet1!A1:B6"
+  rows:
+    - source_category: 국내주식
+      benchmark_category: domestic_stock
+      source_percent: 12.7
+    - source_category: 국내채권
+      benchmark_category: bond
+      source_percent: 27.7
+    - source_category: 해외주식
+      benchmark_category: foreign_stock
+      source_percent: 35.0
+    - source_category: 해외채권
+      benchmark_category: bond
+      source_percent: 7.4
+    - source_category: 대체투자
+      benchmark_category: alternative
+      source_percent: 17.0
+
+# 수집기가 만든 종목은 종목코드만 알고 분류는 모른다. 이름이 여기 있으면
+# 시드를 다시 돌릴 때 해당 분류로 옮겨준다. 여기 없는 종목은 미분류로 남고
+# admin에서 직접 정한다 - 이름만 보고 추측하지 않는다.
+instrument_names:
+  korea-stock: [삼성전자, 현대차, 현대차2우B, 기업은행, LG디스플레이, 아모레퍼시픽]
+  us-stock:
+    - KODEX 미국나스닥100(H)
+    - SOL 미국배당다우존스(H)
+    - RISE 미국S&P500(H)
+  other-stock:
+    - KIWOOM 인도Nifty50(합성)
+    - RISE 유로스탁스50(H)
+  bond:
+    - KIWOOM 국고채10년
+    - KODEX 미국30년국채액티브(H)
+    - KODEX CD금리액티브(합성)
+  gold: [ACE KRX금현물]
+  crypto: [비트코인, 이더리움]

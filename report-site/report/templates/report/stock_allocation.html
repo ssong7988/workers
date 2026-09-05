@@ -1,0 +1,173 @@
+{% extends "report/stock_base.html" %}
+
+{% block title %}금융자산 비중 · 리밸런싱{% endblock %}
+{% block heading %}자산분류별 비중{% endblock %}
+{% block observed %}
+  {% if view.as_of %}{{ view.as_of|date:"Y.m.d" }} 기준{% else %}수집된 자료 없음{% endif %}
+{% endblock %}
+
+{% block extra_style %}
+  .pie-row { margin-top: 1rem; display: grid; gap: 1.25rem; grid-template-columns: 1fr; align-items: center; }
+  @media (min-width: 640px) { .pie-row { grid-template-columns: 220px 1fr; } }
+  .pie { display: block; margin: 0 auto; }
+  .legend { display: grid; gap: .5rem; font-size: .875rem; }
+  .legend-item { display: flex; align-items: center; gap: .5rem; }
+  .legend-name { flex: 1; }
+  .legend-value { color: #475569; font-variant-numeric: tabular-nums; }
+  .bar-wrap { display: grid; gap: .35rem; }
+  .bar { height: .5rem; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+  .bar span { display: block; height: 100%; border-radius: 999px; }
+  .bar-mine span { background: #0ea5e9; }
+  .bar-benchmark span { background: #94a3b8; }
+{% endblock %}
+
+{% block content %}
+{% if not view.has_data %}
+<div class="panel empty">
+  아직 완전한 수집 결과가 없습니다.<br>
+  필수 계좌 전부의 잔고가 같은 기준일로 도착해야 비중을 계산합니다.
+</div>
+{% else %}
+
+<div class="summary">
+  <div class="tile">
+    <div class="tile-value">{{ total_text }}</div>
+    <div class="tile-label">분류 가능한 금융자산</div>
+  </div>
+  <div class="tile">
+    <div class="tile-value">{{ gross_text }}</div>
+    <div class="tile-label">수집된 총 평가액</div>
+  </div>
+  <div class="tile">
+    <div class="tile-value{% if view.unclassified_value %} tile-up{% endif %}">{{ unclassified_text }}</div>
+    <div class="tile-label">미분류 (비중 계산 제외)</div>
+  </div>
+  <div class="tile">
+    <div class="tile-value">{{ view.rows|length }}</div>
+    <div class="tile-label">자산분류 수</div>
+  </div>
+</div>
+
+{% if view.unclassified_value %}
+<div class="notice">
+  미분류 {{ unclassified_text }}이(가) 비중 계산에서 빠져 있습니다.
+  admin의 <b>종목</b>에서 자산분류를 지정하면 반영됩니다.
+</div>
+{% endif %}
+
+<div class="section-title">현재 비중</div>
+<div class="panel pie-row">
+  <svg class="pie" width="220" height="220" viewBox="0 0 220 220" role="img" aria-label="자산분류별 비중">
+    {% for slice in slices %}
+    <path d="{{ slice.path }}" fill="{{ slice.color }}"><title>{{ slice.label }} {{ slice.percent|floatformat:1 }}%</title></path>
+    {% endfor %}
+  </svg>
+  <div class="legend">
+    {% for slice in slices %}
+    <div class="legend-item">
+      <span class="swatch" style="background: {{ slice.color }}"></span>
+      <span class="legend-name">{{ slice.label }}</span>
+      <span class="legend-value">{{ slice.percent|floatformat:1 }}%</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="section-title">목표 대비 리밸런싱</div>
+{% if view.target_note %}
+<div class="notice">{{ view.target_note }}</div>
+{% endif %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>자산분류</th>
+        <th>평가액</th>
+        <th>현재 비중</th>
+        <th>목표</th>
+        <th>차이</th>
+        <th>매수(+) · 매도(−)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><span class="swatch" style="background: {{ row.color }}"></span>{{ row.name }}</td>
+        <td>{{ row.value_text }}</td>
+        <td>{{ row.ratio_text }}</td>
+        <td>{{ row.target_text }}</td>
+        <td>{{ row.gap_text }}</td>
+        <td class="{{ row.action }}">{{ row.rebalance_text }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if has_targets %}
+<div class="hint">
+  현재 평가총액을 유지하는 금액입니다. 만원 단위로 반올림했으므로 매수 합계와
+  매도 합계가 정확히 상쇄되지 않습니다{% if has_remainder %} — 잔액 {{ remainder_text }}{% endif %}.
+  ISA·연금·퇴직연금의 매매·인출 제약은 반영하지 않습니다.
+</div>
+{% endif %}
+
+{% if benchmark %}
+<div class="section-title">국민연금 비교</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>공통분류</th>
+        <th style="width: 40%">비중</th>
+        <th>내 비중</th>
+        <th>국민연금</th>
+        <th>차이</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in benchmark %}
+      <tr>
+        <td>{{ row.label }}</td>
+        <td>
+          <div class="bar-wrap">
+            <div class="bar bar-mine"><span style="width: {{ row.mine_width|floatformat:1 }}%"></span></div>
+            <div class="bar bar-benchmark"><span style="width: {{ row.benchmark_width|floatformat:1 }}%"></span></div>
+          </div>
+        </td>
+        <td>{{ row.mine_text }}</td>
+        <td>{{ row.benchmark_text }}</td>
+        <td>{{ row.gap_text }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="hint">
+  위 막대가 내 비중, 아래 막대가 국민연금입니다.
+  국민연금 원본 비중의 합계는 100%가 아니며, 비교할 때만 100%로 정규화했습니다
+  ({{ view.benchmark_as_of|date:"Y.m.d" }} 기준).
+  국민연금의 <b>대체투자</b>와 개인의 금·코인은 같은 상품군이 아닙니다.
+</div>
+{% endif %}
+
+<div class="section-title">계좌 수집 상태</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>계좌</th><th>유형</th><th>필수</th><th>상태</th><th>행 수</th></tr>
+    </thead>
+    <tbody>
+      {% for account in view.accounts %}
+      <tr>
+        <td>{{ account.alias }}</td>
+        <td>{{ account.account_type }}</td>
+        <td>{% if account.required %}필수{% else %}선택{% endif %}</td>
+        <td>{% if account.status == "success" %}성공{% elif account.status == "missing" %}<span class="buy">미도착</span>{% else %}<span class="buy">{{ account.status }}</span>{% endif %}</td>
+        <td>{{ account.row_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

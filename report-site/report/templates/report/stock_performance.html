@@ -1,0 +1,128 @@
+{% extends "report/stock_base.html" %}
+
+{% block title %}금융자산 수익률 · MDD{% endblock %}
+{% block heading %}수익률과 낙폭{% endblock %}
+{% block observed %}
+  {% if latest %}{{ latest.as_of|date:"Y.m.d" }} 기준 · {{ range_label }}{% else %}수집된 자료 없음{% endif %}
+{% endblock %}
+
+{% block extra_style %}
+  .ranges { margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: .4rem; }
+  .range { border: 1px solid #cbd5e1; border-radius: 999px; padding: .3rem .8rem; font-size: .8125rem; font-weight: 600; color: #475569; background: #fff; }
+  .range.current { background: #0b2545; border-color: #0b2545; color: #fff; }
+  .chart-wrap { margin-top: 1rem; overflow-x: auto; }
+  .chart { display: block; height: auto; }
+  .grid-line { stroke: #e2e8f0; stroke-width: 1; }
+  .zero-line { stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 3 3; }
+  .axis-label { fill: #94a3b8; font-size: 11px; }
+  .series { fill: none; stroke: #0ea5e9; stroke-width: 2; stroke-linejoin: round; }
+  .series-area { fill: rgba(14, 165, 233, .12); stroke: none; }
+  .x-labels { display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; padding: 0 1rem; }
+{% endblock %}
+
+{% block content %}
+{% if not has_data %}
+<div class="panel empty">
+  아직 성과를 계산할 자료가 없습니다.<br>
+  완전 수집일이 이틀 이상 쌓이면 수익률과 낙폭이 나옵니다.
+</div>
+{% else %}
+
+<div class="summary">
+  <div class="tile">
+    <div class="tile-value">{{ summary.market_value_text }}</div>
+    <div class="tile-label">현재 평가액</div>
+  </div>
+  <div class="tile">
+    <div class="tile-value {% if summary.profit %}tile-up{% else %}tile-down{% endif %}">{{ summary.investment_pl_text }}</div>
+    <div class="tile-label">누적 투자손익</div>
+  </div>
+  <div class="tile">
+    <div class="tile-value {% if summary.profit %}tile-up{% else %}tile-down{% endif %}">{{ summary.cumulative_return_text }}</div>
+    <div class="tile-label">누적 수익률</div>
+  </div>
+  <div class="tile">
+    <div class="tile-value tile-down">{{ summary.max_drawdown_text }}</div>
+    <div class="tile-label">MDD</div>
+  </div>
+</div>
+
+<div class="section-title">기간별 성과</div>
+<div class="panel">
+  <div class="ranges">
+    {% for item in ranges %}
+    <a class="range{% if item.key == range_key %} current{% endif %}" href="?range={{ item.key }}">{{ item.label }}</a>
+    {% endfor %}
+  </div>
+  {% if chart %}
+  <div class="chart-wrap">
+    <svg class="chart" width="{{ chart.width }}" height="{{ chart.height }}" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img"
+         aria-label="{{ range_label }} 누적 수익률">
+      {% for tick in chart.ticks %}
+      <line class="grid-line" x1="{{ chart.plot_left }}" y1="{{ tick.y }}" x2="{{ chart.plot_right }}" y2="{{ tick.y }}"/>
+      <text class="axis-label" x="{{ chart.tick_label_x }}" y="{{ tick.y }}" text-anchor="end" dominant-baseline="middle">{{ tick.label }}</text>
+      {% endfor %}
+      <polygon class="series-area" points="{{ chart.area }}"/>
+      <line class="zero-line" x1="{{ chart.plot_left }}" y1="{{ chart.zero_y }}" x2="{{ chart.plot_right }}" y2="{{ chart.zero_y }}"/>
+      <polyline class="series" points="{{ chart.line }}"/>
+    </svg>
+  </div>
+  <div class="x-labels">
+    <span>{{ chart.start_label|date:"Y.m.d" }}</span>
+    <span>{{ chart.end_label|date:"Y.m.d" }}</span>
+  </div>
+  <div class="hint">
+    {{ range_label }} 구간의 시작을 0%로 잡은 상대 수익률입니다.
+    기간 수익률 {{ summary.period_return_text }}, 관측일 {{ observed_days }}일.
+  </div>
+  {% else %}
+  <div class="empty">이 기간에는 관측일이 하나뿐이라 성과선을 그리지 않습니다.</div>
+  {% endif %}
+</div>
+
+<div class="section-title">현금흐름과 낙폭</div>
+<div class="table-wrap">
+  <table>
+    <tbody>
+      <tr><td>최초 평가액 ({{ first_day|date:"Y.m.d" }})</td><td>{{ summary.first_value_text }}</td></tr>
+      <tr><td>누적 순외부입금</td><td>{{ summary.net_flow_text }}</td></tr>
+      <tr><td>누적 투자손익</td><td class="{% if summary.profit %}buy{% else %}sell{% endif %}">{{ summary.investment_pl_text }}</td></tr>
+      <tr><td>현재 낙폭</td><td>{{ summary.drawdown_text }}</td></tr>
+      <tr><td>MDD (최대 낙폭)</td><td>{{ summary.max_drawdown_text }}</td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="hint">
+  입금과 출금은 수익률의 분모만 조정하고 손익으로 세지 않습니다.
+  매수·매도와 포함 계좌 사이 이체는 내부 이동, 배당·이자·수수료·세금은 투자성과입니다.
+  MDD는 평가액이 아니라 현금흐름을 제거한 누적 성과지수의 고점 대비 하락률입니다.
+</div>
+
+{% if classes %}
+<div class="section-title">자산분류별 {{ range_label }} 수익률</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>자산분류</th><th>평가액</th><th>{{ range_label }} 수익률</th><th>관측일</th></tr>
+    </thead>
+    <tbody>
+      {% for row in classes %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td>{{ row.value_text }}</td>
+        <td class="{% if row.trend == 'up' %}buy{% elif row.trend == 'down' %}sell{% endif %}">{{ row.return_text }}</td>
+        <td>{{ row.observed_days }}일</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="hint">
+  분류 안팎으로 오간 매수·매도를 그 분류의 현금흐름으로 처리해, 돈을 더 넣어
+  늘어난 부분과 값이 올라 늘어난 부분을 나눴습니다.
+  관측일이 이틀 미만인 분류는 수익률을 표시하지 않습니다.
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
