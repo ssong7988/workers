@@ -40,6 +40,11 @@ RESTORE_WAIT_SECONDS = 3.0
 # 자동 로그아웃 안내창을 알아보는 글자. 이게 떠 있으면 화면의 숫자는 낡은 것이다.
 LOGGED_OUT_HINTS = ("자동 로그아", "로그아웃 되었", "다시 로그인")
 
+WM_CLOSE = 0x0010
+# 로그인할 때마다 뜨는 안내 화면들. 대상 화면을 덮으면 클릭이 그쪽으로 간다.
+# 제목으로만 고른다 - 사용자가 열어 둔 조회 화면을 함부로 닫지 않기 위해서다.
+NOTICE_SCREEN_WORDS = ("공지", "이벤트", "안내", "알림")
+
 
 class HableError(RuntimeError):
     """H-able 창을 못 찾았거나 상태가 수집할 수 없는 상태일 때."""
@@ -259,3 +264,60 @@ def ensure_input_allowed(main: int) -> None:
         "    hablerun.exe 속성 → 호환성 → '관리자 권한으로 이 프로그램 실행'을 끈다.\n"
         "  - 또는 이 수집기를 관리자 권한 콘솔에서 실행한다."
     )
+
+
+def covering_screens(main: int, screen: int) -> dict[int, str]:
+    """대상 화면의 주요 지점을 덮고 있는 형제 MDI 화면들을 {핸들: 제목}으로."""
+    parent = user32.GetParent(screen)
+    left, top, width, height = rect(screen)
+    points = (
+        (left + width // 2, top + height // 2),
+        (left + width // 2, top + int(height * 0.75)),
+        (left + width - 40, top + int(height * 0.66)),
+    )
+    found: dict[int, str] = {}
+    for x, y in points:
+        under = user32.WindowFromPoint(w.POINT(x, y))
+        if not under or under == screen or user32.IsChild(screen, under):
+            continue
+        node = under
+        while node and user32.GetParent(node) != parent:
+            node = user32.GetParent(node)
+        if node and node != screen:
+            found[node] = window_text(node)
+    return found
+
+
+def clear_notice_screens(main: int, screen: int, *, rounds: int = 4) -> list[str]:
+    """대상 화면을 덮은 로그인 안내 화면들을 닫는다. 닫은 제목들을 돌려준다.
+
+    안내가 아닌 화면이 덮고 있으면 닫지 않고 그대로 알린다 - 사용자가 보려고
+    열어 둔 조회 화면을 우리가 치울 일은 아니다.
+    """
+    closed: list[str] = []
+    for _round in range(rounds):
+        covering = covering_screens(main, screen)
+        if not covering:
+            return closed
+        notices = {
+            handle: title
+            for handle, title in covering.items()
+            if any(word in title for word in NOTICE_SCREEN_WORDS)
+        }
+        if not notices:
+            names = ", ".join(sorted(covering.values())) or "이름 없는 창"
+            raise HableError(
+                f"[{window_text(screen)}] 화면이 다른 화면에 가려 있습니다: {names}\n"
+                "안내 화면이 아니라 함부로 닫지 않았습니다. 직접 닫거나 앞으로 꺼내 주세요."
+            )
+        for handle, title in notices.items():
+            user32.PostMessageW(handle, WM_CLOSE, 0, 0)
+            closed.append(title)
+        time.sleep(0.8)
+    remaining = covering_screens(main, screen)
+    if remaining:
+        raise HableError(
+            "안내 화면을 닫았는데도 대상 화면이 가려 있습니다: "
+            + ", ".join(sorted(remaining.values()))
+        )
+    return closed

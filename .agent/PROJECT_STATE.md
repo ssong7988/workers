@@ -1,6 +1,6 @@
 # Project State
 
-마지막 갱신: 2026-09-05 (**금융자산 수집을 mable 웹에서 H-able 데스크톱으로 옮겼다.** 웹은 6시간마다 자동 로그아웃돼 평일 18:30 무인 수집에 맞지 않는다. 웹 수집기는 지우지 않고 `stock-importer/stock_importer/web/`으로 옮겨 재워 뒀다. H-able 경로는 `hable/`에 있고, 화면 [1285] 총자산현황 하나로 다섯 계좌를 다 읽는다. **아직 실제 데이터로 종단 성공하지 못했다 — H-able이 관리자 권한으로 돌고 수집기는 일반 권한이라 Windows UIPI가 클릭과 키 입력을 전부 차단한다. 권한을 맞추는 것이 다음 단계다.**) 서비스 namespace는 부동산 `/property/`, 주식 `/stock/`, 공통 운영 `/common/`으로 분리하며 Dagster는 한 인스턴스를 공유한다. 개발 브랜치는 `dev`, 버전은 루트 `VERSION`의 `devX.Y.Z` 형식이다.
+마지막 갱신: 2026-09-05 (**금융자산 수집을 mable 웹에서 H-able 데스크톱으로 옮겼다.** 웹은 6시간마다 자동 로그아웃돼 평일 18:30 무인 수집에 맞지 않는다. 웹 수집기는 지우지 않고 `stock-importer/stock_importer/web/`으로 옮겨 재워 뒀다. H-able 경로는 `hable/`에 있고, 화면 [1285] 총자산현황 하나로 다섯 계좌를 다 읽는다. **수집기를 관리자 권한으로 올리면 H-able 조작이 실제로 동작한다 — 창 복원, 로그인 공지 닫기, 우클릭 메뉴, 그리고 조회까지 성공해 실제 잔고가 화면에 찼다. 남은 것은 엑셀 내보내기 버튼 하나다.**) 서비스 namespace는 부동산 `/property/`, 주식 `/stock/`, 공통 운영 `/common/`으로 분리하며 Dagster는 한 인스턴스를 공유한다. 개발 브랜치는 `dev`, 버전은 루트 `VERSION`의 `devX.Y.Z` 형식이다.
 
 ## Current Architecture
 
@@ -90,20 +90,52 @@
 6시간마다 자동 로그아웃된다. 웹 코드는 `stock_importer/web/`으로 옮겨 그대로 남겼고
 (`web-*` 명령으로 여전히 돌아간다) Dagster에는 연결하지 않는다.
 
-#### 막힌 진짜 원인: 권한(UIPI)
+#### 권한(UIPI)과 그 해법
 
-**H-able은 High integrity(관리자 권한)로 돌고 수집기는 Medium이다.** Windows UIPI는
-낮은 권한 프로세스가 높은 권한 창에 보내는 **입력과 창 메시지를 오류 없이 전부
-버린다.** 그래서 클릭도 키 입력도 창 조작도 "아무 일도 일어나지 않는" 것으로만
+**H-able은 관리자 권한으로만 실행된다.** 바로가기가 가리키는 `hable.exe`의 매니페스트가
+`requestedExecutionLevel level='requireAdministrator'`다(`hablerun.exe`는 `asInvoker`지만
+부모의 High를 물려받는다). **그래서 H-able 쪽 권한을 낮추는 방법은 없다** - 매니페스트를
+고치면 서명이 깨지고 업데이트가 되돌린다. 건드리지 않는다.
+
+Windows UIPI는 낮은 권한 프로세스가 높은 권한 창에 보내는 **입력과 창 메시지를 오류 없이
+전부 버린다.** 그래서 수집기가 Medium이면 클릭도 키 입력도 "아무 일도 일어나지 않는" 것으로만
 보인다. 이걸 늦게 알아내는 바람에 좌표가 틀린 줄 알고 한참을 헤맸다.
+`window.ensure_input_allowed()`가 수집 전에 두 무결성 수준을 비교하고 낮으면 멈춘다.
 
-`window.ensure_input_allowed()`가 수집 전에 두 무결성 수준을 비교하고, 낮으면
-무엇을 해야 하는지 적어 멈춘다.
+**해법은 수집기를 승격 실행하는 것뿐이고, 그 방법이 UAC를 매번 띄우면 안 된다.**
+지금은 `Start-Process -Verb RunAs`로 띄우고 있어 실행마다 사람이 "예"를 눌러야 한다 -
+평일 18:30 무인 수집과 정면으로 어긋난다. **다음 작업: Windows 작업 스케줄러에 "가장 높은
+권한으로 실행" 태스크로 등록하고 `schtasks /run`으로 부른다.** 등록할 때 한 번만 관리자
+승인이 필요하고, 그 뒤로는 UAC가 뜨지 않는다. Dagster도 그 태스크를 부르면 된다.
 
-**해결은 둘 중 하나다.** H-able을 관리자 권한 없이 실행하거나(권장 - 수집기가 계속
-일반 권한으로 돌 수 있다. `hablerun.exe` 속성 → 호환성 → '관리자 권한으로 이
-프로그램 실행' 해제), 수집기를 관리자 권한으로 실행한다. 후자를 고르면 Dagster도
-관리자 권한으로 띄워야 한다.
+#### 권한을 맞추면 실제로 되는 것 (2026-09-05 확인)
+
+| 단계 | 결과 |
+|---|---|
+| 최소화된 H-able 창 복원 | 동작(`WM_SYSCOMMAND`/`SC_RESTORE`) |
+| 로그인 공지 화면 닫기 | 동작. `1837 진행중인 이벤트`·`0114 공지사항`·`화면 종료 안내`가 매 로그인마다 1285를 덮는다 |
+| 포그라운드 전환 | ALT를 살짝 눌러 포그라운드 잠금을 푼 뒤에야 된다. 실패해도 멈추지 않고, 클릭 지점의 z-order를 가드가 확인한다 |
+| 우클릭 컨텍스트 메뉴 | **뜬다.** 앞서 "메뉴 없음"은 권한 차단이었다. 다만 항목 이름은 아직 못 읽었다 |
+| Ctrl+C 복사 | 여전히 빈 클립보드 |
+| **조회 버튼 → 잔고 조회** | **성공. 그리드에 실제 데이터가 찬다** |
+| 엑셀 내보내기 버튼 | **저장 대화상자가 뜨지 않는다. 여기서 막혀 있다** |
+
+조회된 화면에서 삼성전자·RISE 미국S&P500(H)·KODEX 미국나스닥100·SOL 미국배당다우존스·
+SK하이닉스·저스템·RISE 200이 계좌번호와 함께 확인됐다. 툴바 좌표(엑셀 = 그리드 판 오른쪽
+끝에서 115px, 조회 = 18px, 위에서 33px)는 화면 그림과 대조해 맞는 것을 확인했다.
+
+#### 계좌 비밀번호
+
+지금은 **사용자가 손으로 넣었다.** 그 상태에서는 조회가 된다. 무인 실행에는 그대로 못 쓴다.
+선택지는 셋이고, 순서대로 낫다.
+
+1. **H-able 자체 저장 기능.** 화면 하단이 "설정에서 비밀번호를 저장하셔야만 잔고/미체결
+   조회가 가능합니다"라고 안내한다. 즉 기능이 있다. 이걸 켜면 **우리가 비밀번호를 갖지
+   않아도 된다.** 어느 설정 화면인지 아직 확인하지 않았다 - 다음에 먼저 할 일.
+2. **Windows 자격 증명 관리자.** OS가 보호하고 Git·로그에 남지 않는다. 실행할 때 읽어
+   키 입력으로 넣는다. 비밀번호 칸은 표준 `Edit`가 아니라 owner-drawn `AfxWnd120`이라
+   `WM_SETTEXT`는 못 쓰고 클릭 후 실제 키 입력을 보내야 한다.
+3. `.env` 평문 - 쓰지 않는다.
 
 #### 읽기로 확인한 것 (권한과 무관하게 유효)
 
@@ -129,15 +161,18 @@
 - `PrintWindow`로 창 캡처 (거절당했다)
 - 최소화 복원·최대화·`WM_MDIACTIVATE`·`WM_CLOSE` (전부 무시됐다)
 
-#### 지금 상태
+#### 지금 막힌 것
 
-로그인은 돼 있다(`환영합니다. 송종민님`). 그런데 **권한이 안 맞아 수집기가 아무것도
-누를 수 없다.** 위 '막힌 진짜 원인' 참고. 그 전 상태에서는 자동 로그아웃까지 겹쳐
-있었다.
-
-주의: mable 웹과 H-able은 **동시에 로그인할 수 없다**. 한쪽이 다른 쪽을 쫓아낸다
-(멀티로그인은 KB증권 설정에서 따로 켜야 한다). 재워 둔 웹 수집기를 진단용으로
-돌리면 H-able 세션이 끊긴다.
+- **엑셀 내보내기 버튼을 눌러도 저장 대화상자가 뜨지 않는다.** 좌표는 맞다. 버튼이 다른
+  창을 띄우는지, 대화상자 판정(`_looks_like_save_dialog`)이 못 알아보는지 아직 안 갈랐다.
+  다음에 할 진단: 엑셀 클릭 전후로 최상위 창 목록을 비교해 무엇이 새로 뜨는지 본다
+  (`scratchpad/excel_probe.py`에 초안이 있다).
+- **PostgreSQL이 응답하지 않는다.** 포트 5432는 열려 있고(PID 14212) 기존 연결도 살아
+  있는데 새 접속이 인증 단계에서 멈춘다. `psql`도 Django도 타임아웃이다. 서비스 항목은
+  `Stopped`로 보이는데 서버 프로세스는 떠 있는 어긋난 상태다. **서비스 재시작이 필요하고
+  그것도 관리자 권한이 필요하다.** 이 때문에 `manage.py test portfolio`를 못 돌렸다.
+- 주의: mable 웹과 H-able은 동시에 로그인할 수 없다. 재워 둔 웹 수집기를 진단용으로
+  돌리면 H-able 세션이 끊긴다.
 
 #### 계좌번호 마스킹 규칙이 바뀌었다
 
@@ -176,6 +211,19 @@ H-able은 `338-711-781-01`처럼 네 덩어리로 준다. 가운데를 전부 �
   앵커로 삼고 셀 좌표로 행·열을 복원한다.
 - 탭이 말한 건수와 읽은 건수가 다르면 저장하지 않고 멈춘다. **H-able 경로에는 이
   대조가 없다** - 화면이 기대 건수를 알려주지 않는다.
+
+### 카카오 전송 (2026-09-05 작성, **미검증**)
+
+`portfolio/delivery.py`와 `manage.py send_stock_digest`(`--dry-run` 지원)를 만들었다.
+부동산 쪽 규칙 그대로다 - **이미지 없이 텍스트 1통에 버튼 정확히 두 개**(`비중·리밸런싱`,
+`수익률·MDD`), 그리고 공개 주소가 그 기준일을 실제로 서빙할 때만 버튼을 붙인다. 그 확인을
+위해 `/stock/allocation/`에 `data-as-of` 표시를 넣었고, 공개 주소 두 개는
+`KAKAO_REPORT_URL`의 출처에서 유도한다(`STOCK_ALLOCATION_URL`, `STOCK_PERFORMANCE_URL`).
+카카오 어댑터는 `properties/notifier.py`의 것을 그대로 쓴다 - 부동산 도메인 지식이 아니라
+카카오 모듈을 불러오는 공용 배선이라 두 벌로 만들 이유가 없다.
+
+**테스트(`portfolio/tests/test_delivery.py`, 11개)를 한 번도 돌리지 못했다.** PostgreSQL이
+응답하지 않아 테스트 DB를 만들 수 없었다. 실제 전송도 아직 안 했다 - 보낼 수집 결과가 없다.
 
 ### 아직 하지 않은 것과 이유
 
@@ -415,17 +463,18 @@ Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Djan
 
 **2026-09-04에 op 기반에서 asset 기반으로 바꿨다.** 이전에는 `property_pipeline_job` 하나가 `ensure_site → scan_step → report_step`을 항상 전부 실행하고, 세 스케줄이 run config로 뒤 두 단계를 no-op으로 만들었다. 지금은 asset `naver_listings → morning_report`가 있고, 각 스케줄이 어디까지 실행할지 고른다. `naver_listings`는 `ensure_site_op → run_scan_op` 두 op을 품은 `graph_asset`이다.
 
-등록 잡은 네 개다. asset job 둘(`scan_job`, `morning_report_job`)과 op job 둘(`server_check_job`, `restart_report_site_job`). `server_check_job`은 `naver_listings` 안에서 쓰는 것과 **같은 `ensure_site_op`을 재사용**하므로 서버 확인 로직이 두 벌로 갈라지지 않는다. `restart_report_site_job`(2026-09-04 추가)은 스케줄 없는 잡이며 report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
+등록 잡은 다섯 개다. asset job 둘(`scan_job`, `morning_report_job`)과 op job 셋(`server_check_job`, `pre_scan_health_job`, `restart_report_site_job`). `server_check_job`과 `pre_scan_health_job`은 `naver_listings` 안에서 쓰는 것과 **같은 `ensure_site_op`을 재사용**하므로 서버 확인 로직이 갈라지지 않는다. `pre_scan_health_job`은 06:00에 서버 확인 후 비대기 `check-login`으로 Edge/CDP·네이버 로그인을 확인하고, 1분 뒤 재시도해도 실패하면 기존 failure hook으로 카카오 경고를 보낸다. `restart_report_site_job`(2026-09-04 추가)은 스케줄 없는 잡이며 report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
 
 **업무 job은 `.bat`/업무용 `.ps1`을 실행하지 않는다.** `run_scan_op`은 수집기 전용 venv의 `python -u -m real_estate_finder run-scan`을, `morning_report`는 finder venv로 Django `manage.py send_digest`를 직접 실행한다. Dagster venv에 Playwright/Django를 합치거나 앱 모듈을 직접 import하지 않는 이유는 의존성 충돌과 장시간 브라우저 작업의 프로세스 격리를 유지하기 위해서다. Windows 장기 프로세스 수명주기(`ensure-site.ps1`, `restart-site.ps1`)에는 PowerShell이 적합하므로 그대로 둔다. `run-scan.ps1`은 Python workflow를 한 줄 호출하는 수동 호환 wrapper로 축소했다.
 
 전환으로 없어진 것: `scan_step.mode="skip"`과 `report_step.enabled`. 남은 설정 손잡이는 `run_scan_op.mode`(`run` | `ensure_fresh`) 하나뿐이다. graph_asset이라 run config 경로가 한 겹 깊다 — `ops.naver_listings.ops.run_scan_op.config.mode`. 새로 생긴 것: Catalog의 lineage 그래프, 그리고 수집할 때마다 그 `Scan` 행의 수집 수·조건 충족 수·급매 수·제외 수가 머티리얼라이즈 메타데이터로 붙는다(`manage.py scan_status --json`을 새로 추가해 되읽는다). 잡 이름이 스케줄별로 갈라져서 실행 이력에서 어떤 성격의 런인지도 이제 잡 이름만으로 구분된다.
 
-1. `server_only_schedule` — 7·8·12·17시를 제외한 매시 정각. `server_check_job`(=`ensure_site_op`만) 실행. 설정 값이 아예 없다.
-2. `scan_schedule` — `0 7,12,17 * * *`. `scan_job`(=`naver_listings`, `mode: run`). 신규 급매 또는 `notify_new` 일반 신규의 카카오는 `record_scan()`이 처리한다.
-3. `morning_report_schedule` — `0 8 * * *`. `morning_report_job`(=`naver_listings → morning_report`, `mode: ensure_fresh`). DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다. 수집을 생략해도 `naver_listings`는 머티리얼라이즈된다 — "매물이 최신이다"라는 결과는 같기 때문이다.
-4. `alert_on_failure` — 네 잡 모두에 걸려 있고 재시도(`RetryPolicy(max_retries=1, delay=300)`)를 다 쓴 뒤 `manage.py send_alert`를 부른다.
-5. `restart_report_site_job` — `report-site/restart-site.ps1`을 실행한다. 8000번 포트를 듣는 `python` 프로세스를 찾아 종료(다른 이름의 프로세스면 건너뛰고 경고만 남긴다)하고, 포트가 풀릴 때까지 최대 20초 기다린 뒤 `run-site.ps1`을 hidden으로 새로 띄우고 `check-api`로 최대 60초 재확인한다. `real-estate-finder`는 스캔·리포트 전송이 매번 새 subprocess로 돌기 때문에 이런 재시작 잡이 필요 없다.
+1. `server_only_schedule` — 6·7·8·12·17시를 제외한 매시 정각. `server_check_job`(=`ensure_site_op`만) 실행. 설정 값이 아예 없다.
+2. `pre_scan_health_schedule` — `0 6 * * *`. 서버 확인 후 `check_naver_login_op`이 임시 탭에서 네이버 로그인 여부만 확인한다. 로그인 입력을 기다리거나 수집하지 않는다. 1분 뒤 한 번 재시도하고 실패하면 07시 수집 전에 카카오 경고를 보낸다.
+3. `scan_schedule` — `0 7,12,17 * * *`. `scan_job`(=`naver_listings`, `mode: run`). 신규 급매 또는 `notify_new` 일반 신규의 카카오는 `record_scan()`이 처리한다.
+4. `morning_report_schedule` — `0 8 * * *`. `morning_report_job`(=`naver_listings → morning_report`, `mode: ensure_fresh`). DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다. 수집을 생략해도 `naver_listings`는 머티리얼라이즈된다 — "매물이 최신이다"라는 결과는 같기 때문이다.
+5. `alert_on_failure` — 다섯 잡 모두에 걸려 있다. 일반 작업은 5분 뒤, 로그인 사전 점검은 1분 뒤 한 번 재시도한 다음 `manage.py send_alert`를 부른다.
+6. `restart_report_site_job` — `report-site/restart-site.ps1`을 실행한다. 8000번 포트를 듣는 `python` 프로세스를 찾아 종료(다른 이름의 프로세스면 건너뛰고 경고만 남긴다)하고, 포트가 풀릴 때까지 최대 20초 기다린 뒤 `run-site.ps1`을 hidden으로 새로 띄우고 `check-api`로 최대 60초 재확인한다. `real-estate-finder`는 스캔·리포트 전송이 매번 새 subprocess로 돌기 때문에 이런 재시작 잡이 필요 없다.
 
 **Dagster 자신(`definitions.py`)의 재시작은 job으로 만들 수 없다** — 자기 자신을 실행 중인 프로세스를 자기 job이 끄면 그 실행 자체가 중단된다. 대신 독립 스크립트 `dagster_project/restart-dagster.bat`(→ `restart-dagster.ps1`)을 추가했다(2026-09-04). 3000번 포트의 기존 `python` 프로세스를 종료 → 포트 해제 대기(최대 20초) → `run-dagster.ps1`을 hidden으로 새로 띄움 → GraphQL(`{__typename}`)로 최대 60초 재확인, 구조는 `restart-site.ps1`과 동일하다. `run-dagster.bat`도 기존 프로세스를 자동으로 끄지 않으므로(포트 3000이 이미 쓰이면 새 프로세스가 바인딩 실패), `definitions.py`를 고친 뒤에는 이 스크립트로 직접 재시작해야 한다.
 
@@ -1012,6 +1061,9 @@ report-site/                   애플리케이션 (Django + PostgreSQL)
 6. `send-report.bat` → 카카오톡 카드에 `원본 이미지 보기` / `전체 매물 보기` 두 버튼이 붙는지 휴대폰에서 확인
 
 ## Known Issues
+
+- **2026-09-05 15:29 KST부터 PostgreSQL이 포트와 Windows 서비스는 살아 있으면서 쿼리에 응답하지 않는 상태다.** PostgreSQL 로그는 이후 매분 `autovacuum 작업자가 너무 오래전에 시작되어 중지됨` 경고를 남긴다. DB를 읽는 `/property/report/`과 Dagster 시작이 함께 멈추고, DB 전에 인증을 거부하는 `/api/health/`의 잘못된 토큰 요청만 즉시 401을 돌려 공통 원인이 DB임을 확인했다. 현재 사용자 권한으로는 `postgresql-x64-18` 서비스를 중지할 수 없어 관리자 권한 서비스 재시작이 필요하다. Dagster 자체 재시작도 DB에서 멈추므로 DB 복구 후 다시 실행해야 한다.
+- **기존 `restart-dagster.ps1`은 3000번 listener 자식만 종료해 `dagster dev` supervisor·daemon·code-server를 남겼다.** 장애 진단 중 중복 트리가 생기는 것을 재현해, 이제 프로젝트 venv의 `-m dagster` 루트를 찾고 모든 자식을 leaf-first로 종료하도록 수정했다. PostgreSQL 장애가 남아 있어 새 로직의 실제 재기동 성공은 DB 복구 후 확인해야 한다.
 
 - **`report.tests.test_views.ReportViewTests.test_urgent_section_respects_region_filter`가 실패한다(2026-09-05 관측, 주식 작업 이전부터).** 지역 필터를 걸면 `urgent` 목록이 비어 나온다. 해당 커밋(`0cb96bc`) 상태로 되돌려도 같은 실패라 이번 주식 작업과는 무관하다. 급매 섹션이 지역 필터를 안 따르는 실제 버그인지 테스트의 기대값이 낡은 것인지는 아직 확인하지 않았다.
 - **주식 도메인은 아직 수집기가 없다.** `/stock/allocation/`과 `/stock/performance/`는 배선이 끝났지만 `POST /stock/api/import-runs/`로 들어온 자료가 없으면 "수집 결과 없음" 화면만 보여준다. `STOCK_API_TOKEN`도 비어 있어 그 API는 지금 503을 돌려준다.

@@ -3,7 +3,7 @@
 {% block title %}금융자산 비중 · 리밸런싱{% endblock %}
 {% block heading %}자산분류별 비중{% endblock %}
 {% block observed %}
-  {% if view.as_of %}{{ view.as_of|date:"Y.m.d" }} 기준{% else %}수집된 자료 없음{% endif %}
+  {% if view.as_of %}<span data-as-of="{{ view.as_of|date:"Y-m-d" }}">{{ view.as_of|date:"Y.m.d" }} 기준</span>{% else %}수집된 자료 없음{% endif %}
 {% endblock %}
 
 {% block extra_style %}

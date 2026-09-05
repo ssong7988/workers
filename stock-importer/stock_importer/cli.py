@@ -147,6 +147,8 @@ def _print_probe(dump: dict) -> None:
     print(f"그리드로 고른 영역: {grid['handle']} ({grid['x']},{grid['y']}) "
           f"{grid['width']}x{grid['height']}  (후보 {len(dump['panes'])}개)")
     print(f"우클릭 메뉴 창: {dump['context_menu_windows'] or '없음'}")
+    if dump.get('context_menu_items'):
+        print(f"  메뉴 항목: {' | '.join(dump['context_menu_items'])}")
     print(f"클립보드: {dump['clipboard_characters']}자, {dump['clipboard_row_count']}행")
     if dump["clipboard_headers"]:
         print(f"  헤더: {' | '.join(dump['clipboard_headers'])}")

@@ -88,8 +88,16 @@ if REPORT_PUBLIC_URL:
     REPORT_STATS_URL = urlunsplit(
         (_public_parts.scheme, _public_parts.netloc, f"{STATISTICS_URL_PATH}/", "", "")
     )
+    STOCK_ALLOCATION_URL = urlunsplit(
+        (_public_parts.scheme, _public_parts.netloc, f"{ALLOCATION_URL_PATH}/", "", "")
+    )
+    STOCK_PERFORMANCE_URL = urlunsplit(
+        (_public_parts.scheme, _public_parts.netloc, f"{PERFORMANCE_URL_PATH}/", "", "")
+    )
 else:
     REPORT_STATS_URL = ""
+    STOCK_ALLOCATION_URL = ""
+    STOCK_PERFORMANCE_URL = ""
 
 # Airflow runs the schedule from WSL2 and drives this machine through interop.
 # Django only reads its status for the operations screen, so every value here

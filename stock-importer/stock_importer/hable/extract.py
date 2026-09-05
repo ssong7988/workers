@@ -24,7 +24,7 @@ user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
 CF_UNICODETEXT = 13
-VK_CONTROL, VK_C, VK_ESCAPE = 0x11, 0x43, 0x1B
+VK_CONTROL, VK_C, VK_ESCAPE, VK_MENU = 0x11, 0x43, 0x1B, 0x12
 KEYEVENTF_KEYUP = 0x0002
 MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
 MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP = 0x0008, 0x0010
@@ -117,26 +117,70 @@ def close_popup_menus() -> None:
     time.sleep(0.3)
 
 
+def read_menu_items(handle: int) -> list[str]:
+    """뜬 팝업 메뉴의 항목 이름들. 못 읽으면 빈 목록.
+
+    메뉴는 그려진 그림이 아니라 접근성 트리에 이름이 있다. 여기서 '복사'나
+    '엑셀 저장' 같은 항목이 보이면 그 경로를 쓸 수 있다.
+    """
+    try:
+        from pywinauto import Desktop
+
+        window = Desktop(backend="uia").window(handle=handle)
+        names = [
+            item.window_text().strip()
+            for item in window.descendants(control_type="MenuItem")
+        ]
+        return [name for name in names if name]
+    except Exception:
+        return []
+
+
 def point_in(screen_handle: int, pane: Pane, dx: int, dy: int) -> tuple[int, int]:
     """화면 창 기준 상대 좌표를 실제 화면 좌표로."""
     left, top, _width, _height = rect(screen_handle)
     return left + pane.x + dx, top + pane.y + dy
 
 
-def focus(main_handle: int, *, wait_seconds: float = 3.0) -> None:
-    """H-able을 맨 앞으로 올린다. 클릭은 z-order를 따라가므로 이게 먼저다."""
-    user32.SetForegroundWindow(main_handle)
+def focus(main_handle: int, *, wait_seconds: float = 2.0) -> bool:
+    """H-able을 맨 앞으로 올려 본다. 올렸으면 True.
+
+    실패해도 멈추지 않는다. 클릭이 어디로 가는지를 정하는 것은 포그라운드가
+    아니라 그 지점의 z-order이고, 그건 `guard_target()`이 실제로 확인한다.
+    Windows는 포그라운드 창을 가진 프로세스가 아니면 `SetForegroundWindow`를
+    자주 거절하므로(최소화된 콘솔에서 시작하면 특히), 여기서 실패를 이유로
+    수집을 포기하면 될 일도 안 된다.
+
+    스레드 입력을 잠깐 붙였다 떼는 것은 그 거절을 우회하는 표준 방법이다.
+    """
     process = process_id(main_handle)
+    # Windows는 최근에 입력을 받은 프로세스에만 포그라운드 전환을 허용한다.
+    # ALT를 살짝 눌렀다 떼면 그 조건을 만족한다 - 널리 쓰는 우회다.
+    user32.keybd_event(VK_MENU, 0, 0, 0)
+    user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.05)
+    user32.BringWindowToTop(main_handle)
+    user32.SetForegroundWindow(main_handle)
+
+    front = user32.GetForegroundWindow()
+    if front and process_id(front) != process:
+        our_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+        their_thread = user32.GetWindowThreadProcessId(main_handle, None)
+        if user32.AttachThreadInput(our_thread, their_thread, True):
+            try:
+                user32.BringWindowToTop(main_handle)
+                user32.SetForegroundWindow(main_handle)
+            finally:
+                user32.AttachThreadInput(our_thread, their_thread, False)
+
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
         front = user32.GetForegroundWindow()
         if front and process_id(front) == process:
             time.sleep(0.3)
-            return
+            return True
         time.sleep(0.2)
-    raise ExtractionError(
-        "H-able 창을 맨 앞으로 올리지 못했습니다. 다른 창이 화면을 잡고 있습니다."
-    )
+    return False
 
 
 def guard_target(x: int, y: int, process: int) -> None:

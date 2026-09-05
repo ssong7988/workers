@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,13 +25,14 @@ from ..parsing import (
     row_to_position,
 )
 from . import window
-from .export import export_grid
+from .export import click_toolbar, export_grid
 from .extract import (
     ExtractionError,
     capture,
     close_popup_menus,
     copy_grid,
     open_context_menu,
+    read_menu_items,
 )
 
 
@@ -42,6 +44,8 @@ class HableCollector:
     """열려 있는 1285 화면 하나를 읽는다."""
 
     SCREEN = window.ASSET_SCREEN
+    # 조회를 누른 뒤 표가 채워질 때까지. 계좌 다섯 개를 한 번에 부른다.
+    QUERY_WAIT_SECONDS = 4.0
 
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir
@@ -53,7 +57,11 @@ class HableCollector:
         window.ensure_input_allowed(main)
         if window.ensure_restored(main):
             print("H-able 창이 최소화돼 있어 복원했습니다.")
-        return main, window.find_screen(main, self.SCREEN)
+        screen = window.find_screen(main, self.SCREEN)
+        closed = window.clear_notice_screens(main, screen)
+        if closed:
+            print("로그인 안내 화면을 닫았습니다: " + ", ".join(closed))
+        return main, screen
 
     @staticmethod
     def _logged_out_notice(main: int) -> str:
@@ -86,6 +94,11 @@ class HableCollector:
         복사가 먼저다 - 파일이 안 남아 계좌번호와 잔고가 디스크에 떨어지지 않는다.
         이 그리드에서는 실측상 복사가 아무것도 내놓지 않아 대개 내보내기로 간다.
         """
+        # 화면에 남아 있는 값은 언제 조회한 것인지 알 수 없다. 오늘 잔고를
+        # 읽으려면 우리가 직접 조회를 눌러야 한다.
+        click_toolbar(main, screen, grid, "query")
+        time.sleep(self.QUERY_WAIT_SECONDS)
+
         clipboard = copy_grid(main, screen, grid)
         if clipboard.strip():
             headers, rows = parse_delimited_table(clipboard)
@@ -117,6 +130,8 @@ class HableCollector:
         found = window.panes(screen)
         grid = self._grid_pane(screen)
 
+        click_toolbar(main, screen, grid, "query")
+        time.sleep(self.QUERY_WAIT_SECONDS)
         shot = capture(main, screen, self.data_dir / "hable-1285.png")
         clipboard = copy_grid(main, screen, grid)
         menus = open_context_menu(main, screen, grid)
@@ -154,6 +169,7 @@ class HableCollector:
             "grid_pane": {"handle": hex(grid.handle), "x": grid.x, "y": grid.y,
                           "width": grid.width, "height": grid.height},
             "context_menu_windows": [hex(handle) for handle in menus],
+            "context_menu_items": [item for handle in menus for item in read_menu_items(handle)],
             "clipboard_characters": len(clipboard),
             "clipboard_headers": headers,
             "clipboard_columns": map_columns(headers),
