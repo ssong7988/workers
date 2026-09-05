@@ -249,7 +249,7 @@ OAuth와 토큰 수명주기, 함수별 메시지 계약, 운영 장애 대응�
 | 금융자산 금액·비율 표기 | `portfolio/display.py` | `portfolio/tests/test_allocation.py` |
 | 금융자산 화면 | `report/stock_views.py`, `templates/report/stock_*.html` | `portfolio/tests/test_views.py` |
 | 계좌번호로 계좌 찾기 | `portfolio/importing.py`의 `_resolve_account` | `portfolio/tests/test_account_resolution.py` |
-| H-able 창·화면 찾기 | `stock-importer/stock_importer/hable/window.py` | 창이 필요해 단위 테스트 없음. `hable-probe`로 확인 |
+| H-able 창·화면 찾기, 권한(UIPI) 사전 확인 | `stock-importer/stock_importer/hable/window.py` | 창이 필요해 단위 테스트 없음. `hable-probe`로 확인 |
 | H-able 표 꺼내기(복사·엑셀 내보내기) | `stock-importer/stock_importer/hable/extract.py`, `hable/export.py` | 같음 |
 | 재워 둔 웹 경로 | `stock-importer/stock_importer/web/` | 쓰지 않는다. 6시간 자동 로그아웃 |
 | 화면 글자 → 서버 값 변환 | `stock-importer/stock_importer/parsing.py` | `stock-importer/tests/test_parsing.py`, `tests/test_hable_table.py` |

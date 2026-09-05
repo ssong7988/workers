@@ -50,6 +50,7 @@ class HableCollector:
 
     def _open_screen(self) -> tuple[int, int]:
         main = window.main_window()
+        window.ensure_input_allowed(main)
         if window.ensure_restored(main):
             print("H-able 창이 최소화돼 있어 복원했습니다.")
         return main, window.find_screen(main, self.SCREEN)

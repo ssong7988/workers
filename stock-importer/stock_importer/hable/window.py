@@ -14,9 +14,12 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes as w
 import time
+from ctypes import POINTER, byref, c_ubyte, c_void_p
 from dataclasses import dataclass
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+advapi32 = ctypes.windll.advapi32
 _ENUM_PROC = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
 
 user32.PostMessageW.argtypes = [w.HWND, ctypes.c_uint, w.WPARAM, w.LPARAM]
@@ -172,3 +175,87 @@ def dialog_labels(handle: int) -> list[str]:
         if text:
             labels.append(text)
     return labels
+
+
+# ------------------------------------------------------------------ 권한
+
+# Windows UIPI는 **낮은 권한 프로세스가 높은 권한 창에 보내는 입력과 메시지를
+# 전부 버린다.** 오류도 나지 않고 그냥 아무 일도 일어나지 않는다. H-able은
+# 관리자 권한으로 도는 경우가 있어서, 이걸 먼저 확인하지 않으면 클릭이 안 먹는
+# 것을 좌표가 틀린 것으로 오해하게 된다 - 실제로 그렇게 한참을 헤맸다.
+#
+# 읽기는 막히지 않는다. 창 제목(WM_GETTEXT)과 위치·구조는 그대로 보인다.
+TOKEN_QUERY = 0x0008
+TOKEN_INTEGRITY_LEVEL = 25
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+INTEGRITY_NAMES = {
+    0x0000: "Untrusted",
+    0x1000: "Low",
+    0x2000: "Medium",
+    0x2100: "Medium+",
+    0x3000: "High(관리자 권한)",
+    0x4000: "System",
+}
+
+kernel32.GetCurrentProcess.restype = w.HANDLE
+kernel32.OpenProcess.restype = w.HANDLE
+kernel32.OpenProcess.argtypes = [w.DWORD, w.BOOL, w.DWORD]
+advapi32.OpenProcessToken.argtypes = [w.HANDLE, w.DWORD, POINTER(w.HANDLE)]
+advapi32.GetTokenInformation.argtypes = [
+    w.HANDLE, ctypes.c_int, c_void_p, w.DWORD, POINTER(w.DWORD)
+]
+advapi32.GetSidSubAuthorityCount.restype = POINTER(c_ubyte)
+advapi32.GetSidSubAuthorityCount.argtypes = [c_void_p]
+advapi32.GetSidSubAuthority.restype = POINTER(w.DWORD)
+advapi32.GetSidSubAuthority.argtypes = [c_void_p, w.DWORD]
+
+
+class _SidAndAttributes(ctypes.Structure):
+    _fields_ = [("Sid", c_void_p), ("Attributes", w.DWORD)]
+
+
+def _integrity_of(process_handle: int) -> int | None:
+    token = w.HANDLE()
+    if not advapi32.OpenProcessToken(process_handle, TOKEN_QUERY, byref(token)):
+        return None
+    size = w.DWORD()
+    advapi32.GetTokenInformation(token, TOKEN_INTEGRITY_LEVEL, None, 0, byref(size))
+    buffer = ctypes.create_string_buffer(size.value)
+    if not advapi32.GetTokenInformation(
+        token, TOKEN_INTEGRITY_LEVEL, buffer, size, byref(size)
+    ):
+        return None
+    label = ctypes.cast(buffer, POINTER(_SidAndAttributes)).contents
+    count = advapi32.GetSidSubAuthorityCount(label.Sid).contents.value
+    return advapi32.GetSidSubAuthority(label.Sid, count - 1).contents.value
+
+
+def integrity_levels(main: int) -> tuple[int | None, int | None]:
+    """(우리, H-able)의 무결성 수준. 못 읽으면 None."""
+    ours = _integrity_of(kernel32.GetCurrentProcess())
+    handle = kernel32.OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION, False, process_id(main)
+    )
+    theirs = _integrity_of(handle) if handle else None
+    return ours, theirs
+
+
+def ensure_input_allowed(main: int) -> None:
+    """우리가 H-able에 입력을 보낼 수 있는지 먼저 확인한다.
+
+    보낼 수 없으면 클릭도 키보드도 창 메시지도 조용히 사라진다. 그 상태로
+    진행하면 원인을 엉뚱한 데서 찾게 되므로 여기서 멈춘다.
+    """
+    ours, theirs = integrity_levels(main)
+    if ours is None or theirs is None or ours >= theirs:
+        return
+    raise HableError(
+        "H-able이 우리보다 높은 권한으로 실행 중이라 클릭과 키 입력이 차단됩니다"
+        f"(H-able {INTEGRITY_NAMES.get(theirs, hex(theirs))}, "
+        f"수집기 {INTEGRITY_NAMES.get(ours, hex(ours))}).\n"
+        "Windows UIPI는 낮은 권한에서 높은 권한 창으로 가는 입력을 오류 없이 버립니다.\n"
+        "둘 중 하나로 맞추세요:\n"
+        "  - H-able을 관리자 권한 없이 실행한다(권장 - 수집기가 계속 일반 권한으로 돈다).\n"
+        "    hablerun.exe 속성 → 호환성 → '관리자 권한으로 이 프로그램 실행'을 끈다.\n"
+        "  - 또는 이 수집기를 관리자 권한 콘솔에서 실행한다."
+    )
