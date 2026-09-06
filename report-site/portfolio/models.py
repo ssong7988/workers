@@ -318,6 +318,14 @@ class CashFlow(models.Model):
     )
     flow_type = models.CharField("구분", max_length=20, choices=FLOW_TYPES)
     amount = models.DecimalField("금액", max_digits=18, decimal_places=2)
+    # 매매와 입출고에만 있다. 실현손익을 평균단가로 계산하려면 수량과 단가가
+    # 필요한데, 금액만으로는 몇 주를 얼마에 샀는지 알 수 없다.
+    quantity = models.DecimalField(
+        "수량", max_digits=20, decimal_places=8, null=True, blank=True
+    )
+    unit_price = models.DecimalField(
+        "단가", max_digits=18, decimal_places=4, null=True, blank=True
+    )
     currency = models.CharField("통화", max_length=3, default="KRW")
     amount_krw = models.DecimalField("원화금액", max_digits=18, decimal_places=2)
     is_external = models.BooleanField("외부 현금흐름", default=False)

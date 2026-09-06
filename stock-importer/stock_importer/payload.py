@@ -46,6 +46,60 @@ def rows_hash(account_number: str, rows: list[dict[str, Any]]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# 서버가 cash_flows 한 줄에서 받는 열쇠들.
+FLOW_KEYS = (
+    "occurred_on",
+    "flow_type",
+    "amount",
+    "currency",
+    "amount_krw",
+    "code",
+    "name",
+    "quantity",
+    "unit_price",
+    "memo",
+    "external_key",
+)
+
+
+def flow_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """서버가 아는 열쇠만 남기고 날짜·키 순으로 정렬한다."""
+    trimmed = [{key: row[key] for key in FLOW_KEYS if key in row} for row in rows]
+    return sorted(trimmed, key=lambda row: (row["occurred_on"], row["external_key"]))
+
+
+def build_trade_payload(
+    account_number: str,
+    as_of: str,
+    flows: list[dict[str, Any]],
+    *,
+    source_name: str = "",
+) -> dict[str, Any]:
+    """거래내역 한 계좌치.
+
+    `as_of`는 이 자료를 받은 날이다. 개별 행은 각자 `occurred_on`을 갖고 있고,
+    서버의 완전 수집일 판정은 잔고(`balance`)만 보므로 이 자료가 그 판정을
+    흔들지 않는다.
+    """
+    rows = flow_rows(flows)
+    canonical = json.dumps(
+        {"account_number": account_number, "cash_flows": rows},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return {
+        "account_number": account_number,
+        "as_of": as_of,
+        "document_type": "trade",
+        "status": "success",
+        "file_hash": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        "source_name": source_name[:200],
+        "positions": [],
+        "cash_flows": rows,
+    }
+
+
 def build_import_payload(
     account_number: str,
     as_of: str,

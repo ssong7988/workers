@@ -165,6 +165,8 @@ def _cash_flow_values(
         "instrument": instrument,
         "flow_type": flow_type,
         "amount": amount,
+        "quantity": _as_decimal(row.get("quantity"), "quantity", allow_none=True),
+        "unit_price": _as_decimal(row.get("unit_price"), "unit_price", allow_none=True),
         "currency": currency,
         "amount_krw": amount_krw,
         "is_external": is_external,

@@ -28,14 +28,14 @@ from .hable.collector import HableCollector
 from .hable.extract import ExtractionError
 from .hable.window import HableError
 from .parsing import RowError
-from .payload import build_import_payload
+from .payload import build_import_payload, build_trade_payload
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_DIR / "data"
 LOCK_PATH = DATA_DIR / "run.lock"
 
 
-def _report_trades(snapshot: dict) -> None:
+def _report_trades(snapshot: dict) -> dict[str, list[dict]]:
     """원본을 현금흐름으로 바꿔 보고, 모르는 거래종류는 한 번에 모아 보여준다.
 
     화면을 다시 만지지 않으므로 여기서 실패해도 원본은 이미 저장돼 있다.
@@ -60,6 +60,32 @@ def _report_trades(snapshot: dict) -> None:
         print("`stock_importer/trades.py`의 FLOW_KINDS에 적어 주세요.")
     total = sum(len(rows) for rows in flows.values())
     print(f"현금흐름 {total}건 (계좌 {len(flows)}/{len(snapshot['accounts'])}개)")
+    return flows
+
+
+def _send_trades(
+    flows: dict[str, list[dict]], snapshot: dict, client: StockApiClient
+) -> None:
+    """계좌마다 거래내역을 서버로 넘긴다.
+
+    같은 기간을 다시 보내도 서버가 `external_key`로 같은 행을 알아보므로
+    안전하다. 그래서 겹치는 구간을 걱정하지 않고 돌릴 수 있다.
+    """
+    if not flows:
+        print("보낼 것이 없습니다.")
+        return
+    _check_api(client)
+    as_of = snapshot["until"]
+    for account, rows in flows.items():
+        if not rows:
+            continue
+        payload = build_trade_payload(
+            account, as_of, rows, source_name=snapshot.get("source_name", "")
+        )
+        result = client.post_import_run(payload)
+        run = result.get("import_run", result)
+        state = run.get("status") or result.get("result") or "저장"
+        print(f"  {account} → {state}: 현금흐름 {run.get('cash_flows', len(rows))}건")
 
 
 def _trade_period(since: str | None, until: str | None) -> tuple[str, str]:
@@ -168,6 +194,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     trades.add_argument("--since", default=None, help="시작일 YYYY-MM-DD (기본값: 1년 전)")
     trades.add_argument("--until", default=None, help="종료일 YYYY-MM-DD (기본값: 오늘)")
+    trades.add_argument(
+        "--send", action="store_true", help="읽은 현금흐름을 리포트 서버로 보낸다"
+    )
+    trades.add_argument(
+        "--from-file",
+        action="store_true",
+        help="화면을 만지지 않고 지난번 원본(hable-trades-raw.json)으로 다시 처리한다",
+    )
     commands.add_parser("hable-import", help="H-able [1285]을 읽어 리포트 서버로 전달")
     commands.add_parser("web-browser", help="[재워 둠] KB 전용 Edge를 mable 주소로 띄우기")
     commands.add_parser("web-probe", help="[재워 둠] mable 화면 구조 덤프")
@@ -315,13 +349,20 @@ def main(argv: list[str] | None = None) -> None:
             return
 
         if args.command == "hable-trades":
-            since, until = _trade_period(args.since, args.until)
-            print(f"조회기간 {since} ~ {until}")
-            with run_lock():
-                snapshot = collector.collect_trades(since, until)
-            saved = _write_json("hable-trades-raw.json", snapshot)
-            print(f"원본 저장: {saved}")
-            _report_trades(snapshot)
+            if args.from_file:
+                snapshot = json.loads(
+                    (DATA_DIR / "hable-trades-raw.json").read_text(encoding="utf-8")
+                )
+                print(f"지난번 원본으로 처리합니다: {snapshot['since']} ~ {snapshot['until']}")
+            else:
+                since, until = _trade_period(args.since, args.until)
+                print(f"조회기간 {since} ~ {until}")
+                with run_lock():
+                    snapshot = collector.collect_trades(since, until)
+                print(f"원본 저장: {_write_json('hable-trades-raw.json', snapshot)}")
+            flows = _report_trades(snapshot)
+            if args.send:
+                _send_trades(flows, snapshot, StockApiClient(args.api_base))
             return
 
         if args.command == "hable-collect":
