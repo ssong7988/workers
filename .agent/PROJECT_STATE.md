@@ -7,6 +7,27 @@
 - 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.docs/ARCHITECTURE.md`에 정리되어 있다. `.agent/`에는 최신 운영 상태인 이 파일만 두고 장기 상세 문서는 `.docs/`에서 관리한다.
 - `real-estate-finder/`는 네이버 부동산 매물을 수집해 `report-site` API로 넘기기만 한다. 조건 판정·상태·표현·전송 코드는 없다.
 - **네이버 자동 로그인(2026-09-06, 실제 확인).** 실행 중인 Edge를 네이버에서 로그아웃시킨 뒤 `check-login`을 돌려 자동 로그인 → 상태 확인까지 통과하는 것을 확인했다. 로그아웃된 브라우저를 만나면 수집기가 네이버 로그인 화면에 아이디·비밀번호를 입력해 직접 로그인한다. 자격 증명은 `real_estate_finder/credentials.py`가 루트 `.env`(또는 `real-estate-finder/.env`)의 `NAVER_ID`/`NAVER_PASSWORD`에서만 읽고, 둘 중 하나라도 없으면 예전처럼 경고만 한다. 값은 로그·문서·예외 어디에도 남기지 않는다(`NaverCredentials.__repr__`까지 가린다). CAPTCHA·인증번호·비밀번호 불일치 화면을 만나면 **재시도하지 않고 중단한다** — 우회하지 않는다는 기존 원칙 그대로다.
+- **세션 유지의 상한을 측정했다(2026-09-06).** 07:41 로그인 뒤 08:06·12:00 스캔이 돈 상태에서
+  12:55에 쿠키를 읽었다. `NID_SES` 만료는 10-06 **12:00**(마지막 접속 +30일)으로 **갱신되고**,
+  `NID_AUT`는 10-06 **07:41**(로그인 시각 +30일)에 **고정**이다. 즉 매시 헬스체크의 접속이
+  세션 쿠키는 계속 살리지만 **인증 쿠키의 30일 상한은 무엇을 눌러도 늘어나지 않는다.**
+  네이버는 "영원히 로그인 유지"가 불가능하고 30일에 한 번은 재로그인이 필요하다 — 그래서
+  자동 로그인을 없앨 수 없다. 네이버 쪽에 접속을 더 넣어도 얻을 것이 없어 추가하지 않았다.
+- **H-able 세션 유지(2026-09-06).** H-able은 반대다. 로그인에 인증서가 필요해 자동화 대상이
+  아니고, 한 번 풀리면 사람이 로그인해야 한다. 그래서 풀리기 전에 막는다 — `pre_scan_health_job`이
+  매시 `hable-keepalive`로 [1285]의 조회를 한 번 누른다(표는 읽지도 저장하지도 않는다).
+  **사람이 PC를 쓰는 중이면 건너뛴다**(무입력 3분 기준, `GetLastInputInfo`). 창을 맨 위로 올려
+  클릭하므로 작업 중에 튀어오르면 방해가 되기 때문이다. 다만 마지막으로 깨운 지 30분이 지나면
+  사람이 쓰는 중이어도 누른다 — H-able의 유휴 판정이 입력이 아니라 서버 요청 기준일 수 있고,
+  그러면 사람이 PC를 쓰는 것과 세션이 살아 있는 것은 별개다. 최소화돼 있던 창은 끝나고 다시
+  내려놓는다. 이 작업은 **어떤 경우에도 실행을 실패시키지 않는다** — H-able을 꺼 둔 날 매시
+  카카오톡이 오면 곤란하다.
+- **수집 전 점검(2026-09-06).** `hable_ready_job`이 평일 18:00(수집 예정 30분 전)에
+  `hable-status`로 같은 조회를 누르되 유휴 여부를 따지지 않고, 꺼짐·로그아웃·화면 없음·계좌
+  비밀번호 요구면 **실패한다.** 실패해야 기존 `alert_on_failure`가 카카오톡을 보낸다.
+  그 과정에서 `run-stock.ps1`이 **작업의 종료 코드를 넘기지 않던 것**을 고쳤다 — 그전에는 항상
+  0으로 끝나 실패를 알릴 방법이 없었다. 18:30 수집 잡 자체는 아직 없고, 이 점검이 자리를 먼저
+  잡아 둔다.
 - **세션이 잘 끊기지 않게 된 이유(2026-09-06).** 자동 로그인이 `로그인 상태 유지`(`#loginStay`)를 켜다. 이것이 꺼져 있으면 `NID_AUT`/`NID_SES`가 만료 없는 **세션 쿠키**라 Edge를 닫는 순간 로그아웃된다. 켜고 로그인한 뒤 실제 쿠키를 확인하니 만료가 **29일 뒤**로 잡혔다. IP보안(`#switchIP`)은 이 화면에서 이미 꺼져 있었고(최초 조사 때 입력의 `value="on"`을 체크 상태로 오독해 켜져 있다고 적었던 것을 바로잡는다), 기본값이 바뀔 때를 대비해 켜 있으면 끄는 안전장치만 두었다.
 - `report-site/portfolio/`가 금융자산 도메인을 소유한다 — 계좌·종목·자산분류·목표 비중·국민연금 기준, 수집 자료 저장, 비중·리밸런싱, 현금흐름 보정 수익률과 MDD. 부동산 `properties/`와는 모델도 URL도 계산도 섞이지 않고 DB와 admin만 공유한다.
 - `report-site/properties/`가 카카오 메시지 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. finder 쪽 중복 코드는 8단계에서 삭제했다.
@@ -238,6 +259,11 @@ Dagster도 같은 태스크를 부르면 된다. PowerShell 스크립트의 메�
 - **목표 비중(`PortfolioTarget`)이 0행이다.** 그래서 리밸런싱 제안이 나오지 않고 digest에도
   그 줄이 없다. 원하는 목표 배분은 사람이 정할 값이라 admin에서 입력해야 한다.
 - 성과·MDD는 이틀째부터 의미가 생긴다. 지금은 지수 1.00에서 시작한 첫날뿐이다.
+- H-able **환경설정 → 보안설정**에 자동 로그아웃 시간 항목이 있는지 아직 안 봤다. 끌 수 있거나
+  최대로 늘릴 수 있으면 그게 매시 창을 건드리는 것보다 낫다. 확인한 뒤 `MIN_IDLE_SECONDS`(180)와
+  `MAX_DEFER_SECONDS`(1800)를 실제 타임아웃에 맞춘다.
+- H-able 자동 로그아웃이 **몇 분 만에** 걸리는지 모른다. 며칠 켜 두고 실제로 유지되는지 봐야
+  한다. 이것만은 시간이 지나야 안다.
 - H-able을 완전히 재시작한 뒤 계좌 비밀번호 저장이 유지되고 자동 조회가 계속 되는지 확인한다.
 - `[1285]` 화면 자체를 자동으로 여는 기능은 아직 없다. 로그인 후 사람이 화면을 열어 둬야 한다.
 - 주의: mable 웹과 H-able은 동시에 로그인할 수 없다. 재워 둔 웹 수집기를 진단용으로
@@ -533,18 +559,20 @@ Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Djan
 
 **2026-09-04에 op 기반에서 asset 기반으로 바꿨다.** 이전에는 `property_pipeline_job` 하나가 `ensure_site → scan_step → report_step`을 항상 전부 실행하고, 세 스케줄이 run config로 뒤 두 단계를 no-op으로 만들었다. 지금은 asset `naver_listings → morning_report`가 있고, 각 스케줄이 어디까지 실행할지 고른다. `naver_listings`는 `ensure_site_op → run_scan_op` 두 op을 품은 `graph_asset`이다.
 
-등록 잡은 다섯 개다. asset job 둘(`scan_job`, `morning_report_job`)과 op job 셋(`server_check_job`, `pre_scan_health_job`, `restart_report_site_job`). `server_check_job`과 `pre_scan_health_job`은 `naver_listings` 안에서 쓰는 것과 **같은 `ensure_site_op`을 재사용**하므로 서버 확인 로직이 갈라지지 않는다. `pre_scan_health_job`은 06:00에 서버 확인 후 비대기 `check-login`으로 Edge/CDP·네이버 로그인을 확인한다. 로그아웃 상태면 **`.env`의 `NAVER_ID`/`NAVER_PASSWORD`로 직접 로그인을 시도하고**, 그래도 실패하면 1분 뒤 재시도 후 기존 failure hook으로 카카오 경고를 보낸다. `restart_report_site_job`(2026-09-04 추가)은 스케줄 없는 잡이며 report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
+등록 잡은 여섯 개다. asset job 둘(`scan_job`, `morning_report_job`)과 op job 넷(`server_check_job`, `pre_scan_health_job`, `hable_ready_job`, `restart_report_site_job`). `server_check_job`과 `pre_scan_health_job`은 `naver_listings` 안에서 쓰는 것과 **같은 `ensure_site_op`을 재사용**하므로 서버 확인 로직이 갈라지지 않는다. `pre_scan_health_job`은 06:00에 서버 확인 후 비대기 `check-login`으로 Edge/CDP·네이버 로그인을 확인한다. 로그아웃 상태면 **`.env`의 `NAVER_ID`/`NAVER_PASSWORD`로 직접 로그인을 시도하고**, 그래도 실패하면 1분 뒤 재시도 후 기존 failure hook으로 카카오 경고를 보낸다. `restart_report_site_job`(2026-09-04 추가)은 스케줄 없는 잡이며 report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
 
 **업무 job은 `.bat`/업무용 `.ps1`을 실행하지 않는다.** `run_scan_op`은 수집기 전용 venv의 `python -u -m real_estate_finder run-scan`을, `morning_report`는 finder venv로 Django `manage.py send_digest`를 직접 실행한다. Dagster venv에 Playwright/Django를 합치거나 앱 모듈을 직접 import하지 않는 이유는 의존성 충돌과 장시간 브라우저 작업의 프로세스 격리를 유지하기 위해서다. Windows 장기 프로세스 수명주기(`ensure-site.ps1`, `restart-site.ps1`)에는 PowerShell이 적합하므로 그대로 둔다. `run-scan.ps1`은 Python workflow를 한 줄 호출하는 수동 호환 wrapper로 축소했다.
 
 전환으로 없어진 것: `scan_step.mode="skip"`과 `report_step.enabled`. 남은 설정 손잡이는 `run_scan_op.mode`(`run` | `ensure_fresh`) 하나뿐이다. graph_asset이라 run config 경로가 한 겹 깊다 — `ops.naver_listings.ops.run_scan_op.config.mode`. 새로 생긴 것: Catalog의 lineage 그래프, 그리고 수집할 때마다 그 `Scan` 행의 수집 수·조건 충족 수·급매 수·제외 수가 머티리얼라이즈 메타데이터로 붙는다(`manage.py scan_status --json`을 새로 추가해 되읽는다). 잡 이름이 스케줄별로 갈라져서 실행 이력에서 어떤 성격의 런인지도 이제 잡 이름만으로 구분된다.
 
 1. `server_only_schedule` — 6·7·8·12·17시를 제외한 매시 정각. **2026-09-06부터 `pre_scan_health_job`을 실행한다**(이전엔 `server_check_job`). 서버만 보던 시간대에도 `check-login`을 돌려, 끊긴 네이버 세션을 최대 1시간 안에 자동 로그인으로 복구한다. 빠진 7·8·12·17시는 수집·리포트 경로가 자체적으로 로그인을 확인하고 필요하면 로그인한다. `server_check_job`은 수동 실행용으로 남아 있다. 설정 값은 여전히 없다.
-2. `pre_scan_health_schedule` — `0 6 * * *`. 서버 확인 후 `check_naver_login_op`이 임시 탭에서 네이버 로그인을 확인하고, 끚겨 있으면 자신이 로그인한다(아래 ‘네이버 자동 로그인’). 사람의 입력을 기다리거나 수집하지는 않는다. 1분 뒤 한 번 재시도하고 실패하면 07시 수집 전에 카카오 경고를 보낸다.
-3. `scan_schedule` — `0 7,12,17 * * *`. `scan_job`(=`naver_listings`, `mode: run`). 신규 급매 또는 `notify_new` 일반 신규의 카카오는 `record_scan()`이 처리한다.
-4. `morning_report_schedule` — `0 8 * * *`. `morning_report_job`(=`naver_listings → morning_report`, `mode: ensure_fresh`). DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다. 수집을 생략해도 `naver_listings`는 머티리얼라이즈된다 — "매물이 최신이다"라는 결과는 같기 때문이다.
-5. `alert_on_failure` — 다섯 잡 모두에 걸려 있다. 일반 작업은 5분 뒤, 로그인 사전 점검은 1분 뒤 한 번 재시도한 다음 `manage.py send_alert`를 부른다.
-6. `restart_report_site_job` — `report-site/restart-site.ps1`을 실행한다. 8000번 포트를 듣는 `python` 프로세스를 찾아 종료(다른 이름의 프로세스면 건너뛰고 경고만 남긴다)하고, 포트가 풀릴 때까지 최대 20초 기다린 뒤 `run-site.ps1`을 hidden으로 새로 띄우고 `check-api`로 최대 60초 재확인한다. `real-estate-finder`는 스캔·리포트 전송이 매번 새 subprocess로 돌기 때문에 이런 재시작 잡이 필요 없다.
+2. `pre_scan_health_schedule` — `0 6 * * *`. 서버 확인 후 `check_naver_login_op`이 임시 탭에서 네이버 로그인을 확인하고, 끚겨 있으면 자신이 로그인한다(아래 ‘네이버 자동 로그인’). 사람의 입력을 기다리거나 수집하지는 않는다. 그 뒤 `keep_hable_awake_op`이 H-able 세션을 깨운다(실패하지 않는다). 1분 뒤 한 번 재시도하고 실패하면 07시 수집 전에 카카오 경고를 보낸다.
+3. `hable_ready_schedule` — `0 18 * * 1-5`. 평일 금융자산 수집 30분 전에 H-able이 켜져 있고
+   로그인돼 있는지 확인하고, 아니면 실패시켜 카카오 경고를 보낸다.
+4. `scan_schedule` — `0 7,12,17 * * *`. `scan_job`(=`naver_listings`, `mode: run`). 신규 급매 또는 `notify_new` 일반 신규의 카카오는 `record_scan()`이 처리한다.
+5. `morning_report_schedule` — `0 8 * * *`. `morning_report_job`(=`naver_listings → morning_report`, `mode: ensure_fresh`). DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다. 수집을 생략해도 `naver_listings`는 머티리얼라이즈된다 — "매물이 최신이다"라는 결과는 같기 때문이다.
+6. `alert_on_failure` — 여섯 잡 모두에 걸려 있다. 일반 작업은 5분 뒤, 로그인 사전 점검은 1분 뒤 한 번 재시도한 다음 `manage.py send_alert`를 부른다.
+7. `restart_report_site_job` — `report-site/restart-site.ps1`을 실행한다. 8000번 포트를 듣는 `python` 프로세스를 찾아 종료(다른 이름의 프로세스면 건너뛰고 경고만 남긴다)하고, 포트가 풀릴 때까지 최대 20초 기다린 뒤 `run-site.ps1`을 hidden으로 새로 띄우고 `check-api`로 최대 60초 재확인한다. `real-estate-finder`는 스캔·리포트 전송이 매번 새 subprocess로 돌기 때문에 이런 재시작 잡이 필요 없다.
 
 **Dagster 자신(`definitions.py`)의 재시작은 job으로 만들 수 없다** — 자기 자신을 실행 중인 프로세스를 자기 job이 끄면 그 실행 자체가 중단된다. 대신 독립 스크립트 `dagster_project/restart-dagster.bat`(→ `restart-dagster.ps1`)을 추가했다(2026-09-04). 3000번 포트의 기존 `python` 프로세스를 종료 → 포트 해제 대기(최대 20초) → `run-dagster.ps1`을 hidden으로 새로 띄움 → GraphQL(`{__typename}`)로 최대 60초 재확인, 구조는 `restart-site.ps1`과 동일하다. `run-dagster.bat`도 기존 프로세스를 자동으로 끄지 않으므로(포트 3000이 이미 쓰이면 새 프로세스가 바인딩 실패), `definitions.py`를 고친 뒤에는 이 스크립트로 직접 재시작해야 한다.
 
