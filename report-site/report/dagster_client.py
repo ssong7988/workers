@@ -79,6 +79,13 @@ JOBS = (
         ),
     },
     {
+        "name": "stock_daily_job",
+        "purpose": "금융자산 잔고·거래내역 수집과 시세 연동 (op job)",
+        "schedules": (
+            {"description": "H-able 수집 → 시세 연동", "cron": "평일 18시 30분"},
+        ),
+    },
+    {
         "name": "scan_job",
         "purpose": "서버 확인 후 매물을 수집한다 (asset: naver_listings)",
         "schedules": (

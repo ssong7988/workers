@@ -11,6 +11,7 @@ from decimal import Decimal
 from django.contrib import admin, messages
 
 from .models import (
+    ManualHolding,
     AssetClass,
     BenchmarkAllocation,
     CashFlow,
@@ -59,6 +60,20 @@ class InstrumentAdmin(admin.ModelAdmin):
     list_editable = ("asset_class", "benchmark_category")
     list_filter = ("asset_class", "currency", "is_cash")
     search_fields = ("code", "name")
+
+
+@admin.register(ManualHolding)
+class ManualHoldingAdmin(admin.ModelAdmin):
+    """코인처럼 수집기가 닿지 않는 자산의 수량을 여기서 넣는다.
+
+    가격은 `manage.py update_manual_positions`가 매일 시세에서 가져온다.
+    종목의 `시세 출처`가 비어 있으면 그 종목은 건너뛴다.
+    """
+
+    list_display = ("account", "instrument", "quantity", "active", "updated_at")
+    list_filter = ("active", "account")
+    search_fields = ("instrument__name", "instrument__code", "note")
+    autocomplete_fields = ("instrument",)
 
 
 @admin.register(PortfolioTarget)

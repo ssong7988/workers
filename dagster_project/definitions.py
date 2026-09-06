@@ -281,6 +281,32 @@ def check_hable_ready_op(context) -> None:
         )
 
 
+@dg.op(retry_policy=RETRY_POLICY)
+def collect_stock_op(context) -> None:
+    """H-able에서 잔고와 최근 거래내역을 읽어 리포트 서버에 넣는다.
+
+    성과 화면의 기간별 수익률·낙폭·자산분류별 수익률은 **하루에 한 행씩 쌓이는
+    자료**로 그린다. 이 잡이 없으면 그 화면은 영원히 첫날에 머문다.
+
+    H-able은 사람이 로그인해 둬야 한다. 30분 전 `hable_ready_job`이 그것을 미리
+    확인해 알린다.
+    """
+    result = _run_stock("hable-import", timeout=1800)
+    context.log.info((result.stdout or "").strip() or "출력이 없습니다.")
+    if result.returncode != 0:
+        raise RuntimeError(f"금융자산 수집 실패 (종료 코드 {result.returncode})")
+
+
+@dg.op(ins={"start": dg.In(dg.Nothing)})
+def update_manual_positions_op(context) -> None:
+    """직접 입력한 보유(코인 등)에 오늘 시세를 붙인다.
+
+    KB 밖의 자산이라 H-able에는 없다. 수량은 admin에, 가격은 공개 시세에서 온다.
+    """
+    result = _run_manage("update_manual_positions", timeout=120, capture=True)
+    context.log.info((result.stdout or "").strip() or "출력이 없습니다.")
+
+
 @dg.op(
     retry_policy=RETRY_POLICY,
     ins={"start": dg.In(dg.Nothing)},
@@ -432,6 +458,19 @@ def hable_ready_job() -> None:
     check_hable_ready_op()
 
 
+@dg.job(
+    hooks={alert_on_failure},
+    description="평일 장 마감 뒤 금융자산 잔고·거래내역을 수집하고 시세를 붙인다.",
+)
+def stock_daily_job() -> None:
+    """수집이 먼저, 시세가 나중이다.
+
+    시세 붙이기는 수집이 실패해도 의미가 있으므로 뒤에 두되 같은 잡에 둔다 -
+    둘 다 그날의 잔고를 만드는 일이고, 한 화면이 둘을 함께 읽는다.
+    """
+    update_manual_positions_op(start=collect_stock_op())
+
+
 @dg.job(hooks={alert_on_failure})
 def restart_report_site_job() -> None:
     """report-site 코드를 바꾼 뒤 수동으로 실행하는 재시작 전용 job.
@@ -474,6 +513,15 @@ scan_schedule = dg.ScheduleDefinition(
     default_status=dg.DefaultScheduleStatus.RUNNING,
     run_config=_scan_config("run"),
 )
+stock_daily_schedule = dg.ScheduleDefinition(
+    name="stock_daily_schedule",
+    job=stock_daily_job,
+    # 평일 18:30. 장이 끝나고 잔고가 확정된 뒤다. 30분 전 `hable_ready_job`이
+    # H-able이 켜져 있는지 확인해 알린다.
+    cron_schedule="30 18 * * 1-5",
+    execution_timezone="Asia/Seoul",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+)
 hable_ready_schedule = dg.ScheduleDefinition(
     name="hable_ready_schedule",
     job=hable_ready_job,
@@ -499,6 +547,7 @@ defs = dg.Definitions(
         server_check_job,
         pre_scan_health_job,
         hable_ready_job,
+        stock_daily_job,
         scan_job,
         morning_report_job,
         restart_report_site_job,
@@ -507,6 +556,7 @@ defs = dg.Definitions(
         server_only_schedule,
         pre_scan_health_schedule,
         hable_ready_schedule,
+        stock_daily_schedule,
         scan_schedule,
         morning_report_schedule,
     ],

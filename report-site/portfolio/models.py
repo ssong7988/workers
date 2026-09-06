@@ -163,6 +163,9 @@ class Instrument(models.Model):
         choices=BENCHMARK_CATEGORIES,
     )
     is_cash = models.BooleanField("현금성", default=False)
+    # 수집기가 닿지 않는 자산의 시세를 어디서 가져올지. `업체:심볼` 형식이며
+    # 지금은 `upbit:KRW-BTC`처럼 업비트만 안다. 비어 있으면 시세를 찾지 않는다.
+    price_source = models.CharField("시세 출처", max_length=64, blank=True)
     created_at = models.DateTimeField("생성 시각", auto_now_add=True)
     updated_at = models.DateTimeField("수정 시각", auto_now=True)
 
@@ -220,6 +223,51 @@ class ImportRun(models.Model):
 
     def __str__(self) -> str:
         return f"{self.as_of} {self.account_id} {self.get_document_type_display()}"
+
+
+class ManualHolding(models.Model):
+    """사람이 admin에 넣는 보유 수량.
+
+    KB 밖의 코인처럼 [1285]에 나오지 않는 자산이다. **수량만 사람이 정하고
+    가격은 매일 시세에서 가져온다** - 수량은 자주 바뀌지 않고 가격은 매일
+    바뀌므로 이렇게 나누는 편이 손이 덜 간다.
+
+    여기 적은 수량으로 매일 `PositionSnapshot`을 만들기 때문에, 사고팔면 이
+    숫자를 고쳐야 한다.
+    """
+
+    account = models.ForeignKey(
+        InvestmentAccount,
+        on_delete=models.PROTECT,
+        related_name="manual_holdings",
+        verbose_name="계좌",
+    )
+    instrument = models.ForeignKey(
+        Instrument,
+        on_delete=models.PROTECT,
+        related_name="manual_holdings",
+        verbose_name="종목",
+    )
+    quantity = models.DecimalField("보유수량", max_digits=20, decimal_places=8)
+    cost_amount = models.DecimalField(
+        "매입금액", max_digits=18, decimal_places=2, null=True, blank=True
+    )
+    active = models.BooleanField("사용", default=True)
+    note = models.CharField("메모", max_length=200, blank=True)
+    updated_at = models.DateTimeField("수정 시각", auto_now=True)
+
+    class Meta:
+        ordering = ("account_id", "instrument_id")
+        verbose_name = "직접 입력 보유"
+        verbose_name_plural = "직접 입력 보유"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("account", "instrument"), name="unique_manual_holding"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.account_id} {self.instrument_id} {self.quantity}"
 
 
 class PositionSnapshot(models.Model):
