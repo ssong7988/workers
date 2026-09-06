@@ -1,11 +1,13 @@
 # Project State
 
-마지막 갱신: 2026-09-05 (**금융자산 수집을 mable 웹에서 H-able 데스크톱으로 옮겼다.** 웹은 6시간마다 자동 로그아웃돼 평일 18:30 무인 수집에 맞지 않는다. 웹 수집기는 지우지 않고 `stock-importer/stock_importer/web/`으로 옮겨 재워 뒀다. H-able 경로는 `hable/`에 있고, 화면 [1285] 총자산현황 하나로 다섯 계좌를 다 읽는다. **작업 스케줄러로 UAC 없이 승격 실행하는 길을 뚫었고, 그 권한이면 H-able 조작이 실제로 동작한다 — 창 복원, 광고·공지 팝업 닫기, 우클릭 메뉴, 조회까지. 남은 블로커는 **계좌 비밀번호** 하나다: 조회를 누르면 H-able이 모달로 비밀번호를 묻고, 모달이 뜨는 순간 창이 비활성화돼 이후 클릭이 전부 막힌다.**) 서비스 namespace는 부동산 `/property/`, 주식 `/stock/`, 공통 운영 `/common/`으로 분리하며 Dagster는 한 인스턴스를 공유한다. 개발 브랜치는 `dev`, 버전은 루트 `VERSION`의 `devX.Y.Z` 형식이다.
+마지막 갱신: 2026-09-06 (**H-able [1285] 자동 조회 → Excel 접근성 셀 읽기 → 5계좌·18보유 PostgreSQL 저장을 실제로 완주했다. 같은 날 재실행은 5계좌 모두 중복으로 판정됐다. 계좌 비밀번호는 H-able 환경설정에만 저장하며 수집기는 갖지 않는다. 카카오 요약도 실제로 발송했다 — H-able → PostgreSQL → 카카오톡 종단 완주. 네이버 쪽은 헬스체크가 로그아웃을 발견하면 스스로 다시 로그인한다.**) 서비스 namespace는 부동산 `/property/`, 주식 `/stock/`, 공통 운영 `/common/`으로 분리하며 Dagster는 한 인스턴스를 공유한다. 개발 브랜치는 `dev`, 버전은 루트 `VERSION`의 `devX.Y.Z` 형식이다.
 
 ## Current Architecture
 
 - 코드 경계, 실제 데이터 흐름과 작업별 최소 읽기 경로는 `.docs/ARCHITECTURE.md`에 정리되어 있다. `.agent/`에는 최신 운영 상태인 이 파일만 두고 장기 상세 문서는 `.docs/`에서 관리한다.
 - `real-estate-finder/`는 네이버 부동산 매물을 수집해 `report-site` API로 넘기기만 한다. 조건 판정·상태·표현·전송 코드는 없다.
+- **네이버 자동 로그인(2026-09-06, 실제 확인).** 실행 중인 Edge를 네이버에서 로그아웃시킨 뒤 `check-login`을 돌려 자동 로그인 → 상태 확인까지 통과하는 것을 확인했다. 로그아웃된 브라우저를 만나면 수집기가 네이버 로그인 화면에 아이디·비밀번호를 입력해 직접 로그인한다. 자격 증명은 `real_estate_finder/credentials.py`가 루트 `.env`(또는 `real-estate-finder/.env`)의 `NAVER_ID`/`NAVER_PASSWORD`에서만 읽고, 둘 중 하나라도 없으면 예전처럼 경고만 한다. 값은 로그·문서·예외 어디에도 남기지 않는다(`NaverCredentials.__repr__`까지 가린다). CAPTCHA·인증번호·비밀번호 불일치 화면을 만나면 **재시도하지 않고 중단한다** — 우회하지 않는다는 기존 원칙 그대로다.
+- **세션이 잘 끊기지 않게 된 이유(2026-09-06).** 자동 로그인이 `로그인 상태 유지`(`#loginStay`)를 켜다. 이것이 꺼져 있으면 `NID_AUT`/`NID_SES`가 만료 없는 **세션 쿠키**라 Edge를 닫는 순간 로그아웃된다. 켜고 로그인한 뒤 실제 쿠키를 확인하니 만료가 **29일 뒤**로 잡혔다. IP보안(`#switchIP`)은 이 화면에서 이미 꺼져 있었고(최초 조사 때 입력의 `value="on"`을 체크 상태로 오독해 켜져 있다고 적었던 것을 바로잡는다), 기본값이 바뀔 때를 대비해 켜 있으면 끄는 안전장치만 두었다.
 - `report-site/portfolio/`가 금융자산 도메인을 소유한다 — 계좌·종목·자산분류·목표 비중·국민연금 기준, 수집 자료 저장, 비중·리밸런싱, 현금흐름 보정 수익률과 MDD. 부동산 `properties/`와는 모델도 URL도 계산도 섞이지 않고 DB와 admin만 공유한다.
 - `report-site/properties/`가 카카오 메시지 정책을 소유하고, `kakao-notifier/`의 인증 토큰/API 어댑터를 호출한다. finder 쪽 중복 코드는 8단계에서 삭제했다.
 - `report-site/`(Django + waitress)가 PostgreSQL을 요청마다 읽어 화면을 렌더링한다. 부동산 화면은 `/property/`, 금융자산 화면은 `/stock/`, 공통 Dagster 운영 화면은 `/common/` namespace다. `REPORT_PATH_TOKEN`을 채우면 두 namespace 앞에 `/<TOKEN>/`이 붙는다. 빌드나 배포 단계는 없다.
@@ -25,6 +27,10 @@
 위 구조는 2026-09-03에 끝난 역할 분리 이관의 결과다. 그 배경과 단계별 이력은 아래 "Completed Migration" 절에 있다.
 
 ## Current State
+
+- **2026-09-06 H-able 잔고 수집 종단 성공.** 사용자가 `환경설정 → 보안설정 → 계좌설정`에서 계좌 비밀번호를 저장한 뒤 `hable-probe`가 비밀번호 팝업 없이 조회하고 25행을 읽었다. 실제 `hable-import`는 표 21행에서 합계 3행을 제외해 **5계좌·18보유**를 PostgreSQL에 저장했고 완전 수집일 `2026-09-06`을 확정했다. 계좌 5개의 마스킹 번호도 DB에 등록했다. 두 번째 `hable-import`는 전 계좌를 `이미 반영됨`으로 처리해 멱등성을 실제 확인했다. `/stock/allocation/`·`/stock/performance/`는 모두 HTTP 200이며 기준일을 표시한다. 기존 분류 시드를 재적용하고 지표 1일치를 만들었으며 미분류는 5개다.
+- **Office 미인증 상태의 Excel 내보내기 폴백 추가.** H-able은 표를 파일로 저장하지 않고 새 Excel 통합 문서로 열었다. 첫 probe에서는 COM 읽기가 됐지만 이후 Office 2016 `제품 인증 실패` 마법사가 통합 문서를 비활성화해 COM과 복사가 모두 거절됐다. 새로 열린 `XLMAIN`만 추적하고 Windows UI Automation의 `DataItem` 주소(A1 등)와 `Value`로 표를 재구성하는 폴백을 추가했다. 읽은 뒤에는 이번 내보내기가 새로 만든 Excel 프로세스만 닫는다. 이 경로로 실제 21행을 연속 두 번 읽었고 Excel 프로세스가 남지 않았다. 수집기 테스트 **59개 통과**.
+- **계좌 인증 오류 처리 개선.** `window.ensure_query_ready()`가 시작 시·조회 대기 중·각 클릭 전에 비밀번호 안내/로그아웃/모달로 비활성화된 창을 확인한다. 인증에 막히면 복사·내보내기·캡처로 진행하지 않고 위 설정 경로를 알린다. 준비 중 예외가 나도 최상위 고정을 해제한다. 비밀번호는 계속 H-able 자체에만 저장하고 코드·환경변수·로그·DB에는 넣지 않는다. H-able 재시작 뒤 저장 유지 여부는 아직 확인하지 않았다.
 
 - **2026-09-06 로깅 작업 인계 검증 정리.** 실시간 출력 저장·기동 실패·정상/비정상 종료·HTTP 오류/시간 초과 테스트 4개와 PowerShell 문법 검사를 통과했다. 09-05 실제 두 서버 재시작에서 control 로그의 종료 대상 PID와 `process_exit` 코드 `0xffffffff`가 함께 남았고, 새 실행의 HTTP 상태 기록 및 공개 리포트·통계·Dagster HTTP 200을 확인했다. 네이버 로그인 사전 점검 관련 별도 변경은 이번 로깅 커밋과 분리해 둔다.
 - **2026-09-05 리포트·Dagster 실시간 장애/종료 로깅 추가.** `run-site.ps1`·`run-dagster.ps1`의 기존 진입점을 `run-logged.py`로 감싸 기동 검사와 실행 중 stdout/stderr를 즉시 날짜별·실행별 UTF-8 로그에 쓴다. 시작/부모/자식 PID, 종료 코드·실행 시간, Ctrl+C 수신, 30초 생존 기록과 HTTP 확인(리포트 DB 조회/GraphQL, 5초 제한)을 남긴다. 재시작 스크립트는 종료 요청 전에 호출 PID·대상 PID·이유를 별도 control 로그에 기록하며 `ensure-site.ps1`도 확인 실패/복구를 기록한다. 강제 종료·전원 차단은 종료 이벤트가 없을 수 있어 Windows 이벤트와 대조한다. 재부팅은 23:31 이후 미기동의 원인이며, 그 이전 PostgreSQL 응답 정지의 원인까지 설명하지는 못한다. 상세 로그 경로와 읽는 방법은 `.docs/RUNBOOK.md`의 로그 보기 절을 따른다.
@@ -128,7 +134,7 @@ Dagster도 같은 태스크를 부르면 된다. PowerShell 스크립트의 메�
 | 우클릭 컨텍스트 메뉴 | **뜬다.** 다만 항목 이름은 MSAA·`MN_GETHMENU` 둘 다 아직 빈 목록이다 |
 | Ctrl+C 복사 | 여전히 빈 클립보드 |
 | **조회 버튼 → 잔고 조회** | **성공.** 비밀번호가 채워져 있으면 그리드에 실제 데이터가 찬다 |
-| 내보내기 | **미검증.** 비밀번호 모달이 막아 아직 한 번도 끝까지 못 갔다 |
+| 내보내기 | **성공.** 툴바 Excel 버튼으로 연 새 통합 문서를 UI Automation 셀 값으로 읽는다. 실제 21행, 연속 2회 성공 |
 
 **클릭 좌표는 맞다.** 화면 그림과 대조해 확인했다 - 엑셀은 그리드 판 오른쪽 끝에서 115px,
 조회는 18px, 위에서 33px(`export.py`의 `TOOLBAR_FROM_RIGHT`).
@@ -142,23 +148,19 @@ Dagster도 같은 태스크를 부르면 된다. PowerShell 스크립트의 메�
 2. **작업 스케줄러가 띄운 cmd 콘솔 창이 H-able을 덮었다.** 화면 한가운데 뜬 검은 창이
    클릭을 가로챘다. `--hide-console`로 우리 콘솔을 숨긴다.
 
-#### 계좌 비밀번호 — **지금의 유일한 블로커**
+#### 계좌 비밀번호 — **해결됨(재시작 유지 여부만 미검증)**
 
 **조회를 누르면 H-able이 `KB H-able` 모달로 "비밀번호를 입력하세요."를 띄운다.** 모달이
 뜨면 소유 창이 비활성화되고, 그러면 `WindowFromPoint`가 자식이 아니라 최상위 창을 돌려준다
 - 그래서 이후 모든 클릭이 "대상 화면의 자리가 아니다"로 막힌다. 오늘 겪은 증상의 절반이
 이것이었다.
 
-사용자가 손으로 넣으면 조회가 되고 그리드가 찬다. 다만 **H-able을 재시작하면 지워진다.**
-사용자 결정: **H-able 자체 설정에 저장하는 방향**(우리가 비밀번호를 아예 갖지 않는다).
+사용자가 H-able 자체 설정에 저장했고 자동 조회가 실제로 성공했다. 수집기는 비밀번호를 아예 갖지 않는다.
 
 - 화면 하단이 직접 안내한다: "설정에서 비밀번호를 저장하셔야만 잔고/미체결 조회가 가능합니다."
 - **1285 툴바의 톱니는 아니다.** 열어 봤더니 "더블클릭시 연결화면 설정"뿐이었다.
-- 상단 우측 **`간편설정`**에 있을 가능성이 높은데, 모달이 자동 클릭을 계속 막아 아직 못 열었다.
-  **다음에 할 일: 사람이 `간편설정`을 열어 계좌비밀번호 저장 항목이 있는지 확인.**
-- 없으면 차선은 **Windows 자격 증명 관리자**에 두고 우리가 키 입력으로 넣는 것이다. 비밀번호
-  칸은 표준 `Edit`가 아니라 owner-drawn `AfxWnd120`(창 텍스트 `******`)이라 `WM_SETTEXT`는
-  못 쓰고 클릭 후 실제 키 입력을 보내야 한다. `.env` 평문은 쓰지 않는다.
+- **2026-09-06 공식 안내로 경로 확인: `H-able 환경설정 → 보안설정 → 계좌설정`.**
+  계좌비밀번호 입력 및 저장 기능이 있고 현재 PC에서 설정 적용과 자동 조회까지 확인했다. 재시작 후 유지 여부는 미검증이다.
 
 #### 읽기로 확인한 것 (권한과 무관하게 유효)
 
@@ -184,15 +186,60 @@ Dagster도 같은 태스크를 부르면 된다. PowerShell 스크립트의 메�
 | `PrintWindow`로 창 캡처 | 여전히 거절당한다. 화면을 긁는 방식으로 대체했다(앞으로 올린 뒤 GDI로 캡처, PNG는 직접 인코딩) |
 | `SysHeader32` 컬럼 이름 | 아직 `item_count` 0. 그리드가 헤더를 직접 그리는 것으로 보인다 |
 | 우클릭 메뉴 **항목 이름** | MSAA와 `MN_GETHMENU` 둘 다 빈 목록. 메뉴는 뜨는데 무엇이 들었는지는 아직 모른다 |
-| 툴바 엑셀 버튼 | **아직 판정 못 함.** 비밀번호 모달이 그 앞을 막고 있다 |
+| 툴바 엑셀 버튼 | **동작한다.** Office 인증 마법사가 COM을 막아도 UI Automation 셀 값으로 읽는다 |
 
-#### 지금 막힌 것
+#### 종단 실행 성공 (2026-09-06)
 
-- **계좌 비밀번호 모달** - 위 절 참고. 이것만 풀리면 나머지는 서 있다.
-- **내보내기 방법이 아직 미검증이다.** 코드는 가벼운 것부터 사다리로 시도한다:
-  우클릭 메뉴의 CSV/TXT 저장 → 툴바 엑셀 버튼의 저장 대화상자 → 그래도 Excel이 열렸으면
-  그 통합 문서를 읽고 **저장하지 않고 닫는다**. 어느 것이 실제로 되는지는 비밀번호가
-  풀린 뒤에 알 수 있다.
+**H-able → PostgreSQL → 카카오톡이 처음으로 끝까지 돌았다.**
+
+- `hable-import` 07:49. 계좌 5개, 보유 18건. 표는 **Excel UI Automation 셀 값**으로 읽었다
+  (Office 인증 마법사가 COM을 막아도 되는 경로). 종목명이 빈 3행(소계 줄)은 건너뛴다.
+- 처음 들어온 종목 5개는 설계대로 `미분류`로 쌓였다. admin에서 채웠다 —
+  RISE 200·RISE 코스닥150·SK하이닉스·저스템 → `한국 주식`, 현금자산 → `안전자산`(현금성).
+  수집기는 여전히 자동 분류하지 않는다. 누락이 조용히 넘어가지 않는 것이 요점이다.
+- 2026-09-06 기준 평가 149,751,992원, 매입 115,908,105원, 평가손익 +33,843,887원(+29.20%).
+  비중은 한국 53.1 / 미국 31.8 / 기타 6.0 / 안전자산 4.7 / 금 4.4%.
+- `send_stock_digest`로 **실제 발송했다**(버튼 2개 포함).
+
+**digest가 손익을 두 개로 나눠 말한다.** `DailyPortfolioMetric`의 수익률은 *수집을 시작한
+뒤*의 성과(Modified Dietz)라 첫날은 정의상 0이다. 그것만 보내면 +29%를 들고 있는 사람에게
+"손익 0만원"이라고 말하게 된다. 그래서 매입 대비 누적 평가손익을 함께 넣었다
+(`delivery.unrealized_totals()`). 지금 문구는 이렇다:
+
+```
+💰 금융자산 2026.09.06
+평가 1억 4,975만원 · 평가손익 +3,384만원 (+29.20%)
+수집후 0.00% · MDD 0.00% · 낙폭 0.00%
+```
+
+#### 한 번도 돌지 않았던 테스트 둘 (2026-09-06 수정)
+
+전체 테스트를 실제로 돌려 보니 두 개가 실패했다. 둘 다 **제품 코드가 아니라 테스트가**
+틀린 경우였고, 원인이 서로 다르다.
+
+1. `report.tests.test_views.test_urgent_section_respects_region_filter` — **처음부터 통과한
+   적이 없다.** 급매 기준가 25억에 매물 25.5억을 넣고 급매 1건을 기대했는데, `is_urgent`는
+   `가격 <= 급매기준가`이고 그 정의는 모델이 생긴 `edb7e1b` 이후 바뀐 적이 없다. 테스트가
+   커밋된 `f5e697c` 시점에도 같은 값이었다. 아래 Known Issues의 "**DB 기반 테스트에는
+   `CREATEDB`가 필요하다**"가 실제로 물린 사례다 — 실행되지 않은 채 들어왔다. 24억으로
+   고쳐 필터가 실제로 걸러내는지 보게 했다.
+2. `tests.test_runtime.test_workflow_prepares_dependencies_and_collects` — **스캔이 도는
+   동안에만 실패한다.** `run_scan_workflow()`가 진짜 `run_lock()`을 잡는데 경로가 운영
+   `data/run.lock`이라, 07·12·17시 스캔과 겹치면 "이전 실행이 진행 중"으로 죽는다. 실제로
+   08:06 스캔 중에 그렇게 실패했다(락 안의 PID가 살아 있는 것을 확인했고 락은 건드리지
+   않았다). 락 동작은 그대로 두고 자리만 임시 폴더로 옮겼다.
+
+**2026-09-06 전체 통과**: Django 186, 수집기 51, 주식 수집기 59. Django 테스트를 위해
+`property_report`에 `CREATEDB`를 잠시 부여했고 끝난 뒤 `NOCREATEDB`로 되돌린 것을
+`pg_roles`로 확인했다.
+
+#### 지금 남은 것
+
+- **목표 비중(`PortfolioTarget`)이 0행이다.** 그래서 리밸런싱 제안이 나오지 않고 digest에도
+  그 줄이 없다. 원하는 목표 배분은 사람이 정할 값이라 admin에서 입력해야 한다.
+- 성과·MDD는 이틀째부터 의미가 생긴다. 지금은 지수 1.00에서 시작한 첫날뿐이다.
+- H-able을 완전히 재시작한 뒤 계좌 비밀번호 저장이 유지되고 자동 조회가 계속 되는지 확인한다.
+- `[1285]` 화면 자체를 자동으로 여는 기능은 아직 없다. 로그인 후 사람이 화면을 열어 둬야 한다.
 - 주의: mable 웹과 H-able은 동시에 로그인할 수 없다. 재워 둔 웹 수집기를 진단용으로
   돌리면 H-able 세션이 끊긴다.
 
@@ -227,7 +274,7 @@ H-able은 `338-711-781-01`처럼 네 덩어리로 준다. 가운데를 전부 �
   `price`를 비워 보낸다(서버에서 선택 값이다).
 - 명령: `hable-probe` · `hable-collect` · `hable-import` · `check-api`, 그리고 재워 둔
   `web-browser` · `web-probe` · `web-collect`.
-- 테스트 43개(`stock-importer/tests/`). 실제 화면의 열·표기를 픽스처로 쓴다 - 1285의
+- 테스트 59개(`stock-importer/tests/`). 실제 화면의 열·표기를 픽스처로 쓴다 - 1285의
   중복 `구분` 열, 네 덩어리 계좌번호가 서로 구분되는지, 탭 구분 복사 파싱, ETF 배지
   분리, 손실 부호, 합계 줄 거르기, 외화 원화평가액 누락 거절, 순서가 달라도 같은 해시.
 
@@ -256,14 +303,13 @@ H-able은 `338-711-781-01`처럼 네 덩어리로 준다. 가운데를 전부 �
 
 ### 아직 하지 않은 것과 이유
 
-- **H-able에서 실제 데이터를 한 번도 못 읽었다.** 위 '여기서 막혔다' 참고.
 - **[1285] 화면을 자동으로 열지 않는다.** 사람이 열어 둔 화면을 읽는다. 화면번호 입력창 구조를 아직 안 봤다.
-- **조회 버튼을 누르지 않는다.** 계좌 비밀번호를 H-able 설정에 저장해 두어야 조회가 되는데, 그 저장은 사용자가 한다.
+- **조회 버튼은 수집기가 직접 누른다.** 저장된 비밀번호가 없으면 정확한 설정 경로를 알리고 즉시 멈춘다.
 - (재워 둔 웹 경로) 내자산 화면까지의 메뉴 자동 클릭이 없다. 실제 DOM을 아직 못 봤다. 지금은 사람이 로그인하고 내자산 화면을 열어 두면 수집기가 최대 5분 기다렸다가 표가 보이는 순간 이어간다.
 - **입출금·거래를 수집하지 않는다.** v1은 잔고만이다. 외부 입출금이 생기기 전까지는 수익률이 정확하고, 생긴 뒤에는 그 구간이 왜곡된다. 해당 화면을 `probe`로 확인한 뒤 붙인다.
 - **해외주식 탭은 원화평가액 열을 찾지 못하면 실패로 멈춘다.** 환율을 지어내지 않는다는 기존 결정 그대로다. 현재 해외주식은 0건이다.
 - **Dagster `stock_portfolio` asset group과 평일 18:30 스케줄이 없다.** 수집기가 없으면 실행할 것이 없다.
-- **카카오 요약과 버튼 2개를 붙이지 않았다.** 보낼 완전 스냅샷이 아직 없다.
+- **카카오 요약과 버튼 2개의 코드는 있으나 실제 발송은 아직 하지 않았다.** 이제 완전 스냅샷은 있다.
 - **`/stock/admin/`은 별도 admin이 아니라 `/property/admin/`으로 보내는 리다이렉트다.** `admin.site.urls`를 두 번 마운트하면 `admin:` URL namespace가 갈라진다. 포트폴리오 모델은 기존 admin에 등록돼 있다.
 
 ### 이미 끝난 설치 (2026-09-05)
@@ -271,22 +317,15 @@ H-able은 `338-711-781-01`처럼 네 덩어리로 준다. 가운데를 전부 �
 `manage.py migrate`(표 9개 + `0002`), `manage.py import_portfolio_seed`(자산분류 8·계좌 5·국민연금 5),
 `report-site/.env`의 `STOCK_API_TOKEN` 생성, `restart-site.ps1`로 서버 재시작까지 끝났다.
 `/stock/allocation/`·`/stock/performance/`가 200으로 응답하고 `/stock/api/status/`는
-토큰 인증으로 동작한다. 계좌 5개는 아직 전부 `계좌번호 미등록`이다.
+토큰 인증으로 동작한다. 계좌 5개의 마스킹 번호 등록과 첫 완전 수집까지 끝났다.
 
-### 다음 사람이 먼저 할 일
+### 다음 작업
 
-1. **H-able 실행 + 로그인.** 관리자 권한으로 뜨는 것이 정상이다(`hable.exe`가 그렇게 만들어져 있다).
-2. **[1285] 총자산현황을 열고, `비밀번호` 칸에 계좌 비밀번호를 넣고 `조회`.** 그리드가 차야 한다.
-3. `stock-importer\run-stock.ps1 -Command hable-probe` — **UAC 없이 돈다.**
-   여기서 `엑셀 내보내기: N행 (읽은 방법)`이 나오면 관문 통과다. 실패하면 같은 명령이 남긴
-   `data\hable-1285.png`(Git 제외)를 보고 좌표를 다시 잰다. 로그는 `data\last-run.log`.
-4. `-Command hable-collect` — 계좌별 건수를 화면과 눈으로 대조.
-5. admin의 투자 계좌 5개에 마스킹 계좌번호(`338-***-781-01` 형식) 입력.
-6. `-Command hable-import` → `/stock/allocation/` 확인 → admin에서 새 종목 분류.
-7. `report-site`에서 `manage.py send_stock_digest --dry-run`으로 보낼 내용을 먼저 보고,
+1. admin에서 새 미분류 종목 5개를 분류한다.
+2. `report-site`에서 `manage.py send_stock_digest --dry-run`으로 보낼 내용을 먼저 보고,
    확인되면 인자 없이 실제 발송.
-8. **무인화의 마지막 조각**: `간편설정`에서 계좌비밀번호 저장 항목을 찾아 켠다. 그게 되면
-   2번이 필요 없어지고 Dagster가 평일 18:30에 `KB-StockImporter` 태스크를 부르면 끝난다.
+3. H-able을 재시작해 비밀번호 저장 유지 여부를 확인한다.
+4. Dagster에 평일 18:30 `KB-StockImporter` 실행과 실패 알림을 연결한다.
 
 `.docs/RUNBOOK.md`에는 아직 안 적었다 - 다른 세션이 그 파일을 작업 중이고, 종단 실행이
 한 번도 성공하지 않아 운영 절차로 적을 단계가 확정되지 않았다.
@@ -494,14 +533,14 @@ Airflow는 WSL2 안에서 돌아 Windows 쪽 작업(브라우저, Postgres, Djan
 
 **2026-09-04에 op 기반에서 asset 기반으로 바꿨다.** 이전에는 `property_pipeline_job` 하나가 `ensure_site → scan_step → report_step`을 항상 전부 실행하고, 세 스케줄이 run config로 뒤 두 단계를 no-op으로 만들었다. 지금은 asset `naver_listings → morning_report`가 있고, 각 스케줄이 어디까지 실행할지 고른다. `naver_listings`는 `ensure_site_op → run_scan_op` 두 op을 품은 `graph_asset`이다.
 
-등록 잡은 다섯 개다. asset job 둘(`scan_job`, `morning_report_job`)과 op job 셋(`server_check_job`, `pre_scan_health_job`, `restart_report_site_job`). `server_check_job`과 `pre_scan_health_job`은 `naver_listings` 안에서 쓰는 것과 **같은 `ensure_site_op`을 재사용**하므로 서버 확인 로직이 갈라지지 않는다. `pre_scan_health_job`은 06:00에 서버 확인 후 비대기 `check-login`으로 Edge/CDP·네이버 로그인을 확인하고, 1분 뒤 재시도해도 실패하면 기존 failure hook으로 카카오 경고를 보낸다. `restart_report_site_job`(2026-09-04 추가)은 스케줄 없는 잡이며 report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
+등록 잡은 다섯 개다. asset job 둘(`scan_job`, `morning_report_job`)과 op job 셋(`server_check_job`, `pre_scan_health_job`, `restart_report_site_job`). `server_check_job`과 `pre_scan_health_job`은 `naver_listings` 안에서 쓰는 것과 **같은 `ensure_site_op`을 재사용**하므로 서버 확인 로직이 갈라지지 않는다. `pre_scan_health_job`은 06:00에 서버 확인 후 비대기 `check-login`으로 Edge/CDP·네이버 로그인을 확인한다. 로그아웃 상태면 **`.env`의 `NAVER_ID`/`NAVER_PASSWORD`로 직접 로그인을 시도하고**, 그래도 실패하면 1분 뒤 재시도 후 기존 failure hook으로 카카오 경고를 보낸다. `restart_report_site_job`(2026-09-04 추가)은 스케줄 없는 잡이며 report-site 코드를 바꾼 뒤 Dagster UI에서 수동으로 Launch Run 한다.
 
 **업무 job은 `.bat`/업무용 `.ps1`을 실행하지 않는다.** `run_scan_op`은 수집기 전용 venv의 `python -u -m real_estate_finder run-scan`을, `morning_report`는 finder venv로 Django `manage.py send_digest`를 직접 실행한다. Dagster venv에 Playwright/Django를 합치거나 앱 모듈을 직접 import하지 않는 이유는 의존성 충돌과 장시간 브라우저 작업의 프로세스 격리를 유지하기 위해서다. Windows 장기 프로세스 수명주기(`ensure-site.ps1`, `restart-site.ps1`)에는 PowerShell이 적합하므로 그대로 둔다. `run-scan.ps1`은 Python workflow를 한 줄 호출하는 수동 호환 wrapper로 축소했다.
 
 전환으로 없어진 것: `scan_step.mode="skip"`과 `report_step.enabled`. 남은 설정 손잡이는 `run_scan_op.mode`(`run` | `ensure_fresh`) 하나뿐이다. graph_asset이라 run config 경로가 한 겹 깊다 — `ops.naver_listings.ops.run_scan_op.config.mode`. 새로 생긴 것: Catalog의 lineage 그래프, 그리고 수집할 때마다 그 `Scan` 행의 수집 수·조건 충족 수·급매 수·제외 수가 머티리얼라이즈 메타데이터로 붙는다(`manage.py scan_status --json`을 새로 추가해 되읽는다). 잡 이름이 스케줄별로 갈라져서 실행 이력에서 어떤 성격의 런인지도 이제 잡 이름만으로 구분된다.
 
-1. `server_only_schedule` — 6·7·8·12·17시를 제외한 매시 정각. `server_check_job`(=`ensure_site_op`만) 실행. 설정 값이 아예 없다.
-2. `pre_scan_health_schedule` — `0 6 * * *`. 서버 확인 후 `check_naver_login_op`이 임시 탭에서 네이버 로그인 여부만 확인한다. 로그인 입력을 기다리거나 수집하지 않는다. 1분 뒤 한 번 재시도하고 실패하면 07시 수집 전에 카카오 경고를 보낸다.
+1. `server_only_schedule` — 6·7·8·12·17시를 제외한 매시 정각. **2026-09-06부터 `pre_scan_health_job`을 실행한다**(이전엔 `server_check_job`). 서버만 보던 시간대에도 `check-login`을 돌려, 끊긴 네이버 세션을 최대 1시간 안에 자동 로그인으로 복구한다. 빠진 7·8·12·17시는 수집·리포트 경로가 자체적으로 로그인을 확인하고 필요하면 로그인한다. `server_check_job`은 수동 실행용으로 남아 있다. 설정 값은 여전히 없다.
+2. `pre_scan_health_schedule` — `0 6 * * *`. 서버 확인 후 `check_naver_login_op`이 임시 탭에서 네이버 로그인을 확인하고, 끚겨 있으면 자신이 로그인한다(아래 ‘네이버 자동 로그인’). 사람의 입력을 기다리거나 수집하지는 않는다. 1분 뒤 한 번 재시도하고 실패하면 07시 수집 전에 카카오 경고를 보낸다.
 3. `scan_schedule` — `0 7,12,17 * * *`. `scan_job`(=`naver_listings`, `mode: run`). 신규 급매 또는 `notify_new` 일반 신규의 카카오는 `record_scan()`이 처리한다.
 4. `morning_report_schedule` — `0 8 * * *`. `morning_report_job`(=`naver_listings → morning_report`, `mode: ensure_fresh`). DB에서 07:00 이후 성공 스캔을 확인하고, 없으면 스캔을 재실행한 뒤 전체 리포트를 보낸다. 수집을 생략해도 `naver_listings`는 머티리얼라이즈된다 — "매물이 최신이다"라는 결과는 같기 때문이다.
 5. `alert_on_failure` — 다섯 잡 모두에 걸려 있다. 일반 작업은 5분 뒤, 로그인 사전 점검은 1분 뒤 한 번 재시도한 다음 `manage.py send_alert`를 부른다.
