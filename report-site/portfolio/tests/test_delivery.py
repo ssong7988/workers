@@ -20,7 +20,7 @@ from portfolio.delivery import (
     build_digest,
     send_digest,
 )
-from portfolio.models import CashFlow, PortfolioTarget
+from portfolio.models import CashFlow, PortfolioTarget, PositionSnapshot
 from portfolio.performance import rebuild_metrics
 
 from .factories import make_account, make_asset_class, make_instrument, record_balance
@@ -46,8 +46,10 @@ class DigestTests(TestCase):
             (date(2026, 8, 31), "600000", "400000"),
             (date(2026, 9, 1), "600000", "200000"),
         ):
-            record_balance(account, samsung, day, stock_value)
-            record_balance(account, kodex, day, bond_value)
+            # 매입금액까지 넣는다. digest는 수집 후 성과와 함께 매입 대비
+            # 평가손익도 보내므로, 그 값이 없으면 절반만 시험하는 셈이다.
+            record_balance(account, samsung, day, stock_value, cost="500000")
+            record_balance(account, kodex, day, bond_value, cost="150000")
         CashFlow.objects.create(
             occurred_on=date(2026, 9, 1),
             account=account,
@@ -74,6 +76,23 @@ class DigestTests(TestCase):
         # 80만원의 60/40 목표 → 가장 큰 조정은 12만원짜리 둘 중 하나다.
         self.assertIn("리밸런싱", digest.message)
         self.assertIn("12만원", digest.message)
+
+    def test_message_carries_profit_against_cost_not_only_tracked_return(self) -> None:
+        """첫날의 수집 후 수익률은 0이다. 그것만 보내면 수익이 없어 보인다."""
+        digest = build_digest()
+
+        # 평가 80만원 - 매입 65만원 = 15만원, 23.08%.
+        self.assertIn("평가손익 +15만원", digest.message)
+        self.assertIn("23.08%", digest.message)
+
+    def test_missing_cost_shows_no_ratio_instead_of_a_wrong_one(self) -> None:
+        PositionSnapshot.objects.filter(as_of=date(2026, 9, 1)).update(
+            cost_amount=None, unrealized_pl=None
+        )
+
+        digest = build_digest()
+
+        self.assertIn("평가손익 0만원 (-)", digest.message)
 
     def test_message_stays_inside_the_kakao_body_limit(self) -> None:
         self.assertLessEqual(len(build_digest().message), TEXT_LIMIT)

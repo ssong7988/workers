@@ -15,6 +15,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
+from django.db.models import Sum
 
 from properties.notifier import KakaoNotifier
 from properties.publish import is_public_report_url
@@ -22,7 +23,7 @@ from properties.publish import is_public_report_url
 from .allocation import build_allocation
 from .display import man_won_text, percent_text, signed_man_won_text, signed_percent_text
 from .importing import latest_complete_date
-from .models import DailyPortfolioMetric
+from .models import DailyPortfolioMetric, PositionSnapshot
 
 
 # 카카오 기본 텍스트 템플릿의 본문 한도.
@@ -44,6 +45,27 @@ class Digest:
     @property
     def has_buttons(self) -> bool:
         return bool(self.buttons)
+
+
+def unrealized_totals(as_of: date) -> tuple[Decimal, Decimal | None]:
+    """매입 대비 평가손익과 그 비율.
+
+    `DailyPortfolioMetric`이 들고 있는 수익률은 **수집을 시작한 뒤**의 성과라
+    첫날은 정의상 0이다. 그것만 보내면 수익이 없는 것처럼 읽히므로, 증권사
+    화면과 같은 누적 평가손익을 함께 보낸다.
+
+    매입금액이 있는 줄만 쓴다. 평가액과 매입액을 같은 줄 집합에서 끊어야
+    비율이 섞이지 않는다.
+    """
+    totals = PositionSnapshot.objects.filter(
+        as_of=as_of, cost_amount__isnull=False
+    ).aggregate(cost=Sum("cost_amount"), value=Sum("market_value_krw"))
+    cost = totals["cost"] or Decimal("0")
+    value = totals["value"] or Decimal("0")
+    if cost <= Decimal("0"):
+        return Decimal("0"), None
+    profit = value - cost
+    return profit, profit / cost
 
 
 def _largest_rebalance(rows) -> str:
@@ -71,13 +93,15 @@ def build_digest(as_of: date | None = None) -> Digest:
         )
 
     view = build_allocation(as_of)
+    unrealized, unrealized_ratio = unrealized_totals(as_of)
     lines = [
         f"💰 금융자산 {as_of:%Y.%m.%d}",
         f"평가 {man_won_text(metric.market_value)} · "
-        f"손익 {signed_man_won_text(metric.investment_pl)} "
-        f"({signed_percent_text(metric.cumulative_return)})",
+        f"평가손익 {signed_man_won_text(unrealized)} "
+        f"({signed_percent_text(unrealized_ratio)})",
+        f"수집후 {signed_percent_text(metric.cumulative_return)} · "
         f"MDD {percent_text(metric.max_drawdown, digits=2)} · "
-        f"현재 낙폭 {percent_text(metric.drawdown, digits=2)}",
+        f"낙폭 {percent_text(metric.drawdown, digits=2)}",
     ]
     rebalance = _largest_rebalance(view.rows)
     if rebalance:

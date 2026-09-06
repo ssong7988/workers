@@ -79,8 +79,13 @@ def record_balance(
     instrument: Instrument,
     as_of: date,
     value: str,
+    cost: str | None = None,
 ) -> PositionSnapshot:
-    """API를 거치지 않고 완전 스냅샷 한 줄을 만든다(성과 계산 테스트용)."""
+    """API를 거치지 않고 완전 스냅샷 한 줄을 만든다(성과 계산 테스트용).
+
+    `cost`를 주면 매입금액과 평가손익까지 채운다 - 수집기가 실제로 그렇게
+    넘기고, digest가 그 두 값을 쓴다.
+    """
     run, _ = ImportRun.objects.get_or_create(
         account=account,
         document_type="balance",
@@ -93,6 +98,8 @@ def record_balance(
         instrument=instrument,
         import_run=run,
         quantity=Decimal("1"),
+        cost_amount=None if cost is None else Decimal(cost),
+        unrealized_pl=None if cost is None else Decimal(value) - Decimal(cost),
         market_value=Decimal(value),
         market_value_krw=Decimal(value),
     )
