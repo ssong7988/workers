@@ -372,8 +372,28 @@ def _close_generated_excel(handle: int, old_processes: set[int]) -> None:
                 kernel32.CloseHandle(process)
 
 
+def click_point(main_handle: int, screen_handle: int, dx: int, dy: int) -> None:
+    """화면 좌상단 기준 상대 좌표를 누른다.
+
+    툴바가 그리드 판에 붙어 있지 않은 화면([0112] 거래내역조회처럼)은
+    `click_toolbar`의 "판 오른쪽 끝에서 몇 픽셀" 계산이 통하지 않는다.
+    그런 화면은 실측한 좌표를 그대로 넘긴다.
+    """
+    focus(main_handle)
+    left, top, _width, _height = rect(screen_handle)
+    x, y = left + dx, top + dy
+    ensure_clickable(main_handle, screen_handle, x, y)
+    with BorrowedCursor() as cursor:
+        cursor.click(x, y, settle=0.8)
+
+
 def export_grid(
-    main_handle: int, screen_handle: int, pane: Pane, folder: Path, stem: str = "hable-1285"
+    main_handle: int,
+    screen_handle: int,
+    pane: Pane,
+    folder: Path,
+    stem: str = "hable-1285",
+    excel_at: tuple[int, int] | None = None,
 ) -> tuple[list[str], list[list[str]], str]:
     """표를 파일로 꺼낸다. 가벼운 방법부터 차례로 시도한다.
 
@@ -393,7 +413,10 @@ def export_grid(
         return through_menu
 
     since = time.time()
-    click_toolbar(main_handle, screen_handle, pane, "excel")
+    if excel_at is None:
+        click_toolbar(main_handle, screen_handle, pane, "excel")
+    else:
+        click_point(main_handle, screen_handle, *excel_at)
 
     deadline = time.monotonic() + 20.0
     while time.monotonic() < deadline:

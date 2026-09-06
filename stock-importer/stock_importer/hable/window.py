@@ -34,6 +34,7 @@ POPUP_MENU_CLASS = "#32768"
 WM_SYSCOMMAND = 0x0112
 SC_RESTORE = 0xF120
 SC_MINIMIZE = 0xF020
+WM_MDIACTIVATE = 0x0222
 # H-able은 최소화됐을 때 ShowWindow(SW_RESTORE)에 반응하지 않는다. 실측으로
 # WM_SYSCOMMAND/SC_RESTORE만 먹혔다.
 RESTORE_WAIT_SECONDS = 3.0
@@ -178,6 +179,20 @@ def ensure_restored(handle: int) -> bool:
     raise HableError(
         "H-able 창이 최소화돼 있는데 복원되지 않았습니다. 작업표시줄에서 직접 열어 주세요."
     )
+
+
+def activate_screen(screen: int) -> None:
+    """MDI 자식 화면을 맨 앞으로 올린다.
+
+    화면 여러 개가 겹쳐 있으면 뒤에 있는 화면의 좌표를 눌러도 앞 화면이 받는다.
+    최상위 창을 올리는 `pin_to_top`으로는 이걸 못 고친다 - MDI 안쪽의 순서는
+    부모인 MDI 클라이언트가 쥐고 있기 때문이다.
+    """
+    parent = user32.GetParent(screen)
+    if parent:
+        user32.PostMessageW(parent, WM_MDIACTIVATE, screen, 0)
+    user32.BringWindowToTop(screen)
+    time.sleep(0.4)
 
 
 def is_minimized(handle: int) -> bool:

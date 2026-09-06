@@ -71,6 +71,8 @@ class HableCollector:
         # 클릭이 닿으려면 H-able이 z-order 위에 있어야 한다. 활성화는 자주
         # 거절당하지만 z-order를 올리는 것은 거절되지 않는다. 끝나면 되돌린다.
         screen = window.find_screen(main, self.screen)
+        # 겹쳐 있는 다른 화면이 우리 좌표를 가로채지 않게 먼저 앞으로 올린다.
+        window.activate_screen(screen)
         window.ensure_query_ready(main, screen)
         pin_to_top(main)
         # 광고·공지 팝업이 always-on-top이라 z-order로는 못 이긴다. 먼저 치운다.

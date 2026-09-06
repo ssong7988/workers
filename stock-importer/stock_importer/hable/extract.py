@@ -28,6 +28,9 @@ CF_UNICODETEXT = 13
 # 이 데스크톱 세션의 마지막 입력 시각. 사람이 자리에 있는지 판단하는 데 쓴다.
 LASTINPUTINFO_SIZE = 8
 VK_CONTROL, VK_C, VK_ESCAPE, VK_MENU = 0x11, 0x43, 0x1B, 0x12
+VK_A, VK_DELETE, VK_DOWN, VK_RETURN = 0x41, 0x2E, 0x28, 0x0D
+KEYEVENTF_UNICODE = 0x0004
+INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
 MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
 MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP = 0x0008, 0x0010
@@ -38,6 +41,20 @@ OBJID_CLIENT = 0xFFFFFFFC
 GA_ROOT = 2
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
 SRCCOPY = 0x00CC0020
+
+
+class _KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", w.WORD),
+        ("wScan", w.WORD),
+        ("dwFlags", w.DWORD),
+        ("time", w.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = [("type", w.DWORD), ("ki", _KEYBDINPUT), ("padding", ctypes.c_ubyte * 8)]
 
 
 class ExtractionError(RuntimeError):
@@ -360,6 +377,41 @@ def idle_seconds() -> float:
     elapsed = kernel32.GetTickCount64() - info.dwTime
     # dwTime은 32비트라 49.7일마다 한 바퀴 돈다. 음수가 나오면 그 경우다.
     return max(0.0, elapsed / 1000.0)
+
+
+def type_text(text: str, *, delay: float = 0.03) -> None:
+    """포커스가 있는 곳에 글자를 넣는다.
+
+    가상 키코드 대신 유니코드로 보낸다. 계좌번호의 `-`처럼 자판 배열을 타는
+    글자를 키코드로 옮기다 틀리는 일을 피한다.
+    """
+    for letter in text:
+        stroke = _INPUT(type=INPUT_KEYBOARD)
+        stroke.ki = _KEYBDINPUT(wVk=0, wScan=ord(letter), dwFlags=KEYEVENTF_UNICODE)
+        user32.SendInput(1, ctypes.byref(stroke), ctypes.sizeof(_INPUT))
+        stroke.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+        user32.SendInput(1, ctypes.byref(stroke), ctypes.sizeof(_INPUT))
+        time.sleep(delay)
+
+
+def press_key(code: int, *, times: int = 1, settle: float = 0.3) -> None:
+    """가상 키 하나를 누른다. 콤보 이동(Down)이나 취소(Esc)에 쓴다."""
+    for _ in range(times):
+        user32.keybd_event(code, 0, 0, 0)
+        user32.keybd_event(code, 0, KEYEVENTF_KEYUP, 0)
+        time.sleep(settle)
+
+
+def clear_field() -> None:
+    """입력칸의 기존 값을 지운다. 포커스가 그 칸에 있어야 한다."""
+    user32.keybd_event(VK_CONTROL, 0, 0, 0)
+    user32.keybd_event(VK_A, 0, 0, 0)
+    user32.keybd_event(VK_A, 0, KEYEVENTF_KEYUP, 0)
+    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.1)
+    user32.keybd_event(VK_DELETE, 0, 0, 0)
+    user32.keybd_event(VK_DELETE, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.1)
 
 
 def pin_to_top(handle: int) -> None:
