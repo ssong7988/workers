@@ -51,3 +51,9 @@ if (Test-Path $LogFile) {
 } else {
     Write-Host "No log was written." -ForegroundColor Yellow
 }
+
+# Hand the task's own exit code back. Without this the script always ended 0,
+# so a caller (Dagster's pre-collection check) could not tell success from
+# failure and would never raise the Kakao alert.
+if ($result -eq $STILL_RUNNING) { exit 1 }
+exit $result

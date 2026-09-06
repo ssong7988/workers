@@ -33,6 +33,7 @@ POPUP_MENU_CLASS = "#32768"
 
 WM_SYSCOMMAND = 0x0112
 SC_RESTORE = 0xF120
+SC_MINIMIZE = 0xF020
 # H-able은 최소화됐을 때 ShowWindow(SW_RESTORE)에 반응하지 않는다. 실측으로
 # WM_SYSCOMMAND/SC_RESTORE만 먹혔다.
 RESTORE_WAIT_SECONDS = 3.0
@@ -58,6 +59,18 @@ class AccountPasswordRequired(HableError):
     """계좌 조회 인증이 필요하다. 좌표 오류와 구분한다."""
 
 
+class HableNotRunning(HableError):
+    """프로그램 자체가 떠 있지 않다."""
+
+
+class ScreenNotOpen(HableError):
+    """프로그램은 떠 있는데 그 화면이 열려 있지 않다."""
+
+
+class LoggedOut(HableError):
+    """세션이 끊겼다. 화면에 남은 숫자는 낡은 값이다."""
+
+
 ACCOUNT_PASSWORD_HELP = (
     "H-able 계좌 비밀번호 입력/저장이 필요합니다.\n"
     "H-able 환경설정 → 보안설정 → 계좌설정에서 계좌비밀번호를 저장한 뒤 "
@@ -74,7 +87,7 @@ def ensure_query_ready(main: int, screen: int) -> None:
             if class_name(child) == "Static"
         )
         if any(hint in labels for hint in LOGGED_OUT_HINTS):
-            raise HableError("H-able이 로그아웃되었습니다. 다시 로그인한 뒤 실행하세요.")
+            raise LoggedOut("H-able이 로그아웃되었습니다. 다시 로그인한 뒤 실행하세요.")
         if "비밀번호" in labels:
             raise AccountPasswordRequired(ACCOUNT_PASSWORD_HELP)
     if not user32.IsWindowEnabled(main) or not user32.IsWindowEnabled(screen):
@@ -137,10 +150,15 @@ def process_id(handle: int) -> int:
     return value.value
 
 
+def find_main_window() -> int:
+    """H-able 메인 창 핸들. 실행 중이 아니면 0. 예외를 올리지 않는다."""
+    return user32.FindWindowW(MAIN_WINDOW_CLASS, None)
+
+
 def main_window() -> int:
-    handle = user32.FindWindowW(MAIN_WINDOW_CLASS, None)
+    handle = find_main_window()
     if not handle:
-        raise HableError(
+        raise HableNotRunning(
             "H-able이 실행돼 있지 않습니다.\n"
             "C:\\KB증권\\hable\\hablerun.exe 를 실행해 로그인한 뒤 다시 시도하세요."
         )
@@ -162,12 +180,21 @@ def ensure_restored(handle: int) -> bool:
     )
 
 
+def is_minimized(handle: int) -> bool:
+    return bool(user32.IsIconic(handle))
+
+
+def minimize(handle: int) -> None:
+    """다시 내려놓는다. 복원과 같은 경로(`WM_SYSCOMMAND`)를 쓴다."""
+    user32.PostMessageW(handle, WM_SYSCOMMAND, SC_MINIMIZE, 0)
+
+
 def find_screen(main: int, number: str = ASSET_SCREEN) -> int:
     """화면번호로 시작하는 MDI 자식 창을 찾는다."""
     for handle in descendants(main):
         if window_text(handle).startswith(number):
             return handle
-    raise HableError(
+    raise ScreenNotOpen(
         f"H-able에서 [{number}] 화면을 찾지 못했습니다.\n"
         f"화면번호 입력창에 {number}를 넣어 화면을 열어 둔 뒤 다시 시도하세요."
     )

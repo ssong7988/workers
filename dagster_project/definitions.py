@@ -58,6 +58,7 @@ import dagster as dg
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REAL_ESTATE_FINDER = REPO_ROOT / "real-estate-finder"
 REPORT_SITE = REPO_ROOT / "report-site"
+STOCK_IMPORTER = REPO_ROOT / "stock-importer"
 PYTHON_EXE = REAL_ESTATE_FINDER / ".venv" / "Scripts" / "python.exe"
 MANAGE_PY = REPORT_SITE / "manage.py"
 
@@ -88,6 +89,34 @@ def _run_powershell(script_path: Path, *, timeout: float) -> None:
     )
     if result.returncode != 0:
         raise RuntimeError(f"{script_path.name} 실패 (종료 코드 {result.returncode})")
+
+
+def _run_stock(command: str, *, timeout: float = 180) -> subprocess.CompletedProcess:
+    """Run a stock-importer command elevated, through its scheduled task.
+
+    H-able only runs as administrator and Windows UIPI drops input from a
+    lower-integrity process, so this cannot be a plain subprocess the way the
+    finder is. `run-stock.ps1` triggers the registered task instead, which runs
+    with highest privileges and no UAC prompt, then hands back the task's own
+    exit code.
+    """
+    return subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(STOCK_IMPORTER / "run-stock.ps1"),
+            "-Command",
+            command,
+        ],
+        timeout=timeout,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def _run_manage(
@@ -211,6 +240,47 @@ def check_naver_login_op() -> None:
     _run_finder("check-login", timeout=90, capture=True)
 
 
+@dg.op(ins={"start": dg.In(dg.Nothing)})
+def keep_hable_awake_op(context) -> None:
+    """H-able 세션이 끊기지 않게 조회를 한 번 누른다.
+
+    네이버와 달리 H-able 로그인은 자동화할 수 없다 - 인증서가 필요하고 그
+    비밀번호는 이 저장소가 갖지 않는다. 한 번 풀리면 사람이 다시 로그인해야
+    하므로, 풀리기 전에 막는 쪽이 값이 크다.
+
+    **어떤 경우에도 실패하지 않는다.** H-able을 꺼 둔 날에도 이 잡은 매시
+    돌고, 그때마다 카카오톡 경고가 가면 곤란하다. 수집 전에 정말 필요한 확인은
+    `check_hable_ready_op`이 따로 한다.
+
+    사람이 자리에 있으면 수집기 쪽에서 건너뛴다(`keepalive.decide`). 창을
+    맨 위로 올려 조회를 누르는 동작이라 작업 중에 튀어오르면 방해가 된다.
+    """
+    try:
+        result = _run_stock("hable-keepalive")
+    except Exception as exc:  # noqa: BLE001 - 이 op은 절대 실행을 실패시키지 않는다
+        context.log.warning(f"H-able 깨우기를 실행하지 못했습니다: {exc}")
+        return
+    context.log.info((result.stdout or "").strip() or "출력이 없습니다.")
+    if result.returncode != 0:
+        context.log.warning(f"H-able 깨우기 종료 코드 {result.returncode}")
+
+
+@dg.op(retry_policy=HEALTH_RETRY_POLICY)
+def check_hable_ready_op(context) -> None:
+    """수집 전에 H-able이 수집 가능한 상태인지 확인한다.
+
+    여기서는 실패해야 한다 - 실패해야 `alert_on_failure`가 카카오톡을 보내고,
+    사람이 수집 시각 전에 H-able을 켜거나 다시 로그인할 수 있다.
+    """
+    result = _run_stock("hable-status")
+    context.log.info((result.stdout or "").strip() or "출력이 없습니다.")
+    if result.returncode != 0:
+        raise RuntimeError(
+            "H-able이 수집할 수 있는 상태가 아닙니다. "
+            + ((result.stdout or "").strip().splitlines() or ["사유 불명"])[-1]
+        )
+
+
 @dg.op(
     retry_policy=RETRY_POLICY,
     ins={"start": dg.In(dg.Nothing)},
@@ -329,8 +399,14 @@ def server_check_job() -> None:
     description="07시 수집 한 시간 전에 서버와 네이버 로그인을 확인한다.",
 )
 def pre_scan_health_job() -> None:
-    """06:00 사전 점검. 실패 시 failure hook이 카카오톡으로 알린다."""
-    check_naver_login_op(start=ensure_site_op())
+    """서버·네이버 점검과 H-able 세션 유지. 실패 시 카카오톡으로 알린다.
+
+    앞의 두 단계는 실패하면 알리고, 마지막 H-able 깨우기는 알리지 않는다 -
+    그쪽은 못 해도 그만이고, 정말 필요한 확인은 `hable_ready_job`이 한다.
+    """
+    started = ensure_site_op()
+    check_naver_login_op(start=started)
+    keep_hable_awake_op(start=started)
 
 
 scan_job = dg.define_asset_job(
@@ -345,6 +421,15 @@ morning_report_job = dg.define_asset_job(
     description="서버 확인 → 최신 수집 확인/재시도 → 전체 리포트 발송.",
     hooks={alert_on_failure},
 )
+
+
+@dg.job(
+    hooks={alert_on_failure},
+    description="평일 수집 전에 H-able이 켜져 있고 로그인돼 있는지 확인한다.",
+)
+def hable_ready_job() -> None:
+    """실패하면 카카오톡으로 알린다. 그래야 수집 시각 전에 손을 쓸 수 있다."""
+    check_hable_ready_op()
 
 
 @dg.job(hooks={alert_on_failure})
@@ -389,6 +474,16 @@ scan_schedule = dg.ScheduleDefinition(
     default_status=dg.DefaultScheduleStatus.RUNNING,
     run_config=_scan_config("run"),
 )
+hable_ready_schedule = dg.ScheduleDefinition(
+    name="hable_ready_schedule",
+    job=hable_ready_job,
+    # 평일 18:30 금융자산 수집 30분 전. 수집 잡은 아직 없고, 이 점검이 그
+    # 자리를 먼저 잡아 둔다 - H-able은 사람이 로그인해야 하므로 미리 알아야
+    # 손을 쓸 수 있다.
+    cron_schedule="0 18 * * 1-5",
+    execution_timezone="Asia/Seoul",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+)
 morning_report_schedule = dg.ScheduleDefinition(
     name="morning_report_schedule",
     job=morning_report_job,
@@ -403,6 +498,7 @@ defs = dg.Definitions(
     jobs=[
         server_check_job,
         pre_scan_health_job,
+        hable_ready_job,
         scan_job,
         morning_report_job,
         restart_report_site_job,
@@ -410,6 +506,7 @@ defs = dg.Definitions(
     schedules=[
         server_only_schedule,
         pre_scan_health_schedule,
+        hable_ready_schedule,
         scan_schedule,
         morning_report_schedule,
     ],

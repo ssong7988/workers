@@ -1,6 +1,6 @@
 # 스케줄과 수동 실행
 
-## 하나의 asset 체인, 네 가지 시간표
+## 하나의 asset 체인, 다섯 가지 시간표
 
 ```text
 naver_listings ──→ morning_report
@@ -18,6 +18,7 @@ naver_listings ──→ morning_report
 |---|---:|---|---|---|
 | `server_only_schedule` | `0 0-5,9-11,13-16,18-23 * * *` | `pre_scan_health_job` | `ensure_site_op` → `check_naver_login_op` | 서버 확인, 네이버 로그인이 끊겼으면 다시 로그인 |
 | `pre_scan_health_schedule` | `0 6 * * *` | `pre_scan_health_job` | `ensure_site_op` → `check_naver_login_op` | 07시 수집 전에 서버·Edge/CDP·네이버 로그인 확인 |
+| `hable_ready_schedule` | `0 18 * * 1-5` | `hable_ready_job` | `check_hable_ready_op` | 평일 금융자산 수집 전에 H-able 준비 확인 |
 | `scan_schedule` | `0 7,12,17 * * *` | `scan_job` | `naver_listings` | 서버 확인 후 수집 |
 | `morning_report_schedule` | `0 8 * * *` | `morning_report_job` | `naver_listings` → `morning_report` | 서버 확인, 필요 시 재수집, 전체 리포트 전송 |
 
@@ -25,7 +26,7 @@ naver_listings ──→ morning_report
 `morning_report_schedule`은 `ensure_fresh`. `server_only_schedule`은 설정이
 아예 없다(수집 op를 실행하지 않으므로 넣을 곳이 없다).
 
-모든 시간은 `Asia/Seoul` 기준이며 네 스케줄의 기본 상태는 `RUNNING`이다. `server_check_job`은 스케줄이 없는 수동 실행 전용으로 남아 있다.
+모든 시간은 `Asia/Seoul` 기준이며 다섯 스케줄의 기본 상태는 `RUNNING`이다. `server_check_job`은 스케줄이 없는 수동 실행 전용으로 남아 있다.
 
 ## 각 단계가 실제로 하는 일
 
@@ -57,6 +58,32 @@ naver_listings ──→ morning_report
 돈다(`server_only_schedule`). 세션이 끊겨도 최대 1시간 안에 스스로 복구되고,
 07·12·17시 수집과 08시 리포트는 각자의 경로에서 같은 확인을 한다. 실패하면 1분 뒤
 한 번 재시도하고 그래도 실패하면 `alert_on_failure`가 카카오톡으로 알린다.
+
+### `keep_hable_awake_op` (op)
+
+H-able 세션이 끊기지 않게 [1285]의 조회를 한 번 누른다. 표를 읽지도 저장하지도
+않는다. 승격이 필요하므로 `run-stock.ps1 -Command hable-keepalive`로 작업
+스케줄러를 거친다.
+
+**네이버와 사정이 다르다.** 네이버는 로그아웃돼도 자동으로 다시 로그인하지만,
+H-able 로그인은 인증서가 필요해 자동화 대상이 아니다 — 한 번 풀리면 사람이
+로그인해야 한다. 그래서 풀리기 전에 막는다.
+
+**이 op은 어떤 경우에도 실패하지 않는다.** H-able을 꺼 둔 날에도 매시 돌기
+때문에, 실패로 만들면 하루 종일 카카오톡이 온다. 결과는 실행 로그에만 남는다.
+
+사람이 PC를 쓰는 중이면 수집기 쪽에서 건너뛴다(무입력 3분이 기준). 창을 맨 위로
+올려 클릭하는 동작이라 작업 중에 튀어오르면 방해가 되기 때문이다. 다만 마지막으로
+깨운 지 30분이 지나면 사람이 쓰는 중이어도 누른다 — 사람이 PC를 쓰는 것과 H-able
+세션이 살아 있는 것은 별개다. 최소화돼 있던 창은 끝나고 다시 내려놓는다.
+
+### `check_hable_ready_op` (op)
+
+`run-stock.ps1 -Command hable-status`. 같은 조회를 누르되 **유휴 여부를 따지지
+않고**, H-able이 꺼져 있거나 로그아웃됐거나 [1285]가 없거나 계좌 비밀번호를
+물으면 **실패한다**. 실패해야 `alert_on_failure`가 카카오톡을 보내고, 사람이
+수집 시각 전에 손을 쓸 수 있다. 수집이 이미 돌고 있으면 실패가 아니다 — 수집이
+돈다는 것은 세션이 살아 있다는 뜻이다.
 
 ### `run_scan_op` (op, `naver_listings` 안)
 
@@ -93,6 +120,9 @@ finder venv의 Python으로 `manage.py send_digest`를 직접 실행해 PostgreS
 06:00  pre_scan_health_job ensure_site_op -> check_naver_login_op
           | (같은 잡이 7·8·12·17시를 뺀 매시 정각에도 돈다)
           | 로그아웃이면 스스로 로그인 -> 실패 시 1분 뒤 재시도 -> 카카오 알림
+
+18:00  hable_ready_job     check_hable_ready_op  (평일만)
+          | 실패 시 1분 뒤 재시도 -> 그래도 실패하면 카카오 알림
 
 07:00  scan_job            ensure_site_op -> run_scan_op (mode: run)
           |

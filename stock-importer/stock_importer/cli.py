@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .api_client import ApiError, StockApiClient
+from .hable import keepalive
 from .hable.collector import HableCollector
 from .hable.extract import ExtractionError
 from .hable.window import HableError
@@ -30,6 +31,21 @@ from .payload import build_import_payload
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_DIR / "data"
 LOCK_PATH = DATA_DIR / "run.lock"
+
+
+def _touch_session(collector: HableCollector, *, require_ready: bool) -> int:
+    """세션을 깨우거나 준비 상태를 확인하고, 종료 코드를 돌려준다.
+
+    수집이 이미 돌고 있으면 락을 기다리지 않고 넘어간다. 수집이 돈다는 것은
+    세션이 살아 있다는 뜻이라 여기서 더 할 일이 없다.
+    """
+    if LOCK_PATH.exists():
+        result = {"state": keepalive.STATE_BLOCKED, "detail": "다른 실행이 창을 쓰는 중입니다."}
+    else:
+        with run_lock():
+            result = collector.check_ready() if require_ready else collector.keep_awake()
+    print(f"{result['state']}: {result['detail']}")
+    return keepalive.exit_code(result["state"], require_ready=require_ready)
 
 
 @contextmanager
@@ -84,6 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check-api", help="리포트 서버 연결과 계좌 상태 확인")
     commands.add_parser("hable-probe", help="H-able [1285] 화면 구조 덤프 (전송 없음)")
+    commands.add_parser(
+        "hable-keepalive", help="세션이 끊기지 않게 조회를 한 번 누름 (사람이 자리에 있으면 건너뜀)"
+    )
+    commands.add_parser(
+        "hable-status", help="수집할 수 있는 상태인지 확인 (준비 안 됐으면 실패로 끝남)"
+    )
     commands.add_parser("hable-collect", help="H-able [1285]을 읽어 JSON으로만 저장")
     commands.add_parser("hable-import", help="H-able [1285]을 읽어 리포트 서버로 전달")
     commands.add_parser("web-browser", help="[재워 둠] KB 전용 Edge를 mable 주소로 띄우기")
@@ -218,6 +240,10 @@ def main(argv: list[str] | None = None) -> None:
             return
 
         collector = HableCollector(DATA_DIR)
+
+        if args.command in ("hable-keepalive", "hable-status"):
+            require_ready = args.command == "hable-status"
+            raise SystemExit(_touch_session(collector, require_ready=require_ready))
 
         if args.command == "hable-probe":
             with run_lock():

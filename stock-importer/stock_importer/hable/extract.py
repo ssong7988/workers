@@ -25,6 +25,8 @@ user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
 CF_UNICODETEXT = 13
+# 이 데스크톱 세션의 마지막 입력 시각. 사람이 자리에 있는지 판단하는 데 쓴다.
+LASTINPUTINFO_SIZE = 8
 VK_CONTROL, VK_C, VK_ESCAPE, VK_MENU = 0x11, 0x43, 0x1B, 0x12
 KEYEVENTF_KEYUP = 0x0002
 MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
@@ -333,6 +335,31 @@ def window_title(handle: int) -> str:
     from .window import window_text
 
     return window_text(handle)
+
+
+class _LastInputInfo(ctypes.Structure):
+    _fields_ = [("cbSize", w.UINT), ("dwTime", w.DWORD)]
+
+
+def idle_seconds() -> float:
+    """이 세션에 사람의 입력이 없던 시간(초).
+
+    `GetLastInputInfo`는 세션 전체를 본다 - 어느 창을 만졌든 상관없다. 그래서
+    "사람이 PC 앞에 있는가"를 묻는 데는 맞지만 "H-able을 만졌는가"에는 답하지
+    못한다. 그 한계는 부르는 쪽에서 다룬다(`keepalive.decide`).
+
+    우리가 만들어 내는 클릭도 입력으로 집계된다. 깨우고 나면 이 값이 0부터
+    다시 올라간다.
+    """
+    info = _LastInputInfo()
+    info.cbSize = LASTINPUTINFO_SIZE
+    if not user32.GetLastInputInfo(ctypes.byref(info)):
+        # 알 수 없으면 "사람이 있다"고 보는 편이 안전하다. 화면을 덜 건드린다.
+        return 0.0
+    kernel32.GetTickCount64.restype = ctypes.c_ulonglong
+    elapsed = kernel32.GetTickCount64() - info.dwTime
+    # dwTime은 32비트라 49.7일마다 한 바퀴 돈다. 음수가 나오면 그 경우다.
+    return max(0.0, elapsed / 1000.0)
 
 
 def pin_to_top(handle: int) -> None:

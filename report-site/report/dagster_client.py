@@ -51,8 +51,8 @@ MAX_RUNS = 20
 #
 # scan_job and morning_report_job are asset jobs over the chain
 # naver_listings -> morning_report; the lineage lives in the asset graph, not
-# here. server_check_job, pre_scan_health_job, and restart_report_site_job are
-# plain op jobs.
+# here. server_check_job, pre_scan_health_job, hable_ready_job, and
+# restart_report_site_job are plain op jobs.
 JOBS = (
     {
         "name": "server_check_job",
@@ -69,6 +69,13 @@ JOBS = (
         "schedules": (
             {"description": "서버 확인 → 네이버 로그인 확인", "cron": "6시"},
             {"description": "서버 확인 → 네이버 로그인 확인", "cron": "그 외 매시 정각"},
+        ),
+    },
+    {
+        "name": "hable_ready_job",
+        "purpose": "평일 수집 전에 H-able이 켜져 있고 로그인돼 있는지 확인한다 (op job)",
+        "schedules": (
+            {"description": "H-able 준비 확인", "cron": "평일 18시"},
         ),
     },
     {

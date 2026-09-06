@@ -24,11 +24,12 @@ from ..parsing import (
     parse_delimited_table,
     row_to_position,
 )
-from . import window
+from . import keepalive, window
 from .export import click_toolbar, export_grid
 from .extract import (
     ExtractionError,
     capture,
+    idle_seconds,
     pin_to_top,
     close_popup_menus,
     copy_grid,
@@ -40,6 +41,11 @@ from .extract import (
 
 def iso_now() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def _first_line(exc: Exception) -> str:
+    """안내문의 첫 줄만. 뒷줄은 사람이 할 일을 적은 여러 줄짜리다."""
+    return str(exc).splitlines()[0]
 
 
 class HableCollector:
@@ -136,6 +142,74 @@ class HableCollector:
         return headers, rows, how
 
     # ------------------------------------------------------------------ 공개
+
+    def keep_awake(self) -> dict[str, Any]:
+        """세션이 끊기지 않게 조회를 한 번 누른다.
+
+        예외를 올리지 않는다. 깨우지 못하는 것은 알릴 일이지 실행을 실패로
+        만들 일이 아니다 - H-able을 꺼 둔 날에도 매시 경고가 오면 곤란하다.
+        """
+        decision = keepalive.decide(
+            idle_seconds(), keepalive.seconds_since_touch(self.data_dir)
+        )
+        if not decision.touch:
+            return {"state": keepalive.STATE_SKIPPED, "detail": decision.reason}
+        return self._touch(decision.reason)
+
+    def check_ready(self) -> dict[str, Any]:
+        """지금 수집할 수 있는 상태인지 본다. 유휴 여부는 따지지 않는다.
+
+        수집 직전 점검용이다. 사람이 손을 대야 하는 상태면 부르는 쪽이 그것을
+        실패로 바꿔 알림을 부른다(`keepalive.exit_code`).
+        """
+        return self._touch("수집 전 점검입니다.")
+
+    def _touch(self, reason: str) -> dict[str, Any]:
+        """조회를 한 번 누른다. 표를 읽지도 저장하지도 않는다.
+
+        상태를 문자열로 짐작하지 않으려고 예외 타입으로 가른다. 어느 것이든
+        창을 맨 위로 올린 것은 반드시 되돌린다.
+        """
+        handle = window.find_main_window()
+        if not handle:
+            return {
+                "state": keepalive.STATE_NOT_RUNNING,
+                "detail": "H-able이 실행 중이 아닙니다.",
+            }
+        # 클릭하려면 창을 복원해야 하는데, 이건 매시 도는 작업이다. 사용자가
+        # 내려둔 창을 올려놓은 채로 두면 한 시간마다 화면이 바뀐다.
+        was_minimized = window.is_minimized(handle)
+        try:
+            main, screen = self._open_screen()
+        except window.AccountPasswordRequired as exc:
+            return {"state": keepalive.STATE_PASSWORD_REQUIRED, "detail": _first_line(exc)}
+        except window.LoggedOut as exc:
+            return {"state": keepalive.STATE_LOGGED_OUT, "detail": _first_line(exc)}
+        except window.HableNotRunning as exc:
+            return {"state": keepalive.STATE_NOT_RUNNING, "detail": _first_line(exc)}
+        except window.ScreenNotOpen as exc:
+            return {"state": keepalive.STATE_SCREEN_MISSING, "detail": _first_line(exc)}
+        except (window.HableError, ExtractionError) as exc:
+            return {"state": keepalive.STATE_FAILED, "detail": _first_line(exc)}
+
+        try:
+            notice = self._logged_out_notice(main)
+            if notice:
+                return {"state": keepalive.STATE_LOGGED_OUT, "detail": notice}
+            self._query(main, screen, self._grid_pane(screen))
+        except window.AccountPasswordRequired as exc:
+            return {"state": keepalive.STATE_PASSWORD_REQUIRED, "detail": _first_line(exc)}
+        except window.LoggedOut as exc:
+            return {"state": keepalive.STATE_LOGGED_OUT, "detail": _first_line(exc)}
+        except (window.HableError, ExtractionError) as exc:
+            return {"state": keepalive.STATE_FAILED, "detail": _first_line(exc)}
+        finally:
+            unpin(main)
+            if was_minimized:
+                window.minimize(main)
+
+        keepalive.record_touch(self.data_dir)
+        return {"state": keepalive.STATE_OK, "detail": f"조회를 눌렀습니다. {reason}"}
 
     def probe(self) -> dict[str, Any]:
         """화면 구조를 그대로 적어 둔다. 아무것도 바꾸지 않는다.
