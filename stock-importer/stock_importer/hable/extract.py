@@ -308,9 +308,10 @@ def ensure_clickable(main_handle: int, screen_handle: int, x: int, y: int) -> No
     창이라 프로세스만 보면 통과해 버리고, 클릭은 툴바가 아니라 이벤트 화면으로
     간다. 실제로 그렇게 한참 헛돌았다.
     """
-    from .window import clear_covering_dialogs, clear_notice_screens
+    from .window import clear_covering_dialogs, clear_notice_screens, ensure_query_ready
 
     for attempt in range(3):
+        ensure_query_ready(main_handle, screen_handle)
         if belongs_to_screen(user32.WindowFromPoint(w.POINT(x, y)), screen_handle):
             return
         if attempt == 0:

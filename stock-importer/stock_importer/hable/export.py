@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import csv
 import ctypes
+import re
 import time
+import warnings
 from pathlib import Path
 
 from .extract import (
@@ -42,6 +44,8 @@ TOOLBAR_FROM_RIGHT = {
 SAVE_DIALOG_CLASS = "#32770"
 WM_SETTEXT = 0x000C
 BM_CLICK = 0x00F5
+PROCESS_TERMINATE = 0x0001
+WM_CLOSE = 0x0010
 
 
 # 우클릭 메뉴에서 무엇을 고를지. 가벼운 것이 먼저다 - CSV와 TXT는 텍스트 파일
@@ -283,6 +287,91 @@ def read_open_workbook(*, close: bool = True) -> tuple[list[str], list[list[str]
         pythoncom.CoUninitialize()
 
 
+_CELL_ADDRESS = re.compile(r"^([A-Z]+)([1-9][0-9]*)$")
+
+
+def _column_number(letters: str) -> int:
+    value = 0
+    for letter in letters:
+        value = value * 26 + ord(letter) - ord("A") + 1
+    return value
+
+
+def table_from_uia_cells(cells: list[tuple[str, str]]) -> tuple[list[str], list[list[str]]]:
+    """Excel UIA 셀 `(주소, 값)`을 직사각형 표로 되돌린다."""
+    found: dict[tuple[int, int], str] = {}
+    max_row = max_column = 0
+    for address, value in cells:
+        match = _CELL_ADDRESS.fullmatch(address)
+        if not match:
+            continue
+        column = _column_number(match.group(1))
+        row = int(match.group(2))
+        found[row, column] = value
+        max_row = max(max_row, row)
+        max_column = max(max_column, column)
+    if max_row < 1 or max_column < 1:
+        return [], []
+    matrix = [
+        [found.get((row, column), "").strip() for column in range(1, max_column + 1)]
+        for row in range(1, max_row + 1)
+    ]
+    return matrix[0], [row for row in matrix[1:] if any(row)]
+
+
+def _excel_roots() -> list[int]:
+    return [
+        handle for handle in top_level_windows()
+        if class_name(handle) == "XLMAIN" and ctypes.windll.user32.IsWindowVisible(handle)
+    ]
+
+
+def read_workbook_via_uia(handle: int) -> tuple[list[str], list[list[str]]] | None:
+    """COM을 인증 마법사가 막을 때 Excel의 UIA 셀 값으로 읽는다."""
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Revert to STA COM threading mode")
+            from pywinauto import Desktop
+    except ImportError:  # pragma: no cover - 설치 안내
+        return None
+    try:
+        workbook = Desktop(backend="uia").window(handle=handle)
+        cells = []
+        for item in workbook.descendants(control_type="DataItem"):
+            address = item.element_info.name or ""
+            try:
+                value = item.iface_value.CurrentValue or ""
+            except Exception:
+                continue
+            cells.append((address, str(value)))
+        headers, rows = table_from_uia_cells(cells)
+        return (headers, rows) if headers and rows else None
+    except Exception:
+        return None
+
+
+def _close_generated_excel(handle: int, old_processes: set[int]) -> None:
+    """이번 내보내기가 새로 만든 Excel만 닫는다."""
+    pid = process_id(handle)
+    if not pid or pid in old_processes:
+        return
+    user32 = ctypes.windll.user32
+    user32.PostMessageW(handle, WM_CLOSE, 0, 0)
+    time.sleep(0.5)
+    # 미인증 Office는 종료 요청도 인증 마법사에서 막는다. 이 PID는 내보내기
+    # 직전에는 없었고 우리가 만든 통합 문서 하나뿐이므로 남아 있으면 종료한다.
+    if any(process_id(root) == pid for root in _excel_roots()):
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_uint]
+        process = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+        if process:
+            try:
+                kernel32.TerminateProcess(process, 0)
+            finally:
+                kernel32.CloseHandle(process)
+
+
 def export_grid(
     main_handle: int, screen_handle: int, pane: Pane, folder: Path, stem: str = "hable-1285"
 ) -> tuple[list[str], list[list[str]], str]:
@@ -296,6 +385,8 @@ def export_grid(
     """
     folder.mkdir(parents=True, exist_ok=True)
     process = process_id(main_handle)
+    existing_excel = set(_excel_roots())
+    existing_excel_processes = {process_id(handle) for handle in existing_excel}
 
     through_menu = export_via_menu(main_handle, screen_handle, pane, folder, stem)
     if through_menu is not None:
@@ -320,6 +411,14 @@ def export_grid(
         if opened is not None:
             headers, rows = opened
             return headers, rows, "Excel 통합 문서(읽고 닫음)"
+        for handle in _excel_roots():
+            if handle in existing_excel:
+                continue
+            opened = read_workbook_via_uia(handle)
+            if opened is not None:
+                headers, rows = opened
+                _close_generated_excel(handle, existing_excel_processes)
+                return headers, rows, "Excel 접근성 셀(읽고 닫음)"
         time.sleep(0.5)
 
     raise ExtractionError(

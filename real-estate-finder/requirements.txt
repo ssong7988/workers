@@ -11,3 +11,6 @@ psycopg[binary]>=3.2,<4
 # Serves Django admin's own CSS/JS under waitress, which does not serve
 # static files itself and never runs with DEBUG on.
 whitenoise>=6,<7
+# H-able Excel export fallback: Office activation dialogs can reject COM while
+# the worksheet values remain available through Windows UI Automation.
+pywinauto>=0.6.9,<0.7

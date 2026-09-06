@@ -54,6 +54,36 @@ class HableError(RuntimeError):
     """H-able 창을 못 찾았거나 상태가 수집할 수 없는 상태일 때."""
 
 
+class AccountPasswordRequired(HableError):
+    """계좌 조회 인증이 필요하다. 좌표 오류와 구분한다."""
+
+
+ACCOUNT_PASSWORD_HELP = (
+    "H-able 계좌 비밀번호 입력/저장이 필요합니다.\n"
+    "H-able 환경설정 → 보안설정 → 계좌설정에서 계좌비밀번호를 저장한 뒤 "
+    "[1285] 총자산현황을 조회하세요. 비밀번호는 H-able에만 입력하세요."
+)
+
+
+def ensure_query_ready(main: int, screen: int) -> None:
+    """인증 팝업을 가림창으로 오인하거나 닫지 않는다. 읽기만 수행한다."""
+    for handle in notice_dialogs(process_id(main)):
+        # 입력 컨트롤의 값은 진단 문구에도 포함하지 않는다.
+        labels = " ".join(
+            window_text(child) for child in descendants(handle)
+            if class_name(child) == "Static"
+        )
+        if any(hint in labels for hint in LOGGED_OUT_HINTS):
+            raise HableError("H-able이 로그아웃되었습니다. 다시 로그인한 뒤 실행하세요.")
+        if "비밀번호" in labels:
+            raise AccountPasswordRequired(ACCOUNT_PASSWORD_HELP)
+    if not user32.IsWindowEnabled(main) or not user32.IsWindowEnabled(screen):
+        raise HableError(
+            "H-able 대화상자가 조회 화면을 비활성화했습니다. 열린 대화상자를 확인하세요.\n"
+            + ACCOUNT_PASSWORD_HELP
+        )
+
+
 @dataclass(frozen=True)
 class Pane:
     """화면 안의 사각 영역 하나. 좌표는 그 화면 창 기준의 상대값이다."""

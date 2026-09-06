@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import unittest
 
-from stock_importer.hable.export import pick_export_item
+from stock_importer.hable.export import pick_export_item, table_from_uia_cells
 
 
 class PickExportItemTests(unittest.TestCase):
@@ -41,3 +41,22 @@ class PickExportItemTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class UiaTableTests(unittest.TestCase):
+    def test_rebuilds_rows_and_pads_missing_cells(self) -> None:
+        headers, rows = table_from_uia_cells([
+            ("A1", "종목명"), ("B1", "계좌번호"), ("C1", "평가금액"),
+            ("A2", "삼성전자"), ("B2", "338-711-781-01"), ("C2", "33,215,000"),
+            ("A3", "현금"), ("C3", "1,108,782"),
+        ])
+        self.assertEqual(headers, ["종목명", "계좌번호", "평가금액"])
+        self.assertEqual(rows[1], ["현금", "", "1,108,782"])
+
+    def test_ignores_non_cell_elements_and_blank_rows(self) -> None:
+        headers, rows = table_from_uia_cells([
+            ("Ribbon", "무시"), ("A1", "종목명"), ("B1", "수량"),
+            ("A2", ""), ("B2", ""), ("A3", "삼성전자"), ("B3", "130"),
+        ])
+        self.assertEqual(headers, ["종목명", "수량"])
+        self.assertEqual(rows, [["삼성전자", "130"]])

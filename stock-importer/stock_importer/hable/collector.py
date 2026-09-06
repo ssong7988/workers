@@ -61,16 +61,32 @@ class HableCollector:
             print("H-able 창이 최소화돼 있어 복원했습니다.")
         # 클릭이 닿으려면 H-able이 z-order 위에 있어야 한다. 활성화는 자주
         # 거절당하지만 z-order를 올리는 것은 거절되지 않는다. 끝나면 되돌린다.
-        pin_to_top(main)
         screen = window.find_screen(main, self.SCREEN)
+        window.ensure_query_ready(main, screen)
+        pin_to_top(main)
         # 광고·공지 팝업이 always-on-top이라 z-order로는 못 이긴다. 먼저 치운다.
-        popups = window.clear_covering_dialogs(main, screen)
-        if popups:
-            print("가리고 있던 팝업을 닫았습니다: " + ", ".join(popups))
-        closed = window.clear_notice_screens(main, screen)
-        if closed:
-            print("로그인 안내 화면을 닫았습니다: " + ", ".join(closed))
+        try:
+            popups = window.clear_covering_dialogs(main, screen)
+            if popups:
+                print("가리고 있던 팝업을 닫았습니다: " + ", ".join(popups))
+            closed = window.clear_notice_screens(main, screen)
+            if closed:
+                print("로그인 안내 화면을 닫았습니다: " + ", ".join(closed))
+        except BaseException:
+            unpin(main)
+            raise
         return main, screen
+
+    def _query(self, main: int, screen: int, grid: window.Pane) -> None:
+        window.ensure_query_ready(main, screen)
+        click_toolbar(main, screen, grid, "query")
+        deadline = time.monotonic() + self.QUERY_WAIT_SECONDS
+        while True:
+            window.ensure_query_ready(main, screen)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.2, remaining))
 
     @staticmethod
     def _logged_out_notice(main: int) -> str:
@@ -105,8 +121,7 @@ class HableCollector:
         """
         # 화면에 남아 있는 값은 언제 조회한 것인지 알 수 없다. 오늘 잔고를
         # 읽으려면 우리가 직접 조회를 눌러야 한다.
-        click_toolbar(main, screen, grid, "query")
-        time.sleep(self.QUERY_WAIT_SECONDS)
+        self._query(main, screen, grid)
 
         clipboard = copy_grid(main, screen, grid)
         if clipboard.strip():
@@ -146,8 +161,7 @@ class HableCollector:
         found = window.panes(screen)
         grid = self._grid_pane(screen)
 
-        click_toolbar(main, screen, grid, "query")
-        time.sleep(self.QUERY_WAIT_SECONDS)
+        self._query(main, screen, grid)
         shot = capture(main, screen, self.data_dir / "hable-1285.png")
         clipboard = copy_grid(main, screen, grid)
         menus = open_context_menu(main, screen, grid)
