@@ -176,8 +176,10 @@ class ReportViewTests(TestCase):
 
     def test_urgent_section_respects_region_filter(self) -> None:
         other = self._create_gwanggyo_condition()
-        self.listing("1", 2_550_000_000)
-        self.listing("2", 2_550_000_000, condition=other, complex_name="광교 다른단지")
+        # 급매 기준가는 두 조건 모두 25억이고, 급매는 그 이하일 때다. 25.5억을
+        # 넣으면 어느 쪽도 급매가 아니어서 필터가 걸렀는지 알 수 없다.
+        self.listing("1", 2_400_000_000)
+        self.listing("2", 2_400_000_000, condition=other, complex_name="광교 다른단지")
 
         response = self.client.get(self.url + "?region=광교")
         self.assertEqual(len(response.context["urgent"]), 1)
