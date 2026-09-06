@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -18,13 +19,15 @@ from typing import Any
 
 from ..parsing import (
     RowError,
+    mask_account_number,
     group_by_account,
     map_columns,
     missing_fields,
     parse_delimited_table,
     row_to_position,
 )
-from . import keepalive, window
+from ..trades import dedupe_rows
+from . import keepalive, trade_screen, window
 from .export import click_toolbar, export_grid
 from .extract import (
     ExtractionError,
@@ -63,14 +66,14 @@ class HableCollector:
 
     # ------------------------------------------------------------------ 상태
 
-    def _open_screen(self) -> tuple[int, int]:
+    def _open_screen(self, number: str | None = None) -> tuple[int, int]:
         main = window.main_window()
         window.ensure_input_allowed(main)
         if window.ensure_restored(main):
             print("H-able 창이 최소화돼 있어 복원했습니다.")
         # 클릭이 닿으려면 H-able이 z-order 위에 있어야 한다. 활성화는 자주
         # 거절당하지만 z-order를 올리는 것은 거절되지 않는다. 끝나면 되돌린다.
-        screen = window.find_screen(main, self.screen)
+        screen = window.find_screen(main, number or self.screen)
         # 겹쳐 있는 다른 화면이 우리 좌표를 가로채지 않게 먼저 앞으로 올린다.
         window.activate_screen(screen)
         window.ensure_query_ready(main, screen)
@@ -323,6 +326,82 @@ class HableCollector:
                 }
             )
         return rows
+
+    def account_numbers(self, main: int, screen: int) -> list[str]:
+        """[1285]에서 계좌번호 원문을 읽는다.
+
+        원문은 돌려주기만 하고 저장하지 않는다. [0112]의 계좌 콤보가 마스킹돼
+        있어 화면으로는 계좌를 가릴 수 없으므로, 이 번호를 그대로 넣어 계좌를
+        고른다. 마스킹은 서버로 보내기 직전에 한다.
+        """
+        headers, rows, _how = self._read_table(main, screen, self._grid_pane(screen))
+        try:
+            index = next(i for i, name in enumerate(headers) if "계좌번호" in name)
+        except StopIteration:
+            raise ExtractionError(
+                "[1285]에서 계좌번호 칸을 찾지 못했습니다."
+            ) from None
+        found: list[str] = []
+        for row in rows:
+            value = row[index].strip() if index < len(row) else ""
+            if value.count("-") >= 2 and value not in found:
+                found.append(value)
+        if not found:
+            raise ExtractionError("[1285]에서 계좌번호를 하나도 읽지 못했습니다.")
+        return found
+
+    @staticmethod
+    def account_order() -> dict[int, str]:
+        """[0112] 계좌 콤보의 순번 → 마스킹 계좌번호.
+
+        콤보의 글자는 그려진 것이라 읽을 수 없다. 그래서 순번으로 고르고,
+        어느 순번이 어느 계좌인지는 설정 파일에 적어 둔다.
+        """
+        path = Path(__file__).resolve().parents[2] / "config" / "account-order.json"
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))["accounts"]
+        except (OSError, ValueError, KeyError) as error:
+            raise ExtractionError(
+                f"계좌 순번 설정을 읽지 못했습니다: {path}\n{error}"
+            ) from error
+        return {int(index): str(number) for index, number in raw.items()}
+
+    def collect_trades(self, since: str, until: str) -> dict[str, Any]:
+        """계좌마다 [0112]를 조회해 **원본 표 그대로** 모은다.
+
+        무엇으로 볼지는 정하지 않는다. 모르는 거래종류 하나 때문에 다섯 계좌를
+        다시 도는 일이 없도록, 화면에서 읽는 일과 분류하는 일을 갈라 둔다.
+        """
+        order = self.account_order()
+        print(f"계좌 {len(order)}개를 순번으로 읽습니다: {sorted(order)}")
+
+        main, screen = self._open_screen(trade_screen.TRADE_SCREEN)
+        accounts: dict[str, dict[str, Any]] = {}
+        try:
+            for index in sorted(order):
+                masked = order[index]
+                headers, rows, how, pages = trade_screen.collect_account(
+                    main, screen, index, since, until, self.data_dir / "trades"
+                )
+                rows = dedupe_rows(rows)
+                count = sum(1 for row in rows[1:] if row and row[0].strip())
+                accounts[masked] = {
+                    "index": index,
+                    "headers": headers,
+                    "rows": rows,
+                    "read_with": how,
+                }
+                print(f"  [{index}] {masked}: {count}건 ({pages}쪽, {how})")
+        finally:
+            unpin(main)
+
+        return {
+            "observed_at": iso_now(),
+            "since": since,
+            "until": until,
+            "source_name": f"H-able [{trade_screen.TRADE_SCREEN}] 거래내역조회",
+            "accounts": accounts,
+        }
 
     def collect_holdings(self) -> dict[str, Any]:
         """1285에서 보유 종목을 읽어 계좌별로 묶는다."""

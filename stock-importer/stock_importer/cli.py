@@ -17,11 +17,13 @@ import json
 import os
 import sys
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Iterator
 
 from .api_client import ApiError, StockApiClient
 from .hable import keepalive
+from .trades import rows_to_cash_flows, summarize, unknown_kinds
 from .hable.collector import HableCollector
 from .hable.extract import ExtractionError
 from .hable.window import HableError
@@ -31,6 +33,48 @@ from .payload import build_import_payload
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_DIR / "data"
 LOCK_PATH = DATA_DIR / "run.lock"
+
+
+def _report_trades(snapshot: dict) -> None:
+    """원본을 현금흐름으로 바꿔 보고, 모르는 거래종류는 한 번에 모아 보여준다.
+
+    화면을 다시 만지지 않으므로 여기서 실패해도 원본은 이미 저장돼 있다.
+    """
+    unknown: dict[str, list[str]] = {}
+    flows: dict[str, list[dict]] = {}
+    for account, table in snapshot["accounts"].items():
+        missing = unknown_kinds(table["headers"], table["rows"])
+        if missing:
+            unknown[account] = missing
+            continue
+        rows = rows_to_cash_flows(table["headers"], table["rows"], account)
+        flows[account] = rows
+        print(f"  {account}: 현금흐름 {len(rows)}건 {summarize(rows)}")
+
+    if unknown:
+        print()
+        print("모르는 거래종류가 있어 그 계좌는 넘겼습니다:")
+        for account, kinds in unknown.items():
+            for kind in kinds:
+                print(f"  {account}: {kind!r}")
+        print("`stock_importer/trades.py`의 FLOW_KINDS에 적어 주세요.")
+    total = sum(len(rows) for rows in flows.values())
+    print(f"현금흐름 {total}건 (계좌 {len(flows)}/{len(snapshot['accounts'])}개)")
+
+
+def _trade_period(since: str | None, until: str | None) -> tuple[str, str]:
+    """기본은 오늘까지의 1년. 화면이 1년 구간을 한 번에 받는 것을 확인했다."""
+    end = date.fromisoformat(until) if until else date.today()
+    if since:
+        start = date.fromisoformat(since)
+    else:
+        try:
+            start = end.replace(year=end.year - 1)
+        except ValueError:  # 2월 29일
+            start = end.replace(year=end.year - 1, day=28)
+    if start > end:
+        raise RuntimeError("시작일이 종료일보다 늦습니다.")
+    return start.isoformat(), end.isoformat()
 
 
 def _touch_session(collector: HableCollector, *, require_ready: bool) -> int:
@@ -119,6 +163,11 @@ def build_parser() -> argparse.ArgumentParser:
         "hable-status", help="수집할 수 있는 상태인지 확인 (준비 안 됐으면 실패로 끝남)"
     )
     commands.add_parser("hable-collect", help="H-able [1285]을 읽어 JSON으로만 저장")
+    trades = commands.add_parser(
+        "hable-trades", help="H-able [0112] 거래내역을 계좌별로 읽어 JSON으로만 저장"
+    )
+    trades.add_argument("--since", default=None, help="시작일 YYYY-MM-DD (기본값: 1년 전)")
+    trades.add_argument("--until", default=None, help="종료일 YYYY-MM-DD (기본값: 오늘)")
     commands.add_parser("hable-import", help="H-able [1285]을 읽어 리포트 서버로 전달")
     commands.add_parser("web-browser", help="[재워 둠] KB 전용 Edge를 mable 주소로 띄우기")
     commands.add_parser("web-probe", help="[재워 둠] mable 화면 구조 덤프")
@@ -263,6 +312,16 @@ def main(argv: list[str] | None = None) -> None:
             _print_probe(dump)
             name = f"hable-probe-{collector.screen}.json"
             print(f"전체 덤프: {_write_json(name, dump)}")
+            return
+
+        if args.command == "hable-trades":
+            since, until = _trade_period(args.since, args.until)
+            print(f"조회기간 {since} ~ {until}")
+            with run_lock():
+                snapshot = collector.collect_trades(since, until)
+            saved = _write_json("hable-trades-raw.json", snapshot)
+            print(f"원본 저장: {saved}")
+            _report_trades(snapshot)
             return
 
         if args.command == "hable-collect":

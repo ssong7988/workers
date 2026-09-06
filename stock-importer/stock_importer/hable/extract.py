@@ -29,6 +29,7 @@ CF_UNICODETEXT = 13
 LASTINPUTINFO_SIZE = 8
 VK_CONTROL, VK_C, VK_ESCAPE, VK_MENU = 0x11, 0x43, 0x1B, 0x12
 VK_A, VK_DELETE, VK_DOWN, VK_RETURN = 0x41, 0x2E, 0x28, 0x0D
+VK_HOME, VK_UP = 0x24, 0x26
 KEYEVENTF_UNICODE = 0x0004
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
@@ -391,6 +392,21 @@ def type_text(text: str, *, delay: float = 0.03) -> None:
         user32.SendInput(1, ctypes.byref(stroke), ctypes.sizeof(_INPUT))
         stroke.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
         user32.SendInput(1, ctypes.byref(stroke), ctypes.sizeof(_INPUT))
+        time.sleep(delay)
+
+
+def type_digits(digits: str, *, delay: float = 0.12) -> None:
+    """숫자를 진짜 키 입력으로 보낸다.
+
+    날짜 칸 같은 자리 나뉜 컨트롤은 유니코드 입력(`WM_CHAR`)을 받지 않는다 -
+    실제로 `20260906`을 넣었더니 `18000101`이 됐다. 키코드로 눌러야 한다.
+    """
+    for letter in digits:
+        if not letter.isdigit():
+            continue
+        code = 0x30 + int(letter)
+        user32.keybd_event(code, 0, 0, 0)
+        user32.keybd_event(code, 0, KEYEVENTF_KEYUP, 0)
         time.sleep(delay)
 
 
