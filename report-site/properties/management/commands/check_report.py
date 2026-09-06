@@ -10,7 +10,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         latest = (
-            Listing.objects.filter(active=True, condition__enabled=True)
+            Listing.objects.filter(
+                active=True, condition__enabled=True, duplicate_of__isnull=True
+            )
             .order_by("-observed_at")
             .first()
         )

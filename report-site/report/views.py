@@ -78,7 +78,7 @@ def index(request) -> HttpResponse:
         conditions = [c for c in conditions if c.region == scope.region]
 
     listings_qs = Listing.objects.filter(
-        active=True, condition__enabled=True
+        active=True, condition__enabled=True, duplicate_of__isnull=True
     ).select_related("condition")
     if scope.condition_id:
         listings_qs = listings_qs.filter(condition_id=scope.condition_id)

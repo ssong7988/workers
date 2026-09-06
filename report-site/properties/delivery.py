@@ -175,9 +175,9 @@ class DeliveryService:
 
     def send_digest(self) -> str:
         listings = list(
-            Listing.objects.filter(active=True, condition__enabled=True).select_related(
-                "condition"
-            )
+            Listing.objects.filter(
+                active=True, condition__enabled=True, duplicate_of__isnull=True
+            ).select_related("condition")
         )
         if not listings:
             self._send_text("☀️ 관심 매물이 없습니다.")

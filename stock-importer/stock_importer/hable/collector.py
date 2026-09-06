@@ -51,12 +51,15 @@ def _first_line(exc: Exception) -> str:
 class HableCollector:
     """열려 있는 1285 화면 하나를 읽는다."""
 
+    # 기본은 총자산현황. 거래내역([0112]) 같은 다른 화면도 같은 방법으로
+    # 읽으므로 화면번호는 상수가 아니라 인자다.
     SCREEN = window.ASSET_SCREEN
     # 조회를 누른 뒤 표가 채워질 때까지. 계좌 다섯 개를 한 번에 부른다.
     QUERY_WAIT_SECONDS = 4.0
 
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, screen: str | None = None) -> None:
         self.data_dir = data_dir
+        self.screen = screen or self.SCREEN
 
     # ------------------------------------------------------------------ 상태
 
@@ -67,7 +70,7 @@ class HableCollector:
             print("H-able 창이 최소화돼 있어 복원했습니다.")
         # 클릭이 닿으려면 H-able이 z-order 위에 있어야 한다. 활성화는 자주
         # 거절당하지만 z-order를 올리는 것은 거절되지 않는다. 끝나면 되돌린다.
-        screen = window.find_screen(main, self.SCREEN)
+        screen = window.find_screen(main, self.screen)
         window.ensure_query_ready(main, screen)
         pin_to_top(main)
         # 광고·공지 팝업이 always-on-top이라 z-order로는 못 이긴다. 먼저 치운다.
@@ -211,20 +214,24 @@ class HableCollector:
         keepalive.record_touch(self.data_dir)
         return {"state": keepalive.STATE_OK, "detail": f"조회를 눌렀습니다. {reason}"}
 
-    def probe(self) -> dict[str, Any]:
-        """화면 구조를 그대로 적어 둔다. 아무것도 바꾸지 않는다.
+    def probe(self, *, query: bool = True) -> dict[str, Any]:
+        """화면 구조를 그대로 적어 둔다.
 
         여기서 나온 것으로 어느 방법(복사/우클릭/내보내기)이 먹히는지 정한다.
+
+        `query=False`면 조회 버튼도 우클릭도 하지 않고 창 구조만 읽는다.
+        툴바 좌표는 1285에서 재서 얻은 값이라, 처음 보는 화면에서는 엉뚱한
+        컨트롤을 누를 수 있다. 모르는 화면은 먼저 보기만 한다.
         """
         main, screen = self._open_screen()
         try:
-            return self._probe(main, screen)
+            return self._probe(main, screen, query=query)
         finally:
             # 클릭을 닿게 하려고 창을 맨 위로 올렸다. 사용자 화면에 그대로
             # 두면 곤란하니 무슨 일이 있어도 되돌린다.
             unpin(main)
 
-    def _probe(self, main: int, screen: int) -> dict[str, Any]:
+    def _probe(self, main: int, screen: int, *, query: bool = True) -> dict[str, Any]:
         left, top, width, height = window.rect(screen)
         process = window.process_id(main)
 
@@ -234,32 +241,37 @@ class HableCollector:
         ]
         found = window.panes(screen)
         grid = self._grid_pane(screen)
+        clipboard = ""
+        menus: list[int] = []
+        export: dict[str, Any] = {"tried": False}
+        if query:
+            self._query(main, screen, grid)
+        # 조회 뒤에 찍는다. 인증에 막힌 화면의 숫자는 낡은 값이라 남길 이유가 없다.
+        shot = capture(main, screen, self.data_dir / f"hable-{self.screen}.png")
+        if query:
+            clipboard = copy_grid(main, screen, grid)
+            menus = open_context_menu(main, screen, grid)
+            close_popup_menus()
 
-        self._query(main, screen, grid)
-        shot = capture(main, screen, self.data_dir / "hable-1285.png")
-        clipboard = copy_grid(main, screen, grid)
-        menus = open_context_menu(main, screen, grid)
-        close_popup_menus()
+            # 엑셀 내보내기도 실제로 눌러 본다. 어느 방법이 먹히는지가 이 명령의
+            # 존재 이유다. 실패해도 probe 자체는 끝까지 간다.
+            export = {"tried": True}
+            try:
+                export_headers, export_rows, how = export_grid(
+                    main, screen, grid, self.data_dir / "hable"
+                )
+                export.update(
+                    how=how,
+                    headers=export_headers,
+                    columns=map_columns(export_headers),
+                    missing_fields=missing_fields(map_columns(export_headers)),
+                    row_count=len(export_rows),
+                    first_rows=export_rows[:3],
+                )
+            except (ExtractionError, OSError) as error:
+                export.update(error=str(error))
 
         headers, rows = parse_delimited_table(clipboard)
-
-        # 엑셀 내보내기도 실제로 눌러 본다. 어느 방법이 먹히는지가 이 명령의
-        # 존재 이유다. 실패해도 probe 자체는 끝까지 간다.
-        export: dict[str, Any] = {"tried": True}
-        try:
-            export_headers, export_rows, how = export_grid(
-                main, screen, grid, self.data_dir / "hable"
-            )
-            export.update(
-                how=how,
-                headers=export_headers,
-                columns=map_columns(export_headers),
-                missing_fields=missing_fields(map_columns(export_headers)),
-                row_count=len(export_rows),
-                first_rows=export_rows[:3],
-            )
-        except (ExtractionError, OSError) as error:
-            export.update(error=str(error))
 
         return {
             "observed_at": iso_now(),
@@ -276,6 +288,7 @@ class HableCollector:
             "context_menu_items": [
                 item.name for handle in menus for item in read_menu_items(handle)
             ],
+            "controls": self._controls(screen),
             "clipboard_characters": len(clipboard),
             "clipboard_headers": headers,
             "clipboard_columns": map_columns(headers),
@@ -285,6 +298,29 @@ class HableCollector:
             "excel_export": export,
             "screenshot": str(shot),
         }
+
+    @staticmethod
+    def _controls(screen: int) -> list[dict[str, Any]]:
+        """화면 안의 표준 컨트롤 목록.
+
+        계좌 콤보, 조회기간 입력칸, 조회·다음 버튼이 어디 있는지 알아야
+        거래내역처럼 조건을 넣고 여러 번 조회하는 화면을 다룰 수 있다.
+        그린 셀(`AfxWnd120`)은 수가 많고 알아볼 것이 없어 뺀다.
+        """
+        rows = []
+        for handle in window.descendants(screen):
+            name = window.class_name(handle)
+            if name == "AfxWnd120":
+                continue
+            rows.append(
+                {
+                    "handle": hex(handle),
+                    "class": name,
+                    "text": window.window_text(handle)[:60],
+                    "rect": window.rect(handle),
+                }
+            )
+        return rows
 
     def collect_holdings(self) -> dict[str, Any]:
         """1285에서 보유 종목을 읽어 계좌별로 묶는다."""
@@ -333,7 +369,7 @@ class HableCollector:
         return {
             "observed_at": iso_now(),
             "as_of": date.today().isoformat(),
-            "source_name": f"H-able [{self.SCREEN}] 총자산현황",
+            "source_name": f"H-able [{self.screen}] 총자산현황",
             "read_with": method,
             "headers": headers,
             "rows_read": len(rows),

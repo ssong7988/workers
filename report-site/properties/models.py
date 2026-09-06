@@ -296,6 +296,17 @@ class Listing(PropertyFields):
     last_urgent_alert_price_won = models.PositiveBigIntegerField(
         "마지막 급매 알림 가격", null=True, blank=True
     )
+    # 네이버가 같은 집을 중개사별로 두 건으로 보여줄 때, 늦게 본 쪽이 먼저 본
+    # 쪽을 가리킨다. 행은 지우지 않는다 - 무엇이 왜 묶였는지 남겨야 한다.
+    # 화면과 카카오는 대표만 센다.
+    duplicate_of = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        related_name="duplicates",
+        verbose_name="대표 매물",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         ordering = ("price_won", "floor", "listing_id")

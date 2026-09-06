@@ -99,7 +99,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check-api", help="리포트 서버 연결과 계좌 상태 확인")
-    commands.add_parser("hable-probe", help="H-able [1285] 화면 구조 덤프 (전송 없음)")
+    probe = commands.add_parser(
+        "hable-probe", help="H-able 화면 구조 덤프 (전송 없음)"
+    )
+    probe.add_argument(
+        "--screen",
+        default=None,
+        help="덤프할 화면번호 (기본값: 1285 총자산현황). 예: 0112 거래내역조회",
+    )
+    probe.add_argument(
+        "--no-query",
+        action="store_true",
+        help="조회·복사·내보내기를 하지 않고 창 구조만 읽는다 (처음 보는 화면용)",
+    )
     commands.add_parser(
         "hable-keepalive", help="세션이 끊기지 않게 조회를 한 번 누름 (사람이 자리에 있으면 건너뜀)"
     )
@@ -239,7 +251,7 @@ def main(argv: list[str] | None = None) -> None:
                     print(f"저장: {_write_json('web-holdings-latest.json', snapshot)}")
             return
 
-        collector = HableCollector(DATA_DIR)
+        collector = HableCollector(DATA_DIR, screen=getattr(args, "screen", None))
 
         if args.command in ("hable-keepalive", "hable-status"):
             require_ready = args.command == "hable-status"
@@ -247,9 +259,10 @@ def main(argv: list[str] | None = None) -> None:
 
         if args.command == "hable-probe":
             with run_lock():
-                dump = collector.probe()
+                dump = collector.probe(query=not args.no_query)
             _print_probe(dump)
-            print(f"전체 덤프: {_write_json('hable-probe-latest.json', dump)}")
+            name = f"hable-probe-{collector.screen}.json"
+            print(f"전체 덤프: {_write_json(name, dump)}")
             return
 
         if args.command == "hable-collect":

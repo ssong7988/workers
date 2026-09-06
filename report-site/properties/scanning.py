@@ -98,6 +98,67 @@ def _no_alert_reason(
     return "\n".join([head, *(f"  - {reason}" for reason in reasons)])
 
 
+def dedupe_key(listing: Listing) -> tuple:
+    """같은 집으로 볼 기준.
+
+    한 단지에서 같은 타입이 같은 층에 같은 가격으로 두 건 올라오면, 중개사가
+    둘일 뿐 집은 하나다. 공백은 표기 차이일 뿐이라 지우고 비교한다.
+    """
+    return (
+        listing.condition_id,
+        listing.complex_name.replace(" ", ""),
+        listing.type_name.replace(" ", ""),
+        listing.floor_text.replace(" ", ""),
+        listing.price_won,
+    )
+
+
+def _same_building(one: Listing, other: Listing) -> bool:
+    """동이 충돌하지 않는가.
+
+    101동 10층과 102동 10층은 같은 가격이어도 다른 집이다. 다만 네이버가 동을
+    늘 주지는 않으므로, **양쪽 다 값이 있고 서로 다를 때만** 다른 집으로 본다.
+    """
+    if not one.building or not other.building:
+        return True
+    return one.building.replace(" ", "") == other.building.replace(" ", "")
+
+
+def collapse_duplicates(matched: list[Listing]) -> dict[int, Listing]:
+    """중복을 대표에 붙이고, 붙인 것들을 `{pk: 대표}`로 돌려준다.
+
+    대표는 가장 먼저 본 매물이다. 그래야 스캔마다 대표가 바뀌지 않는다.
+
+    이번 스캔에서 본 매물만 다루므로 승격이 저절로 된다 - 대표가 사라지면
+    남은 쪽이 자기 묶음의 첫 번째가 되고, 그때 `duplicate_of`가 풀린다.
+    """
+    buckets_by_key: dict[tuple, list[list[Listing]]] = {}
+    for listing in sorted(matched, key=lambda item: (item.first_seen_at, item.listing_id)):
+        buckets = buckets_by_key.setdefault(dedupe_key(listing), [])
+        for bucket in buckets:
+            # 묶음 전체와 견준다. 동이 없는 매물이 다리를 놓아 101동과 102동이
+            # 한 묶음이 되는 일을 막는다.
+            if all(_same_building(member, listing) for member in bucket):
+                bucket.append(listing)
+                break
+        else:
+            buckets.append([listing])
+
+    duplicates: dict[int, Listing] = {}
+    for buckets in buckets_by_key.values():
+        for bucket in buckets:
+            primary, rest = bucket[0], bucket[1:]
+            if primary.duplicate_of_id is not None:
+                primary.duplicate_of = None
+                primary.save(update_fields=("duplicate_of",))
+            for other in rest:
+                if other.duplicate_of_id != primary.pk:
+                    other.duplicate_of = primary
+                    other.save(update_fields=("duplicate_of",))
+                duplicates[other.pk] = primary
+    return duplicates
+
+
 @transaction.atomic
 def record_scan(
     *,
@@ -146,8 +207,11 @@ def record_scan(
     }
     matched: list[Listing] = []
     alerts: list[AlertDecision] = []
+    # 중복을 접은 뒤에 세어야 하므로 숫자가 아니라 매물을 모은다.
+    urgent_new: list[Listing] = []
+    new_listings: list[Listing] = []
+    muted_new: list[Listing] = []
     collected_count = excluded_count = urgent_hit = existing_urgent = 0
-    new_seen = new_muted = 0
 
     for raw_payload in observations:
         payload = dict(raw_payload)
@@ -223,7 +287,8 @@ def record_scan(
 
         is_urgent = listing.is_urgent
         urgent_hit += int(is_urgent)
-        new_seen += int(is_new)
+        if is_new:
+            new_listings.append(listing)
         # An urgent alert is useful only when the listing itself is new in this
         # scan.  Existing listings crossing the threshold (or dropping again)
         # remain visible in the report, but no longer generate another Kakao
@@ -234,7 +299,7 @@ def record_scan(
             should_alert or (condition.notify_new and is_new)
         )
         if should_alert:
-            scan.urgent_count += 1
+            urgent_new.append(listing)
         if should_notify:
             alert = AlertDecision(
                 listing=listing,
@@ -248,9 +313,20 @@ def record_scan(
                 listing.last_urgent_alert_price_won = listing.price_won
         else:
             existing_urgent += int(is_urgent and not should_alert)
-            new_muted += int(is_new and not condition.notify_new)
+            if is_new and not condition.notify_new:
+                muted_new.append(listing)
         listing.save()
         matched.append(listing)
+
+    # 같은 집이 두 건으로 온 경우를 여기서 접는다. 행은 그대로 두고 대표만
+    # 세며, 카카오도 한 번만 나간다.
+    duplicates = collapse_duplicates(matched)
+    if duplicates:
+        alerts = [alert for alert in alerts if alert.listing.pk not in duplicates]
+        matched = [listing for listing in matched if listing.pk not in duplicates]
+    scan.urgent_count = sum(1 for item in urgent_new if item.pk not in duplicates)
+    new_seen = sum(1 for item in new_listings if item.pk not in duplicates)
+    new_muted = sum(1 for item in muted_new if item.pk not in duplicates)
 
     for condition_id, seen_ids in seen_matched.items():
         Listing.objects.filter(condition_id=condition_id, active=True).exclude(
