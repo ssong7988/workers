@@ -7,6 +7,7 @@
 {% endblock %}
 
 {% block extra_style %}
+  .hint.warn { color: #b3261e; }
   .ranges { margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: .4rem; }
   .range { border: 1px solid #cbd5e1; border-radius: 999px; padding: .3rem .8rem; font-size: .8125rem; font-weight: 600; color: #475569; background: #fff; }
   .range.current { background: #0b2545; border-color: #0b2545; color: #fff; }
@@ -121,6 +122,52 @@
   분류 안팎으로 오간 매수·매도를 그 분류의 현금흐름으로 처리해, 돈을 더 넣어
   늘어난 부분과 값이 올라 늘어난 부분을 나눴습니다.
   관측일이 이틀 미만인 분류는 수익률을 표시하지 않습니다.
+</div>
+{% endif %}
+
+{% if realized %}
+<div class="section-title">확정된 손익 (거래내역)</div>
+<div class="hint">
+  위의 수익률은 <b>수집을 시작한 뒤</b> 평가액이 어떻게 변했는지이고, 여기는
+  실제로 팔거나 받아서 <b>확정된 금액</b>입니다. 거래내역은 지난 1년치를 받아오므로
+  수집 이전 기간도 말할 수 있습니다. 두 숫자는 성격이 다르니 섞어 읽지 마세요.
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>기간</th><th>누적 확정손익</th><th>기록된 날</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ realized.first_day|date:"Y.m.d" }} ~ {{ realized.last_day|date:"Y.m.d" }}</td>
+        <td>{{ realized.total_text }}</td>
+        <td>{{ realized.day_count }}일</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+{% if realized.unknown_cost_sales %}
+<div class="hint warn">
+  <b>이 금액은 실제보다 큽니다.</b> 매도 {{ realized.unknown_cost_sales }}건은 산 기록이
+  조회 기간(1년) 밖에 있어 <b>취득원가를 알 수 없습니다</b>. 그런 매도는 판 금액이
+  통째로 이익으로 잡힙니다. 배당과 이자는 원가와 무관하므로 그대로 정확합니다.
+</div>
+{% endif %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>날짜</th><th>그날</th><th>누적</th></tr>
+    </thead>
+    <tbody>
+      {% for row in realized.recent %}
+      <tr>
+        <td>{{ row.as_of|date:"Y.m.d" }}</td>
+        <td class="{{ row.trend }}">{{ row.day_text }}</td>
+        <td>{{ row.total_text }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 {% endif %}
 

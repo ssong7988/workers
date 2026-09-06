@@ -17,7 +17,7 @@ import json
 import os
 import sys
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterator
 
@@ -29,6 +29,10 @@ from .hable.extract import ExtractionError
 from .hable.window import HableError
 from .parsing import RowError
 from .payload import build_import_payload, build_trade_payload
+
+# 매일 수집이 함께 읽는 거래내역 기간. 겹쳐 읽어도 멱등이라 안전하고,
+# 하루를 거른 날이 영영 비지 않게 한다.
+RECENT_TRADE_DAYS = 7
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_DIR / "data"
@@ -61,6 +65,31 @@ def _report_trades(snapshot: dict) -> dict[str, list[dict]]:
     total = sum(len(rows) for rows in flows.values())
     print(f"현금흐름 {total}건 (계좌 {len(flows)}/{len(snapshot['accounts'])}개)")
     return flows
+
+
+def _import_recent_trades(
+    collector: HableCollector, client: StockApiClient, days: int
+) -> None:
+    """잔고를 넘긴 뒤 최근 거래내역까지 읽어 보낸다.
+
+    하루가 아니라 며칠을 겹쳐 읽는다. `external_key`가 같은 행을 알아보므로
+    겹쳐도 중복되지 않고, 하루를 걸렀을 때 그 하루가 영영 비는 일을 막는다.
+
+    거래내역을 읽지 못해도 잔고 수집은 이미 끝났다. 여기서 실패해도 그것을
+    무르지 않고 사유만 알린다.
+    """
+    if days <= 0:
+        return
+    until = date.today()
+    since = until - timedelta(days=days)
+    print(f"최근 거래내역을 함께 읽습니다: {since} ~ {until}")
+    try:
+        snapshot = collector.collect_trades(since.isoformat(), until.isoformat())
+        _write_json("hable-trades-raw.json", snapshot)
+        flows = _report_trades(snapshot)
+        _send_trades(flows, snapshot, client)
+    except (ExtractionError, HableError, RowError, ApiError) as error:
+        print(f"거래내역은 읽지 못했습니다(잔고는 저장됐습니다): {error}", file=sys.stderr)
 
 
 def _send_trades(
@@ -202,7 +231,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="화면을 만지지 않고 지난번 원본(hable-trades-raw.json)으로 다시 처리한다",
     )
-    commands.add_parser("hable-import", help="H-able [1285]을 읽어 리포트 서버로 전달")
+    balance = commands.add_parser(
+        "hable-import", help="H-able [1285] 잔고와 최근 거래내역을 리포트 서버로 전달"
+    )
+    balance.add_argument(
+        "--trade-days",
+        type=int,
+        default=RECENT_TRADE_DAYS,
+        help=f"함께 읽을 거래내역 기간(일). 0이면 읽지 않는다 (기본값: {RECENT_TRADE_DAYS})",
+    )
     commands.add_parser("web-browser", help="[재워 둠] KB 전용 Edge를 mable 주소로 띄우기")
     commands.add_parser("web-probe", help="[재워 둠] mable 화면 구조 덤프")
     commands.add_parser("web-collect", help="[재워 둠] mable 내자산을 JSON으로만 저장")
@@ -381,6 +418,7 @@ def main(argv: list[str] | None = None) -> None:
             _write_json("hable-holdings-latest.json", snapshot)
             if not _import(snapshot, client):
                 raise SystemExit(1)
+            _import_recent_trades(collector, client, args.trade_days)
     except ApiError as exc:
         print(f"실행 실패: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

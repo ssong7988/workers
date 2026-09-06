@@ -26,6 +26,7 @@ from portfolio.display import (
 )
 from portfolio.models import DailyPortfolioMetric
 from portfolio.performance import class_performance
+from portfolio.realized import build_realized
 
 
 ZERO = Decimal("0")
@@ -218,8 +219,38 @@ def performance(request: HttpRequest) -> HttpResponse:
             "first_day": rows[0].as_of if rows else None,
             "summary": _summary(latest, rows, period_return) if latest else None,
             "classes": classes,
+            "realized": _realized_block(),
         },
     )
+
+
+def _realized_block() -> dict | None:
+    """거래내역에서 확정된 손익.
+
+    위쪽 수익률과 성격이 다르다. 저쪽은 수집을 시작한 뒤의 평가액 변화이고,
+    이쪽은 실제로 팔거나 받아서 확정된 금액이라 수집 이전 기간도 말할 수 있다.
+    섞어 읽지 않도록 따로 낸다.
+    """
+    series = build_realized()
+    if not series.has_data:
+        return None
+    recent = [
+        {
+            "as_of": day.as_of,
+            "day_text": signed_man_won_text(day.realized),
+            "total_text": signed_man_won_text(day.cumulative),
+            "trend": "up" if day.realized > ZERO else "down",
+        }
+        for day in series.days[-8:][::-1]
+    ]
+    return {
+        "total_text": signed_man_won_text(series.total),
+        "first_day": series.days[0].as_of,
+        "last_day": series.days[-1].as_of,
+        "day_count": len(series.days),
+        "unknown_cost_sales": series.unknown_cost_sales,
+        "recent": recent,
+    }
 
 
 def _summary(
