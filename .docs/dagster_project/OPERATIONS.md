@@ -1,6 +1,6 @@
 # 스케줄과 수동 실행
 
-## 하나의 asset 체인, 세 가지 시간표
+## 하나의 asset 체인, 네 가지 시간표
 
 ```text
 naver_listings ──→ morning_report
@@ -16,7 +16,8 @@ naver_listings ──→ morning_report
 
 | 스케줄 | KST cron | job | 실행 범위 | 결과 |
 |---|---:|---|---|---|
-| `server_only_schedule` | `0 0-6,9-11,13-16,18-23 * * *` | `server_check_job` | `ensure_site_op`만 (op job) | 서버만 확인 |
+| `server_only_schedule` | `0 0-5,9-11,13-16,18-23 * * *` | `pre_scan_health_job` | `ensure_site_op` → `check_naver_login_op` | 서버 확인, 네이버 로그인이 끊겼으면 다시 로그인 |
+| `pre_scan_health_schedule` | `0 6 * * *` | `pre_scan_health_job` | `ensure_site_op` → `check_naver_login_op` | 07시 수집 전에 서버·Edge/CDP·네이버 로그인 확인 |
 | `scan_schedule` | `0 7,12,17 * * *` | `scan_job` | `naver_listings` | 서버 확인 후 수집 |
 | `morning_report_schedule` | `0 8 * * *` | `morning_report_job` | `naver_listings` → `morning_report` | 서버 확인, 필요 시 재수집, 전체 리포트 전송 |
 
@@ -24,7 +25,7 @@ naver_listings ──→ morning_report
 `morning_report_schedule`은 `ensure_fresh`. `server_only_schedule`은 설정이
 아예 없다(수집 op를 실행하지 않으므로 넣을 곳이 없다).
 
-모든 시간은 `Asia/Seoul` 기준이며 세 스케줄의 기본 상태는 `RUNNING`이다.
+모든 시간은 `Asia/Seoul` 기준이며 네 스케줄의 기본 상태는 `RUNNING`이다. `server_check_job`은 스케줄이 없는 수동 실행 전용으로 남아 있다.
 
 ## 각 단계가 실제로 하는 일
 
@@ -40,6 +41,22 @@ naver_listings ──→ morning_report
 
 **두 곳에서 같은 op을 재사용한다** — `server_check_job` 전체이자
 `naver_listings`의 첫 단계다. 스크립트가 멱등이라 중복 호출이 안전하다.
+
+### `check_naver_login_op` (op)
+
+수집기 venv의 `python -m real_estate_finder check-login`을 실행한다. Edge CDP를
+준비하고 임시 탭에서 네이버 로그인 상태를 확인한 뒤 바로 닫는다. `browser-login`과
+달리 로그인 화면을 열어 5분간 기다리지 않고, 실제 매물도 수집하지 않는다.
+
+**끊겨 있으면 스스로 로그인한다**(2026-09-06). 루트 `.env`의 `NAVER_ID`·
+`NAVER_PASSWORD`를 읽어 네이버 로그인 화면에 입력하고, `로그인 상태 유지`를 켠다.
+자격 증명이 없으면 예전처럼 경고만 한다. CAPTCHA·인증번호·비밀번호 불일치 화면을
+만나면 재시도하지 않고 멈춘다.
+
+그래서 이 op은 06:00 한 번이 아니라 **수집·리포트 시간대를 뺀 매시 정각**에도
+돈다(`server_only_schedule`). 세션이 끊겨도 최대 1시간 안에 스스로 복구되고,
+07·12·17시 수집과 08시 리포트는 각자의 경로에서 같은 확인을 한다. 실패하면 1분 뒤
+한 번 재시도하고 그래도 실패하면 `alert_on_failure`가 카카오톡으로 알린다.
 
 ### `run_scan_op` (op, `naver_listings` 안)
 
@@ -73,6 +90,10 @@ finder venv의 Python으로 `manage.py send_digest`를 직접 실행해 PostgreS
 ## 7시와 8시의 관계
 
 ```text
+06:00  pre_scan_health_job ensure_site_op -> check_naver_login_op
+          | (같은 잡이 7·8·12·17시를 뺀 매시 정각에도 돈다)
+          | 로그아웃이면 스스로 로그인 -> 실패 시 1분 뒤 재시도 -> 카카오 알림
+
 07:00  scan_job            ensure_site_op -> run_scan_op (mode: run)
           |
           +-- 실패 시 5분 뒤 한 번 재시도

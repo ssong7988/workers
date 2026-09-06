@@ -51,13 +51,24 @@ MAX_RUNS = 20
 #
 # scan_job and morning_report_job are asset jobs over the chain
 # naver_listings -> morning_report; the lineage lives in the asset graph, not
-# here. server_check_job and restart_report_site_job are plain op jobs.
+# here. server_check_job, pre_scan_health_job, and restart_report_site_job are
+# plain op jobs.
 JOBS = (
     {
         "name": "server_check_job",
         "purpose": "리포트 서버만 확인한다 (op job)",
+        # 매시 점검이 pre_scan_health_job으로 넘어가 스케줄이 없다. 서버만 빠르게
+        # 확인하고 싶을 때 UI에서 직접 돌린다.
         "schedules": (
-            {"description": "서버 확인", "cron": "그 외 매시 정각"},
+            {"description": "서버 확인", "cron": "수동 실행 (Dagster UI)"},
+        ),
+    },
+    {
+        "name": "pre_scan_health_job",
+        "purpose": "서버와 네이버 로그인을 확인하고, 끊겨 있으면 로그인한다 (op job)",
+        "schedules": (
+            {"description": "서버 확인 → 네이버 로그인 확인", "cron": "6시"},
+            {"description": "서버 확인 → 네이버 로그인 확인", "cron": "그 외 매시 정각"},
         ),
     },
     {

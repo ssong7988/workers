@@ -60,6 +60,7 @@ class DagsterViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "scan_job")
+        self.assertContains(response, "pre_scan_health_job")
         self.assertContains(response, "morning_report_job")
         self.assertContains(response, "restart_report_site_job")
         self.assertContains(response, "수동 실행")
@@ -68,7 +69,7 @@ class DagsterViewTests(TestCase):
             f'<div class="tile-value">{len(JOBS)}</div><div class="tile-label">등록된 잡</div>',
             html=False,
         )
-        self.assertEqual(len(JOBS), 4)
+        self.assertEqual(len(JOBS), 5)
 
     def test_staff_sees_runs_and_latest_scan(self) -> None:
         staff = get_user_model().objects.create_user(

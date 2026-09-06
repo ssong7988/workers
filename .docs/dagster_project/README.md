@@ -13,10 +13,10 @@
 | 용어 | 이 프로젝트에서의 의미 |
 |---|---|
 | asset | 파이프라인이 만들어 내는 **산출물**을 선언한 것. `naver_listings`, `morning_report` 두 개가 이어져 있다. |
-| op | 한 단계의 **행동**. 산출물이 없으면 op다 — `ensure_site_op`, `run_scan_op`, `restart_report_site` 셋. |
+| op | 한 단계의 **행동**. 산출물이 없으면 op다 — `ensure_site_op`, `check_naver_login_op`, `run_scan_op`, `restart_report_site` 넷. |
 | graph_asset | op 여러 개를 묶어 하나의 asset으로 만든 것. `naver_listings`가 `ensure_site_op → run_scan_op`을 품는다. |
-| job | 한 번에 실행할 범위. `scan_job`·`morning_report_job`은 asset job, `server_check_job`·`restart_report_site_job`은 op job이다. |
-| schedule | 정해진 시간에 job을 실행한다. 세 스케줄이 앞 세 job에 1:1로 붙는다. |
+| job | 한 번에 실행할 범위. `scan_job`·`morning_report_job`은 asset job, `server_check_job`·`pre_scan_health_job`·`restart_report_site_job`은 op job이다. |
+| schedule | 정해진 시간에 job을 실행한다. 네 스케줄이 세 job에 붙는다 — `pre_scan_health_job`은 06시와 그 외 매시 정각 둘을 받는다. |
 | run | job을 한 번 실행한 기록. 성공·실패·각 step 로그를 Dagster UI에서 본다. |
 | materialization | asset을 한 번 만들어 낸 기록. 수집 수·급매 수 같은 메타데이터가 여기 붙는다. |
 | daemon | 시각을 감시하다 schedule을 실제 run으로 만드는 백그라운드 프로세스다. |
@@ -98,7 +98,8 @@ asset인 것이 아니다.
                       `-> manage.py send_digest
 
   실행 범위:
-  server_check_job        : ensure_site_op 만                (op job)
+  server_check_job        : ensure_site_op 만                (op job, 스케줄 없음)
+  pre_scan_health_job     : ensure_site_op -> 로그인 확인    (op job, 06시+매시)
   scan_job                : naver_listings                   (asset job)
   morning_report_job      : naver_listings -> morning_report (asset job)
   restart_report_site_job : restart_report_site              (op job, 스케줄 없음)

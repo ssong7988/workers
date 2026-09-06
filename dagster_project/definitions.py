@@ -49,6 +49,7 @@ job (a job that kills its own process aborts its own run).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -61,6 +62,7 @@ PYTHON_EXE = REAL_ESTATE_FINDER / ".venv" / "Scripts" / "python.exe"
 MANAGE_PY = REPORT_SITE / "manage.py"
 
 RETRY_POLICY = dg.RetryPolicy(max_retries=1, delay=300)
+HEALTH_RETRY_POLICY = dg.RetryPolicy(max_retries=1, delay=60)
 GROUP = "property_report"
 
 
@@ -115,16 +117,26 @@ def _run_manage(
     )
 
 
-def _run_finder(*args: str, timeout: float = 1200) -> None:
+def _run_finder(*args: str, timeout: float = 1200, capture: bool = False) -> None:
     """Run a collector command in its own venv and stream output to Dagster."""
     result = subprocess.run(
         [str(PYTHON_EXE), "-u", "-m", "real_estate_finder", *args],
         cwd=REAL_ESTATE_FINDER,
         timeout=timeout,
+        capture_output=capture,
+        text=capture,
+        encoding="utf-8" if capture else None,
+        errors="replace" if capture else None,
+        env={**os.environ, "PYTHONUTF8": "1"},
     )
     if result.returncode != 0:
+        detail = ""
+        if capture:
+            lines = (result.stderr or result.stdout or "").strip().splitlines()
+            if lines:
+                detail = f": {lines[-1].removeprefix('실행 실패: ')}"
         raise RuntimeError(
-            f"real_estate_finder {' '.join(args)} 실패 (종료 코드 {result.returncode})"
+            f"real_estate_finder {' '.join(args)} 실패 (종료 코드 {result.returncode}){detail}"
         )
 
 
@@ -186,6 +198,17 @@ def ensure_site_op() -> None:
     asset이 아니라 op인 이유: 이 단계가 끝나도 남는 산출물이 없다.
     """
     _run_powershell(REPORT_SITE / "ensure-site.ps1", timeout=90)
+
+
+@dg.op(retry_policy=HEALTH_RETRY_POLICY, ins={"start": dg.In(dg.Nothing)})
+def check_naver_login_op() -> None:
+    """06:00에 Edge/CDP와 네이버 로그인 상태를 대기 없이 확인한다.
+
+    실패하면 기존 failure hook이 카카오톡을 보낸다. 실제 수집은 하지 않고,
+    로그인 화면에서 사용자를 기다리지도 않으므로 07:00 수집 전에 대응할
+    시간을 온전히 남긴다.
+    """
+    _run_finder("check-login", timeout=90, capture=True)
 
 
 @dg.op(
@@ -301,6 +324,15 @@ def server_check_job() -> None:
     ensure_site_op()
 
 
+@dg.job(
+    hooks={alert_on_failure},
+    description="07시 수집 한 시간 전에 서버와 네이버 로그인을 확인한다.",
+)
+def pre_scan_health_job() -> None:
+    """06:00 사전 점검. 실패 시 failure hook이 카카오톡으로 알린다."""
+    check_naver_login_op(start=ensure_site_op())
+
+
 scan_job = dg.define_asset_job(
     name="scan_job",
     selection=dg.AssetSelection.assets(naver_listings),
@@ -332,9 +364,20 @@ def _scan_config(mode: str) -> dict:
 
 server_only_schedule = dg.ScheduleDefinition(
     name="server_only_schedule",
-    job=server_check_job,
-    # 7·8·12·17시는 아래 전용 스케줄이 같은 서버 확인부터 시작한다.
-    cron_schedule="0 0-6,9-11,13-16,18-23 * * *",
+    # 네이버 세션이 끊기면 다음 수집이 통째로 날아간다. `check-login`은
+    # 이제 끊긴 세션을 스스로 다시 로그인하므로, 서버만 보던 이 시간대에도
+    # 같은 점검을 돌려 최대 1시간 안에 복구한다. `server_check_job`은 수동
+    # 실행용으로 남겨 둔다.
+    job=pre_scan_health_job,
+    # 06시는 로그인까지 보는 사전 점검, 7·8·12·17시는 전용 작업이 확인한다.
+    cron_schedule="0 0-5,9-11,13-16,18-23 * * *",
+    execution_timezone="Asia/Seoul",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+)
+pre_scan_health_schedule = dg.ScheduleDefinition(
+    name="pre_scan_health_schedule",
+    job=pre_scan_health_job,
+    cron_schedule="0 6 * * *",
     execution_timezone="Asia/Seoul",
     default_status=dg.DefaultScheduleStatus.RUNNING,
 )
@@ -357,6 +400,17 @@ morning_report_schedule = dg.ScheduleDefinition(
 
 defs = dg.Definitions(
     assets=[naver_listings, morning_report],
-    jobs=[server_check_job, scan_job, morning_report_job, restart_report_site_job],
-    schedules=[server_only_schedule, scan_schedule, morning_report_schedule],
+    jobs=[
+        server_check_job,
+        pre_scan_health_job,
+        scan_job,
+        morning_report_job,
+        restart_report_site_job,
+    ],
+    schedules=[
+        server_only_schedule,
+        pre_scan_health_schedule,
+        scan_schedule,
+        morning_report_schedule,
+    ],
 )

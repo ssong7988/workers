@@ -42,6 +42,18 @@ PowerShell에서 직접 실행하려면 저장소 루트에서 다음 명령을 
 
 **스캔이 도는 동안 Edge 창을 최소화하지 않는다.** 비활성 탭은 Chromium이 렌더링을 늦춰, 페이지 이동 직후 로그인 상태 확인이 실제로는 로그인돼 있는데도 "네이버 로그인 상태가 만료되었습니다"로 오탐할 수 있다. 창을 보이는 상태로 두면 재현되지 않는다.
 
+Dagster는 06:00과 그 외 매시 정각(수집·리포트 시간대 제외)에
+`pre_scan_health_job`으로 서버와 네이버 로그인을 확인한다. **로그인이 끊겨
+있으면 루트 `.env`의 `NAVER_ID`·`NAVER_PASSWORD`로 스스로 다시 로그인한다.**
+자격 증명이 없거나 네이버가 CAPTCHA·인증번호를 요구하면 1분 간격 재시도 후
+카카오톡 경고가 온다. 직접 같은 확인을 하려면 다음 명령을 쓴다. 사람의 로그인
+입력을 기다리거나 매물을 수집하지는 않는다.
+
+```powershell
+cd real-estate-finder
+.\.venv\Scripts\python.exe -m real_estate_finder check-login
+```
+
 `send-report.bat`은 `report-site`의 `manage.py send_digest`를 실행한다. 데이터베이스의 활성 매물을 쓰므로 Edge 기동, 네이버 로그인, 웹 서버 실행이 모두 필요 없다.
 
 ## 최초 한 번만 준비

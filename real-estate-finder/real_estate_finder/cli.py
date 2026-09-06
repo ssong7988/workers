@@ -62,6 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check-api", help="리포트 서버 연결과 검색 조건 확인")
+    commands.add_parser(
+        "check-login", help="대기 없이 현재 Edge의 네이버 로그인 상태 확인"
+    )
     commands.add_parser("browser-login", help="Edge 로그인 프로필 준비")
     commands.add_parser("scan-once", help="즉시 1회 수집하고 리포트 서버에 전달")
     commands.add_parser(
@@ -227,6 +230,11 @@ def main(argv: list[str] | None = None) -> None:
             headed=not args.headless,
             cdp_endpoint=args.edge_cdp or None,
         )
+        if args.command == "check-login":
+            ensure_edge_debugging(args.edge_cdp)
+            collector.check_login()
+            print("네이버 로그인 상태가 정상입니다.")
+            return
         if args.command == "browser-login":
             collector.open_login()
             print("브라우저 로그인 프로필을 저장했습니다.")

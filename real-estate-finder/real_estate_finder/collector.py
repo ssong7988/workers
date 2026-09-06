@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from urllib.parse import urljoin
 
+from .credentials import naver_credentials
 from .models import Listing, SearchCondition, iso_now
 from .parsing import normalize_type_name, parse_price_won
 
@@ -111,6 +112,31 @@ class NaverBrowserCollector:
     COMPLEX_TAB_NAME = "단지"
     BETWEEN_COMPLEX_DELAY_MS = 8_000
     LOGIN_WAIT_SECONDS = 300
+    # Naver's own sign-in form. Filling the two fields and pressing the button
+    # is what a person does; nothing here works around a challenge.
+    LOGIN_ID_SELECTOR = "#id"
+    LOGIN_PASSWORD_SELECTOR = "#pw"
+    # Naver ships two layouts of the same form and hides one, so both ids are
+    # present in the DOM and only the visible one can be clicked.
+    LOGIN_SUBMIT_SELECTOR = "#loginBtn_column, #loginBtn_row"
+    LOGIN_STAY_SELECTOR = "#loginStay"
+    # IP security ends the session whenever the public IP changes, which a home
+    # connection does on its own. It is off by default on this form; this is the
+    # guard for the day that default changes.
+    IP_SECURITY_SELECTOR = "#switchIP"
+    # Naver watches for input that arrives all at once, so type it.
+    LOGIN_TYPE_DELAY_MS = 45
+    LOGIN_SUBMIT_WAIT_SECONDS = 25
+    # If any of these is on the screen, the sign-in was refused or a human is
+    # being asked for something. Stop rather than retry into an account lock.
+    LOGIN_REFUSAL_MARKERS = (
+        "자동입력 방지",
+        "captcha",
+        "일치하지 않",
+        "인증번호",
+        "2단계",
+        "보호조치",
+    )
     # Runaway guard only; the saved-complex count comes from the screen.
     MAX_FAVORITE_COMPLEXES = 30
     # Runaway guards only; the screen's own counts decide when a scan is done.
@@ -158,8 +184,9 @@ class NaverBrowserCollector:
                 # This is the entry point: the user launches Edge themselves and
                 # signs in there. Walk them through it rather than telling them
                 # to re-run the very command they are already running.
-                self._wait_for_login(page, url)
-                self._verify_login(page)
+                if not self._try_sign_in(page):
+                    self._wait_for_login(page, url)
+                    self._verify_login(page)
                 print("네이버 로그인을 확인했습니다. 이 Edge를 켜 둔 채로 조회를 실행하세요.")
                 return
             context = playwright.chromium.launch_persistent_context(
@@ -170,7 +197,7 @@ class NaverBrowserCollector:
             )
             page = context.pages[0] if context.pages else context.new_page()
             try:
-                if not self._is_logged_in(page):
+                if not self._is_logged_in(page) and not self._try_sign_in(page):
                     self._wait_for_login(page, url)
                     self._verify_login(page)
             except Exception:
@@ -179,6 +206,43 @@ class NaverBrowserCollector:
             # Closing a persistent context flushes the authenticated browser profile
             # to disk. Later scheduled runs reuse this exact profile directory.
             context.close()
+
+    def check_login(self) -> None:
+        """Verify the current Naver session without waiting for user input.
+
+        Scheduled health checks must finish promptly: opening the login form
+        and waiting five minutes (the interactive ``open_login`` behavior)
+        would make a 06:00 warning arrive late.  With CDP, use a temporary tab
+        so the check does not navigate the tab the user left open.
+        """
+        sync_playwright = _load_playwright()
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
+        with sync_playwright() as playwright:
+            if self.cdp_endpoint:
+                try:
+                    browser = playwright.chromium.connect_over_cdp(self.cdp_endpoint)
+                except Exception as exc:
+                    raise CollectionError(_cdp_help(self.cdp_endpoint)) from exc
+                if not browser.contexts:
+                    raise CollectionError("연결된 Edge에서 브라우저 컨텍스트를 찾지 못했습니다.")
+                page = browser.contexts[0].new_page()
+                try:
+                    self._verify_or_sign_in(page)
+                finally:
+                    page.close()
+                return
+
+            context = playwright.chromium.launch_persistent_context(
+                str(self.profile_dir),
+                channel="msedge",
+                headless=False,
+                viewport={"width": 1440, "height": 1000},
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+            try:
+                self._verify_or_sign_in(page)
+            finally:
+                context.close()
 
     def collect_all(self, conditions: list[SearchCondition]) -> dict[str, list[Listing]]:
         snapshot = self.collect_favorites_snapshot()
@@ -245,7 +309,9 @@ class NaverBrowserCollector:
                 # up front, and again before each complex below, keeps that
                 # race fair even if the window loses focus between complexes.
                 page.bring_to_front()
-                self._verify_login(page)
+                # Sign in rather than fail: a session that died since the 06:00
+                # health check would otherwise cost the whole 12:00 scan.
+                self._verify_or_sign_in(page)
                 self._open_land_from_naver_home(page)
                 expected = self._open_favorites(page)
                 complexes = self._favorite_complexes(page, expected)
@@ -1053,6 +1119,138 @@ class NaverBrowserCollector:
             raise CollectionError(
                 "네이버 로그인이 안 된 Edge입니다. browser-login을 실행해 로그인하세요."
             )
+
+    def _verify_or_sign_in(self, page) -> None:
+        """Make sure the session is usable, signing in when it is not.
+
+        This is the unattended path. The 06:00 health check has nobody to ask,
+        so a signed-out browser is something to fix, not only to warn about.
+        """
+        if self._is_logged_in(page):
+            return
+        if not self._sign_in(page):
+            raise CollectionError(
+                "네이버 로그인이 안 된 Edge입니다. 자동 로그인을 쓰려면 저장소 루트 .env에 "
+                "NAVER_ID와 NAVER_PASSWORD를 넣으세요. "
+                "직접 로그인하려면 browser-login을 실행하세요."
+            )
+        self._verify_login(page)
+        print("네이버에 자동으로 로그인했습니다.")
+
+    def _try_sign_in(self, page) -> bool:
+        """Sign in where a person is present: report the reason, do not raise."""
+        try:
+            self._verify_or_sign_in(page)
+        except CollectionError as exc:
+            print(f"자동 로그인을 하지 못했습니다: {exc}")
+            return False
+        return True
+
+    def _sign_in(self, page, url: str = LOGIN_URL) -> bool:
+        """Sign in with the credentials from .env.
+
+        Returns False when none are configured - not a failure, just a signal to
+        fall back to asking a person. A configured sign-in that does not end
+        signed in raises, and says why without ever repeating the password.
+        """
+        credentials = naver_credentials()
+        if credentials is None:
+            return False
+
+        page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        identifier = self._first_visible(page.locator(self.LOGIN_ID_SELECTOR))
+        secret = self._first_visible(page.locator(self.LOGIN_PASSWORD_SELECTOR))
+        if identifier is None or secret is None:
+            raise CollectionError(
+                "네이버 로그인 화면의 입력칸을 찾지 못했습니다. 화면 구조를 확인하세요."
+            )
+
+        identifier.click()
+        identifier.press_sequentially(credentials.username, delay=self.LOGIN_TYPE_DELAY_MS)
+        secret.click()
+        secret.press_sequentially(credentials.password, delay=self.LOGIN_TYPE_DELAY_MS)
+        self._keep_signed_in(page)
+        self._relax_ip_security(page)
+        submit = self._first_visible(page.locator(self.LOGIN_SUBMIT_SELECTOR))
+        if submit is None:
+            raise CollectionError(
+                "네이버 로그인 화면의 로그인 버튼을 찾지 못했습니다. 화면 구조를 확인하세요."
+            )
+        submit.click()
+
+        deadline = time.monotonic() + self.LOGIN_SUBMIT_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            page.wait_for_timeout(1_000)
+            if "nid.naver.com" not in (page.url or ""):
+                # Let Naver's own post-login redirect settle.
+                page.wait_for_timeout(2_000)
+                return True
+            if self._skip_device_registration(page):
+                continue
+            self._raise_if_login_refused(page)
+        raise CollectionError(
+            "자동 로그인이 끝나지 않았습니다. 네이버가 추가 확인을 요구했는지 브라우저를 확인하세요."
+        )
+
+    @staticmethod
+    def _first_visible(locator):
+        """Return the one element on screen, or None when the selector missed."""
+        for index in range(locator.count()):
+            candidate = locator.nth(index)
+            if candidate.is_visible():
+                return candidate
+        return None
+
+    def _keep_signed_in(self, page) -> None:
+        """Ask Naver to hold the session; a longer one means fewer sign-ins.
+
+        Without this the login cookies are session cookies and closing Edge
+        signs the machine out. With it they last a month.
+        """
+        self._set_login_switch(page, self.LOGIN_STAY_SELECTOR, "loginStay", wanted=True)
+
+    def _relax_ip_security(self, page) -> None:
+        """Do not tie the session to one IP; a home connection changes its own."""
+        self._set_login_switch(page, self.IP_SECURITY_SELECTOR, "switchIP", wanted=False)
+
+    def _set_login_switch(self, page, selector: str, name: str, *, wanted: bool) -> None:
+        try:
+            box = page.locator(selector)
+            if not box.count() or box.first.is_checked() == wanted:
+                return
+            # The checkbox is styled as a switch, so its label is the control.
+            label = self._first_visible(page.locator(f"label[for='{name}']"))
+            if label is not None:
+                label.click()
+        except Exception:
+            # Best effort. The sign-in itself does not depend on either switch.
+            pass
+
+    def _skip_device_registration(self, page) -> bool:
+        """Answer the new-device page without changing the account's settings."""
+        if "deviceConfirm" not in (page.url or ""):
+            return False
+        for selector in ("[id='new.dontsave']", "[id='new.save']"):
+            button = page.locator(selector)
+            if button.count():
+                button.first.click()
+                page.wait_for_timeout(2_000)
+                return True
+        return False
+
+    def _raise_if_login_refused(self, page) -> None:
+        """Stop on a wrong password or a challenge instead of trying again."""
+        try:
+            text = page.locator("body").inner_text(timeout=5_000)
+        except Exception:
+            return
+        lowered = text.lower()
+        for marker in self.LOGIN_REFUSAL_MARKERS:
+            if marker in text or marker in lowered:
+                raise CollectionError(
+                    f"네이버가 자동 로그인을 받지 않았습니다 (화면 안내: {marker}). "
+                    "브라우저에서 직접 로그인하세요."
+                )
 
     def _collect_condition(self, page, condition: SearchCondition) -> list[Listing]:
         try:
