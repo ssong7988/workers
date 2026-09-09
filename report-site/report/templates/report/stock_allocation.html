@@ -8,7 +8,7 @@
 
 {% block extra_style %}
   .pie-row { margin-top: 1rem; display: grid; gap: 1.25rem; grid-template-columns: 1fr; align-items: center; }
-  @media (min-width: 640px) { .pie-row { grid-template-columns: 220px 1fr; } }
+  @media (min-width: 640px) { .pie-row { grid-template-columns: 220px minmax(0, 1fr); } }
   .pie { display: block; margin: 0 auto; }
   .legend { display: grid; gap: .5rem; font-size: .875rem; }
   .legend-item { display: flex; align-items: center; gap: .5rem; }
@@ -93,11 +93,11 @@
       {% for row in rows %}
       <tr>
         <td><span class="swatch" style="background: {{ row.color }}"></span>{{ row.name }}</td>
-        <td>{{ row.value_text }}</td>
-        <td>{{ row.ratio_text }}</td>
-        <td>{{ row.target_text }}</td>
-        <td>{{ row.gap_text }}</td>
-        <td class="{{ row.action }}">{{ row.rebalance_text }}</td>
+        <td data-label="평가액">{{ row.value_text }}</td>
+        <td data-label="현재 비중">{{ row.ratio_text }}</td>
+        <td data-label="목표">{{ row.target_text }}</td>
+        <td data-label="차이">{{ row.gap_text }}</td>
+        <td data-label="매수(+) · 매도(−)" class="{{ row.action }}">{{ row.rebalance_text }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -128,15 +128,15 @@
       {% for row in benchmark %}
       <tr>
         <td>{{ row.label }}</td>
-        <td>
+        <td data-label="비중 비교">
           <div class="bar-wrap">
             <div class="bar bar-mine"><span style="width: {{ row.mine_width|floatformat:1 }}%"></span></div>
             <div class="bar bar-benchmark"><span style="width: {{ row.benchmark_width|floatformat:1 }}%"></span></div>
           </div>
         </td>
-        <td>{{ row.mine_text }}</td>
-        <td>{{ row.benchmark_text }}</td>
-        <td>{{ row.gap_text }}</td>
+        <td data-label="내 비중">{{ row.mine_text }}</td>
+        <td data-label="국민연금">{{ row.benchmark_text }}</td>
+        <td data-label="차이">{{ row.gap_text }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -160,10 +160,10 @@
       {% for account in view.accounts %}
       <tr>
         <td>{{ account.alias }}</td>
-        <td>{{ account.account_type }}</td>
-        <td>{% if account.required %}필수{% else %}선택{% endif %}</td>
-        <td>{% if account.status == "success" %}성공{% elif account.status == "missing" %}<span class="buy">미도착</span>{% else %}<span class="buy">{{ account.status }}</span>{% endif %}</td>
-        <td>{{ account.row_count }}</td>
+        <td data-label="유형">{{ account.account_type }}</td>
+        <td data-label="필수 여부">{% if account.required %}필수{% else %}선택{% endif %}</td>
+        <td data-label="상태">{% if account.status == "success" %}성공{% elif account.status == "missing" %}<span class="buy">미도착</span>{% else %}<span class="buy">{{ account.status }}</span>{% endif %}</td>
+        <td data-label="행 수">{{ account.row_count }}</td>
       </tr>
       {% endfor %}
     </tbody>

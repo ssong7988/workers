@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="공통 운영, 관심 부동산, 금융자산 화면으로 이동하는 서비스 안내">
+<title>관심 매물 · 금융자산</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #eef4ff;
+    --muted: #9eabc0;
+    --line: rgba(255, 255, 255, .12);
+    --surface: rgba(17, 29, 49, .78);
+    --background: #08111f;
+  }
+  * { box-sizing: border-box; }
+  html { min-height: 100%; background: var(--background); }
+  body {
+    min-height: 100vh;
+    margin: 0;
+    color: var(--ink);
+    background:
+      radial-gradient(circle at 85% 5%, rgba(56, 189, 248, .12), transparent 28rem),
+      radial-gradient(circle at 8% 92%, rgba(52, 211, 153, .09), transparent 28rem),
+      linear-gradient(145deg, #08111f 0%, #0b1628 55%, #0a1321 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif;
+    letter-spacing: -.01em;
+  }
+  a { color: inherit; text-decoration: none; }
+  .shell { width: min(74rem, calc(100% - 2rem)); margin: 0 auto; padding: 3rem 0 2rem; }
+  .masthead { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 2rem; }
+  .overline {
+    display: flex; align-items: center; gap: .65rem; margin: 0;
+    color: #8da0bb; font-size: .875rem; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .overline::before { content: ""; width: 2rem; height: 1px; background: #5d7494; }
+  h1 { max-width: 15ch; margin: 1rem 0 0; font-size: clamp(2.4rem, 6vw, 5rem); line-height: 1.03; letter-spacing: -.055em; }
+  .intro { max-width: 24rem; margin: 0 0 .45rem; color: var(--muted); font-size: 1rem; line-height: 1.75; }
+  .route-mark { color: #d8e4f6; font-family: Consolas, "SFMono-Regular", monospace; }
+  .directory { position: relative; margin-top: 3.75rem; }
+  .directory::before {
+    content: ""; position: absolute; top: -1.5rem; left: 0; right: 0;
+    height: 1px; background: linear-gradient(90deg, transparent, rgba(148, 163, 184, .45), transparent);
+  }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+  .card {
+    --accent: #38bdf8;
+    position: relative; display: flex; min-height: 27rem; flex-direction: column; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 1.35rem; background: var(--surface);
+    padding: 1.35rem; box-shadow: 0 18px 60px rgba(0, 0, 0, .2);
+    backdrop-filter: blur(16px);
+  }
+  .card::after {
+    content: ""; position: absolute; inset: 0 0 auto; height: 3px;
+    background: linear-gradient(90deg, var(--accent), transparent 82%);
+  }
+  .card.common { --accent: #38bdf8; }
+  .card.property { --accent: #34d399; }
+  .card.stock { --accent: #fbbf24; }
+  .card-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .namespace {
+    border: 1px solid color-mix(in srgb, var(--accent) 48%, transparent);
+    border-radius: 999px; padding: .35rem .65rem; color: var(--accent);
+    font: 700 .8125rem/1 Consolas, "SFMono-Regular", monospace; letter-spacing: .04em;
+  }
+  .number { color: rgba(255, 255, 255, .2); font-size: .875rem; font-weight: 800; letter-spacing: .1em; }
+  .card h2 { margin: 2rem 0 0; font-size: 1.75rem; letter-spacing: -.04em; }
+  .description { min-height: 5.25rem; margin: .85rem 0 0; color: #aebbd0; font-size: 1rem; line-height: 1.7; }
+  .links { display: grid; gap: .6rem; margin-top: auto; padding-top: 2rem; }
+  .endpoint {
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .75rem;
+    border: 1px solid rgba(255, 255, 255, .11); border-radius: .85rem;
+    background: rgba(255, 255, 255, .035); padding: .85rem .9rem;
+    transition: border-color .18s, background .18s, transform .18s;
+  }
+  .endpoint:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: rgba(255, 255, 255, .07); transform: translateY(-2px); }
+  .endpoint:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .endpoint-name { display: block; font-size: .9375rem; font-weight: 750; }
+  .endpoint-path { display: block; margin-top: .25rem; color: #7f91aa; font: .75rem/1.4 Consolas, "SFMono-Regular", monospace; overflow-wrap: anywhere; }
+  .endpoint-note { color: #7f91aa; font-size: .75rem; }
+  .arrow { color: var(--accent); font-size: 1.2rem; transition: transform .18s; }
+  .endpoint:hover .arrow { transform: translateX(3px); }
+  .protected {
+    margin-top: auto; border: 1px dashed rgba(255, 255, 255, .15); border-radius: .85rem;
+    padding: 1rem; color: #8fa0b8; font-size: .875rem; line-height: 1.55;
+  }
+  .footer {
+    display: flex; justify-content: space-between; gap: 1rem; margin-top: 2.25rem;
+    border-top: 1px solid rgba(255, 255, 255, .08); padding-top: 1.15rem;
+    color: #657791; font-size: .8125rem;
+  }
+  @media (max-width: 880px) {
+    .shell { padding-top: 2.25rem; }
+    .masthead { grid-template-columns: 1fr; align-items: start; gap: 1.25rem; }
+    .intro { max-width: 34rem; }
+    .directory { margin-top: 3rem; }
+    .cards { grid-template-columns: 1fr; }
+    .card { min-height: 0; }
+    .description { min-height: 0; }
+  }
+  @media (max-width: 480px) {
+    .shell { width: min(100% - 1.25rem, 74rem); padding-top: 1.5rem; }
+    h1 { font-size: 2.45rem; }
+    .directory { margin-top: 2.5rem; }
+    .card { border-radius: 1.1rem; padding: 1.1rem; }
+    .card h2 { margin-top: 1.5rem; }
+    .footer { flex-direction: column; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .endpoint, .arrow { transition: none; }
+  }
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="masthead">
+    <div>
+      <p class="overline">Personal operations</p>
+      <h1>한곳에서 확인하는<br>나의 데이터</h1>
+    </div>
+    <p class="intro">관심 매물과 금융자산, 이를 움직이는 자동화 상태까지 필요한 화면으로 바로 이동하세요.</p>
+  </header>
+
+  <section class="directory" aria-label="서비스 바로가기">
+    <div class="cards">
+      {% for section in sections %}
+      <article class="card {{ section.tone }}">
+        <div class="card-top">
+          <span class="namespace">/{{ section.namespace }}</span>
+          <span class="number">{{ section.index }}</span>
+        </div>
+        <h2>{{ section.name }}</h2>
+        <p class="description">{{ section.description }}</p>
+        {% if show_links %}
+        <nav class="links" aria-label="{{ section.name }} 화면">
+          {% for link in section.links %}
+          <a class="endpoint" href="{{ link.path }}">
+            <span>
+              <span class="endpoint-name">{{ link.label }}</span>
+              <span class="endpoint-path">{{ link.path }}</span>
+              {% if link.note %}<span class="endpoint-note">{{ link.note }}</span>{% endif %}
+            </span>
+            <span class="arrow" aria-hidden="true">→</span>
+          </a>
+          {% endfor %}
+        </nav>
+        {% else %}
+        <p class="protected">이 서비스의 이동 경로는 보호된 주소에서 확인할 수 있습니다.</p>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span class="route-mark">ROOT /</span>
+    <span>관심 매물 · 금융자산</span>
+  </footer>
+</main>
+</body>
+</html>

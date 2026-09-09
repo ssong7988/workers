@@ -80,7 +80,7 @@ Copy-Item .env.example .env    # FINDER_API_TOKEN, POSTGRES_PASSWORD를 채운�
 ..\real-estate-finder\.venv\Scripts\python.exe manage.py import_searches
 ```
 
-검색 조건은 이후 Django admin(`.../property/admin/`, 토큰 사용 시 `.../<TOKEN>/property/admin/`)에서 고친다. `properties/seed/searches.yaml`은 첫 시드일 뿐이다.
+검색 조건은 이후 Django admin(`.../admin/`, 토큰 사용 시 `.../<TOKEN>/admin/`)에서 고친다. `properties/seed/searches.yaml`은 첫 시드일 뿐이다.
 
 Dagster의 실행 이력도 같은 PostgreSQL DB에 들어가지만 Django 테이블과 섞이지 않도록 전용 schema를 쓴다. `property_report`가 그 DB의 소유자라 별도 권한 없이 한 번만 만들면 된다.
 
@@ -156,7 +156,7 @@ cd report-site
 .\run-site.ps1
 ```
 
-더블클릭하려면 `run-site.bat`을 쓴다. 실행하면 콘솔에 로컬 주소를 함께 출력한다. 부동산 경로는 `/property/report/`, `/property/statistics/`, `/property/admin/`이고 공통 운영 요약은 `/common/dagster/`다. `REPORT_PATH_TOKEN`을 채우면 두 namespace 앞에 `/<TOKEN>`이 붙는다. 이 로컬 주소는 같은 PC에서만 열린다 — 카카오톡의 공개 링크로는 쓸 수 없다(아래 Tailscale Funnel 절차 필요).
+더블클릭하려면 `run-site.bat`을 쓴다. 실행하면 콘솔에 로컬 주소를 함께 출력한다. 부동산 경로는 `/property/report/`, `/property/statistics/`이고 공통 운영 요약은 `/common/dagster/`, Django admin은 뿌리의 `/admin/`이다. `REPORT_PATH_TOKEN`을 채우면 namespace와 admin 앞에 `/<TOKEN>`이 붙는다. 이 로컬 주소는 같은 PC에서만 열린다 — 카카오톡의 공개 링크로는 쓸 수 없다(아래 Tailscale Funnel 절차 필요).
 
 Ctrl+C로 멈춘다. **이 서버가 꺼져 있으면 스캔도 되지 않는다.** 데이터베이스와 판정이 여기 있어서 `run-scan.bat`이 수집 결과를 넘길 곳이 없기 때문이다. 예전에는 스캔이 파일에 저장하고 끝나서 서버 없이도 돌았지만 지금은 그렇지 않다.
 
@@ -165,10 +165,10 @@ Ctrl+C로 멈춘다. **이 서버가 꺼져 있으면 스캔도 되지 않는다
 검색 조건을 고치거나 "이 매물이 왜 빠졌는지"를 확인하는 곳이다.
 
 ```text
-http://127.0.0.1:8000/property/admin/
+http://127.0.0.1:8000/admin/
 ```
 
-`REPORT_PATH_TOKEN`을 나중에 채우면 주소는 `/<TOKEN>/property/admin/`으로 바뀐다. `run-site` 창의 `Local admin:` 줄에 항상 현재 완성 주소가 출력된다. 계정은 최초 설정에서 만든 슈퍼유저이며, 비밀번호를 잊었다면 재설정한다.
+admin은 부동산·금융자산 두 서비스의 모델을 모두 들고 있어서 namespace 안이 아니라 뿌리에 있다. 옛 주소 `/property/admin/`과 `/stock/admin/`은 여기로 리다이렉트되므로 저장해 둔 즐겨찾기도 그대로 열린다. `REPORT_PATH_TOKEN`을 나중에 채우면 주소는 `/<TOKEN>/admin/`으로 바뀐다. `run-site` 창의 `Local admin:` 줄에 항상 현재 완성 주소가 출력된다. 계정은 최초 설정에서 만든 슈퍼유저이며, 비밀번호를 잊었다면 재설정한다.
 
 ```powershell
 cd report-site
@@ -184,7 +184,7 @@ cd report-site
 | Listing | 현재 매물 상태. `active` 필터, `first_seen_at`, `last_urgent_alert_price_won` |
 | Scan | 실행 이력과 카카오 미전송 사유 |
 
-admin은 Tailscale Funnel 공개 주소로도 열린다(현재 `/property/admin/`). 로그인 화면이 인터넷에 노출돼 있으므로 비밀번호는 강하게 둔다.
+admin은 Tailscale Funnel 공개 주소로도 열린다(현재 `/admin/`). 로그인 화면이 인터넷에 노출돼 있으므로 비밀번호는 강하게 둔다.
 
 ## 가격 통계 보기
 
@@ -317,4 +317,4 @@ cd report-site
 
 - `run-site.bat`이 꺼져 있거나 PC가 절전/종료 상태면 공개 리포트 주소가 응답하지 않는다. 이 구조의 본질적 제약이다.
 - 루트 `.env`의 `KAKAO_REPORT_URL`을 비우면 카카오 메시지가 이전에 쓰던 Codex Sites 주소로 폴백한다. 그 주소는 더 이상 갱신되지 않으므로 비우지 않는다.
-- Django admin은 같은 공개 호스트의 `/property/admin/`에 있다. 로그인 화면이 인터넷에 열려 있는 셈이므로 관리자 비밀번호는 강해야 한다.
+- Django admin은 같은 공개 호스트의 `/admin/`에 있다. 로그인 화면이 인터넷에 열려 있는 셈이므로 관리자 비밀번호는 강해야 한다.

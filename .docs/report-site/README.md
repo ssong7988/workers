@@ -117,7 +117,7 @@ DB 커밋이 먼저여야 공개 리포트가 방금 수집한 시각을 보여 
 | `/property/airflow/` | Django | staff 로그인, 현재 전환 계획 보류 상태의 요약 |
 | `/common/dagster/` | Django | staff 로그인 |
 | `/common/dagster/console/` | Dagster 직접 프록시 | 현재 Django 인증 없음 |
-| `/property/admin/` | Django admin | staff 로그인 |
+| `/admin/` | Django admin | staff 로그인. 두 서비스 공용이라 namespace 밖에 둔다. 옛 `/property/admin/`·`/stock/admin/`은 여기로 리다이렉트 |
 
 토큰을 채우면 비-API 경로에만 `/<TOKEN>`이 붙는다. `/api/`는 URL이 바뀌지
 않고 계속 Bearer 토큰으로 보호된다. 실제 토큰은 문서나 Git에 남기지 않는다.

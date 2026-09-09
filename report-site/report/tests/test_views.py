@@ -12,11 +12,17 @@ from properties.models import GlobalRule, Listing, Scan, SearchCondition
 class RouteNamespaceTests(SimpleTestCase):
     databases = set()
 
+    def test_landing_page_sits_at_the_root(self) -> None:
+        self.assertEqual(reverse("site-home"), "/")
+
     def test_property_routes_share_the_property_namespace(self) -> None:
         self.assertEqual(reverse("report-index"), "/property/report/")
         self.assertEqual(reverse("report-stats"), "/property/statistics/")
-        self.assertEqual(reverse("admin:index"), "/property/admin/")
         self.assertEqual(reverse("report-airflow"), "/property/airflow/")
+
+    def test_admin_sits_at_the_root_not_inside_a_namespace(self) -> None:
+        # 두 서비스의 모델을 모두 들고 있으므로 어느 한쪽 아래에 두지 않는다.
+        self.assertEqual(reverse("admin:index"), "/admin/")
 
     def test_dagster_uses_the_common_namespace(self) -> None:
         self.assertEqual(reverse("report-dagster"), "/common/dagster/")
@@ -99,9 +105,21 @@ class ReportViewTests(TestCase):
         response = self.client.get("/not-the-real-token/property/report/")
         self.assertEqual(response.status_code, 404)
 
-    def test_root_path_is_404(self) -> None:
+    def test_root_path_is_the_service_directory(self) -> None:
         response = self.client.get("/")
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "공통 운영")
+        self.assertContains(response, "부동산")
+        self.assertContains(response, "금융자산")
+        for url_name in (
+            "report-dagster",
+            "report-index",
+            "report-stats",
+            "stock-allocation",
+            "stock-performance",
+        ):
+            self.assertContains(response, f'href="{reverse(url_name)}"')
+        self.assertEqual(response["Cache-Control"], "no-store")
 
     def test_empty_database_renders_empty_state_not_500(self) -> None:
         response = self.client.get(self.url)

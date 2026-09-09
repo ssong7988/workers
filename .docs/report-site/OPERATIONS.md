@@ -97,8 +97,9 @@ migration이 누락되면 안전하게 멈추고 적용 명령을 안내한다. 
 
 ## Django admin
 
-기본 주소는 `http://127.0.0.1:8000/property/admin/`이며 선택 토큰을 쓰면
-`/<TOKEN>/property/admin/`으로 이동한다. `run-site`가 현재 완성 주소를 출력한다.
+기본 주소는 `http://127.0.0.1:8000/admin/`이며 선택 토큰을 쓰면
+`/<TOKEN>/admin/`으로 이동한다. 두 서비스의 모델을 모두 들고 있어 namespace
+안이 아니라 뿌리에 둔다. 옛 `/property/admin/`·`/stock/admin/`은 리다이렉트다. `run-site`가 현재 완성 주소를 출력한다.
 
 | 화면 | 운영 용도 |
 |---|---|

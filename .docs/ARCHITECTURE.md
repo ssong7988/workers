@@ -153,7 +153,7 @@ Django + PostgreSQL + waitress. 도메인 앱 둘(`properties/` 부동산, `port
 | 파일/경로 | 책임 |
 |---|---|
 | `report_site/settings.py` | PostgreSQL, admin 배선, whitenoise, 필수 API 토큰과 선택 경로 토큰, 루트 `.env`까지 로드 |
-| `report_site/urls.py` | `/property/report/` 리포트, `/property/statistics/` 가격 통계, `/property/admin/` admin, `/stock/allocation/`·`/stock/performance/` 금융자산, `/common/dagster/` 공통 운영 요약. `REPORT_PATH_TOKEN`을 채우면 namespace 앞에 `/<TOKEN>/`이 붙는다. 수집기 API 둘(`/api/`, `/stock/api/`)은 namespace 밖에 각자의 Bearer 토큰으로 있다 |
+| `report_site/urls.py` | `/property/report/` 리포트, `/property/statistics/` 가격 통계, 뿌리의 `/admin/` admin(옛 `/property/admin/`·`/stock/admin/`은 리다이렉트), `/stock/allocation/`·`/stock/performance/` 금융자산, `/common/dagster/` 공통 운영 요약. `REPORT_PATH_TOKEN`을 채우면 namespace 앞에 `/<TOKEN>/`이 붙는다. 수집기 API 둘(`/api/`, `/stock/api/`)은 namespace 밖에 각자의 Bearer 토큰으로 있다 |
 | `run-site.ps1`, `run-site.bat` | `check` → `migrate --check` → `collectstatic` → waitress `127.0.0.1:8000` |
 
 ### properties — 도메인 (b/e)

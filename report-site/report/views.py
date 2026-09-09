@@ -28,6 +28,55 @@ from .dagster_client import fetch_status as fetch_dagster_status
 from .stats_params import resolve_range, resolve_scope
 
 
+def landing(request, *, show_links: bool = True) -> HttpResponse:
+    """Render the public service directory without touching the database."""
+    sections = [
+        {
+            "index": "01",
+            "namespace": "common",
+            "name": "공통 운영",
+            "description": "부동산과 금융자산 수집 작업의 일정과 최근 실행 상태를 확인합니다.",
+            "tone": "common",
+            "links": [
+                {
+                    "label": "운영 현황",
+                    "path": reverse("report-dagster"),
+                    "note": "관리자 로그인",
+                }
+            ],
+        },
+        {
+            "index": "02",
+            "namespace": "property",
+            "name": "부동산",
+            "description": "관심 단지의 조건 충족 매물과 급매, 지역·단지별 호가 추이를 살펴봅니다.",
+            "tone": "property",
+            "links": [
+                {"label": "매물 리포트", "path": reverse("report-index")},
+                {"label": "가격 통계", "path": reverse("report-stats")},
+            ],
+        },
+        {
+            "index": "03",
+            "namespace": "stock",
+            "name": "금융자산",
+            "description": "자산 비중과 목표 대비 리밸런싱, 기간별 수익률과 낙폭을 확인합니다.",
+            "tone": "stock",
+            "links": [
+                {"label": "비중·리밸런싱", "path": reverse("stock-allocation")},
+                {"label": "수익률·MDD", "path": reverse("stock-performance")},
+            ],
+        },
+    ]
+    response = render(
+        request,
+        "report/landing.html",
+        {"sections": sections, "show_links": show_links},
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
 def _local_iso(moment: datetime | None, timezone_name: str) -> str:
     if moment is None:
         return ""
@@ -239,6 +288,7 @@ def dagster(request) -> HttpResponse:
             ),
             "report_url": reverse("report-index"),
             "stats_url": reverse("report-stats"),
+            "home_url": reverse("site-home"),
             "dagster_runs_url": f"{settings.DAGSTER_PATH_PREFIX}/runs",
         },
     )
