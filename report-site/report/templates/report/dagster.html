@@ -43,10 +43,47 @@
   .state-running { color: #1e40af; background: #eff6ff; }
   .state-queued { color: #92400e; background: #fffbeb; }
   .state-other { color: #475569; background: #f1f5f9; }
-  .job-purpose { margin: .5rem .25rem 0; font-size: 12px; color: #64748b; }
+  .guide { margin-top: 1.25rem; padding: 1.35rem; }
+  .guide-title { margin: 0; font-size: 1.125rem; }
+  .guide-copy { margin: .6rem 0 0; color: #475569; font-size: 1rem; line-height: 1.7; }
+  .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: .6rem; margin-top: 1.15rem; }
+  .flow-step { position: relative; border-radius: .75rem; background: #f8fafc; padding: .85rem; }
+  .flow-step:not(:last-child)::after { content: "→"; position: absolute; right: -.55rem; top: 50%; z-index: 1; color: #94a3b8; font-weight: 800; transform: translateY(-50%); }
+  .flow-label { display: block; color: #047857; font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+  .flow-text { display: block; margin-top: .3rem; color: #334155; font-size: .875rem; line-height: 1.45; }
+  .jobs { display: grid; gap: 1rem; margin-top: 1rem; }
+  .job-card { overflow: hidden; border-radius: 1rem; border: 1px solid #e2e8f0; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .job-main { padding: 1.25rem; }
+  .job-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .job-category { display: inline-block; border-radius: 999px; background: #ecfdf5; padding: .25rem .6rem; color: #047857; font-size: 12px; font-weight: 800; }
+  .job-title { margin: .55rem 0 0; font-size: 1.25rem; letter-spacing: -.02em; }
+  .job-name { color: #64748b; font: 12px/1.5 Consolas, "SFMono-Regular", monospace; overflow-wrap: anywhere; }
+  .job-purpose { margin: .8rem 0 0; color: #334155; font-size: 1rem; font-weight: 650; line-height: 1.65; }
+  .job-method { margin: .55rem 0 0; color: #64748b; font-size: .9375rem; line-height: 1.72; }
+  .schedule-list { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }
+  .schedule-chip { border: 1px solid #dbe5e1; border-radius: .7rem; background: #f7fbf9; padding: .5rem .65rem; }
+  .schedule-work { display: block; color: #475569; font-size: 12px; }
+  .schedule-time { display: block; margin-top: .18rem; color: #065f46; font-size: .8125rem; font-weight: 800; }
+  .job-detail { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(13rem, .75fr); border-top: 1px solid #eef2f7; background: #fbfcfd; }
+  .steps { margin: 0; padding: 1.1rem 1.25rem 1.1rem 3.2rem; counter-reset: job-step; list-style: none; }
+  .steps li { position: relative; min-height: 1.7rem; color: #475569; font-size: .875rem; line-height: 1.55; }
+  .steps li + li { margin-top: .55rem; }
+  .steps li::before { counter-increment: job-step; content: counter(job-step); position: absolute; left: -1.95rem; top: .02rem; display: grid; width: 1.35rem; height: 1.35rem; place-items: center; border-radius: 50%; background: #d1fae5; color: #047857; font-size: 11px; font-weight: 800; }
+  .result { border-left: 1px solid #eef2f7; padding: 1.1rem 1.25rem; }
+  .result-label { color: #64748b; font-size: 12px; font-weight: 800; }
+  .result-text { margin: .4rem 0 0; color: #0f172a; font-size: .9rem; font-weight: 700; line-height: 1.55; }
   .empty { padding: 3rem 1rem; text-align: center; color: #64748b; }
   .footer { padding: 1.75rem .5rem; text-align: center; font-size: 12px; line-height: 1.5; color: #94a3b8; }
   .icon { display: inline-block; vertical-align: -3px; }
+  @media (max-width: 720px) {
+    .flow { grid-template-columns: 1fr 1fr; }
+    .flow-step:not(:last-child)::after { display: none; }
+    .job-head { display: block; }
+    .job-name { display: block; margin-top: .5rem; }
+    .job-detail { grid-template-columns: 1fr; }
+    .result { border-top: 1px solid #eef2f7; border-left: 0; }
+  }
+  @media (max-width: 420px) { .flow { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -59,6 +96,7 @@
   <div class="observed">
     <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 16V9"/><path d="M12 16V5"/><path d="M17 16v-5"/></svg>
     마지막 수집: {{ latest_scan_at }}
+    <a class="back" href="{{ home_url }}">전체 서비스 &rarr;</a>
     <a class="back" href="{{ report_url }}">매물 리포트 &rarr;</a>
     <a class="back" href="{{ stats_url }}">가격 통계 &rarr;</a>
   </div>
@@ -79,26 +117,60 @@
   </section>
   {% endif %}
 
-  {% for job in jobs %}
+  <section class="panel guide">
+    <h2 class="guide-title">Dagster가 하는 일</h2>
+    <p class="guide-copy">
+      Dagster는 직접 매물이나 계좌 데이터를 만드는 프로그램이 아니라, 정해진 시간에 Windows의
+      수집기와 Django 명령을 순서대로 실행하고 성공·실패를 기록하는 운영 스케줄러입니다.
+      이 화면에서는 각각의 실행 묶음을 <strong>잡(job)</strong>으로 표시합니다.
+      주요 서버·수집 단계는 한 번 재시도하며, 그래도 실패하면 Django의 <code>send_alert</code>가 카카오톡으로 운영 경고를 보냅니다.
+    </p>
+    <div class="flow" aria-label="자동화 처리 흐름">
+      <div class="flow-step"><span class="flow-label">1 · SCHEDULE</span><span class="flow-text">Dagster가 정해진 시각에 잡 시작</span></div>
+      <div class="flow-step"><span class="flow-label">2 · COLLECT</span><span class="flow-text">Edge·네이버 또는 H-able에서 자료 수집</span></div>
+      <div class="flow-step"><span class="flow-label">3 · STORE</span><span class="flow-text">Django가 판정·계산 후 PostgreSQL 저장</span></div>
+      <div class="flow-step"><span class="flow-label">4 · DELIVER</span><span class="flow-text">웹 화면 갱신, 필요한 경우 카카오 발송</span></div>
+    </div>
+  </section>
+
   <div class="section-title">
     <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#047857" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-    {{ job.name }}
+    등록된 잡과 실행 방식
   </div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>작업</th><th>일정</th></tr></thead>
-      <tbody>
-        {% for schedule in job.schedules %}
-        <tr>
-          <td>{{ schedule.description }}</td>
-          <td>{{ schedule.cron }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <p class="job-purpose">{{ job.purpose }}</p>
-  {% endfor %}
+  <section class="jobs" aria-label="등록된 Dagster 잡 설명">
+    {% for job in jobs %}
+    <article class="job-card">
+      <div class="job-main">
+        <div class="job-head">
+          <div>
+            <span class="job-category">{{ job.category }}</span>
+            <h3 class="job-title">{{ job.title }}</h3>
+          </div>
+          <span class="job-name">{{ job.name }}</span>
+        </div>
+        <p class="job-purpose">{{ job.purpose }}</p>
+        <p class="job-method">{{ job.method }}</p>
+        <div class="schedule-list" aria-label="실행 일정">
+          {% for schedule in job.schedules %}
+          <div class="schedule-chip">
+            <span class="schedule-work">{{ schedule.description }}</span>
+            <span class="schedule-time">{{ schedule.cron }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="job-detail">
+        <ol class="steps">
+          {% for step in job.steps %}<li>{{ step }}</li>{% endfor %}
+        </ol>
+        <div class="result">
+          <div class="result-label">남는 결과</div>
+          <p class="result-text">{{ job.result }}</p>
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
 
   {% if status.reachable %}
   <div class="section-title">

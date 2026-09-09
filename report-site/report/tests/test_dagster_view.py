@@ -42,7 +42,7 @@ class DagsterViewTests(TestCase):
         self.assertEqual(response["Cache-Control"], "no-store")
         # The static job list renders regardless of whether Dagster itself
         # answered - it's the whole point of not depending on a live query.
-        self.assertContains(response, "매물 수집")
+        self.assertContains(response, "네이버 부동산 매물 스캔")
 
     def test_staff_sees_every_registered_job(self) -> None:
         """Both jobs in definitions.py show up, scheduled or not.
@@ -66,6 +66,11 @@ class DagsterViewTests(TestCase):
         self.assertContains(response, "morning_report_job")
         self.assertContains(response, "restart_report_site_job")
         self.assertContains(response, "수동 실행")
+        self.assertContains(response, "네이버 부동산 관심단지")
+        self.assertContains(response, "H-able [1285]")
+        self.assertContains(response, "kakao-notifier")
+        self.assertContains(response, "Yahoo Finance·Upbit")
+        self.assertContains(response, "Dagster가 하는 일")
         self.assertContains(
             response,
             f'<div class="tile-value">{len(JOBS)}</div><div class="tile-label">등록된 잡</div>',
