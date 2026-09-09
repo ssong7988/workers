@@ -21,6 +21,8 @@ Thumbs.db
 **/*.log
 real-estate-finder/data/
 real-estate-finder/config/searches.local.yaml
+spending-analyzer/data/
+spending-analyzer/config/settings.local.yaml
 
 # Hosted report workspace (tracked separately)
 property-report-site/.tools/

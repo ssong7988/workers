@@ -1,0 +1,15 @@
+# 설정 로딩
+PyYAML>=6.0,<7
+
+# 명세서 PDF의 표 추출과 암호 해제.
+# pypdf는 텍스트는 뽑아도 좌표 기반 표 재구성이 약한데, 명세서는 표가 전부입니다.
+pdfplumber>=0.11,<1
+
+# 미분류 가맹점 분류 (선택 — ANTHROPIC_API_KEY가 없으면 이 단계만 건너뜁니다)
+anthropic>=0.40
+
+# 카카오 월간 요약 카드 렌더링에만 씁니다. 분석 파이프라인에는 필요 없습니다.
+playwright>=1.55,<2
+
+# Windows에는 IANA 시간대 DB가 없어 ZoneInfo("Asia/Seoul")에 필요합니다.
+tzdata>=2024.1
