@@ -178,6 +178,22 @@ class Instrument(models.Model):
     def effective_benchmark_category(self) -> str:
         return self.benchmark_category or self.asset_class.benchmark_category
 
+    def clean(self) -> None:
+        """시세 출처의 오타를 admin에서 잡는다.
+
+        여기서 걸러내지 않으면 매일 도는 `update_manual_positions`가 실패하고,
+        그 코인은 그날 평가액에서 통째로 빠진다. 저장하는 사람 앞에서 틀리는
+        편이 낫다.
+        """
+        super().clean()
+        if not self.price_source:
+            return
+        from portfolio.prices import describe_source_error
+
+        message = describe_source_error(self.price_source)
+        if message:
+            raise ValidationError({"price_source": message})
+
     def __str__(self) -> str:
         return self.name
 
@@ -268,6 +284,39 @@ class ManualHolding(models.Model):
 
     def __str__(self) -> str:
         return f"{self.account_id} {self.instrument_id} {self.quantity}"
+
+
+class InstrumentDailyPrice(models.Model):
+    """외부 공개 시세에서 받은 종목별 일 종가.
+
+    보유 이력과 시세 이력은 다른 사실이다. 이 표에는 가격만 저장하고, 현재
+    수량을 과거 보유량으로 가장하지 않는다.
+    """
+
+    as_of = models.DateField("기준일", db_index=True)
+    instrument = models.ForeignKey(
+        Instrument,
+        on_delete=models.CASCADE,
+        related_name="daily_prices",
+        verbose_name="종목",
+    )
+    close = models.DecimalField("종가", max_digits=24, decimal_places=8)
+    source = models.CharField("시세 출처", max_length=64)
+    fetched_at = models.DateTimeField("수집 시각", auto_now=True)
+
+    class Meta:
+        ordering = ("-as_of", "instrument_id")
+        verbose_name = "종목 일 종가"
+        verbose_name_plural = "종목 일 종가"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("as_of", "instrument"),
+                name="unique_daily_price_per_instrument",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.as_of} {self.instrument_id} {self.close}"
 
 
 class PositionSnapshot(models.Model):
@@ -514,3 +563,37 @@ class DailyPortfolioMetric(models.Model):
 
     def __str__(self) -> str:
         return f"{self.as_of}"
+
+
+class HableAccountDailyMetric(models.Model):
+    """H-able [0354]가 계산한 계좌별 일간 성과 원본.
+
+    과거 보유종목을 현재 잔고로 역산하지 않고, 증권사가 보관한 실제 일별
+    평가액과 시간가중수익률을 그대로 저장한다. 금액 원본은 천원 단위지만
+    다른 포트폴리오 모델과 맞추기 위해 원 단위로 변환해 둔다.
+    """
+
+    account = models.ForeignKey(
+        InvestmentAccount, on_delete=models.CASCADE, related_name="hable_daily_metrics"
+    )
+    as_of = models.DateField("기준일", db_index=True)
+    market_value = models.DecimalField("평가액", max_digits=18, decimal_places=2)
+    deposit = models.DecimalField("입금", max_digits=18, decimal_places=2, default=0)
+    withdrawal = models.DecimalField("출금", max_digits=18, decimal_places=2, default=0)
+    investment_pl = models.DecimalField("당일 투자손익", max_digits=18, decimal_places=2)
+    daily_return = models.DecimalField("일간 수익률", max_digits=12, decimal_places=8)
+    account_cumulative_return = models.DecimalField(
+        "계좌 누적 수익률", max_digits=12, decimal_places=8
+    )
+    imported_at = models.DateTimeField("가져온 시각", auto_now=True)
+
+    class Meta:
+        ordering = ("as_of", "account_id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("account", "as_of"), name="unique_hable_metric_account_day"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.as_of} {self.account_id}"

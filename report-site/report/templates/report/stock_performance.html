@@ -3,7 +3,7 @@
 {% block title %}금융자산 수익률 · MDD{% endblock %}
 {% block heading %}수익률과 낙폭{% endblock %}
 {% block observed %}
-  {% if latest %}{{ latest.as_of|date:"Y.m.d" }} 기준 · {{ range_label }}{% else %}수집된 자료 없음{% endif %}
+  {% if latest %}{{ latest.as_of|date:"Y.m.d" }} 기준 · {{ portfolio_label }} · {{ range_label }}{% else %}수집된 자료 없음{% endif %}
 {% endblock %}
 
 {% block extra_style %}
@@ -12,19 +12,63 @@
   .range { border: 1px solid #cbd5e1; border-radius: 999px; padding: .3rem .8rem; font-size: .8125rem; font-weight: 600; color: #475569; background: #fff; }
   .range.current { background: #0b2545; border-color: #0b2545; color: #fff; }
   .chart-wrap { margin-top: 1rem; overflow-x: auto; }
-  .chart { display: block; height: auto; }
+  .chart { display: block; width: 100%; height: auto; }
+  .cash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin: 1rem 0 0; }
+  .cash-grid > div { min-width: 0; padding: 1rem; border: 1px solid #e2e8f0; border-radius: .75rem; background: #fff; }
+  .cash-grid dt { color: #64748b; font-size: .8rem; line-height: 1.5; }
+  .cash-grid dd { margin: .4rem 0 0; font-size: 1.1rem; font-weight: 700; overflow-wrap: anywhere; }
+  .portfolio-filter { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: end; margin-bottom: 1rem; }
+  .portfolio-filter label { display: block; margin-bottom: .4rem; font-size: .85rem; font-weight: 700; }
+  .portfolio-filter select { width: 100%; min-width: 0; padding: .7rem; border: 1px solid #cbd5e1; border-radius: .65rem; background: #fff; font: inherit; }
+  .portfolio-filter button { padding: .75rem 1rem; border: 0; border-radius: .65rem; background: #0b2545; color: #fff; font: inherit; cursor: pointer; }
+  @media (min-width: 640px) { .cash-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   .grid-line { stroke: #e2e8f0; stroke-width: 1; }
   .zero-line { stroke: #94a3b8; stroke-width: 1; stroke-dasharray: 3 3; }
   .axis-label { fill: #94a3b8; font-size: 11px; }
+  @media (max-width: 639px) { .axis-label { font-size: 22px; } }
   .series { fill: none; stroke: #0ea5e9; stroke-width: 2; stroke-linejoin: round; }
   .series-area { fill: rgba(14, 165, 233, .12); stroke: none; }
   .x-labels { display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; padding: 0 1rem; }
+  .asset-legend { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+  .asset-toggle { min-height: 44px; padding: .5rem .8rem; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; color: #0f172a; font: inherit; cursor: pointer; }
+  .asset-toggle[aria-pressed="false"] { background: #e2e8f0; color: #64748b; text-decoration: line-through; }
+  .asset-toggle:disabled { opacity: .55; cursor: default; }
+  .asset-toggle:focus-visible { outline: 3px solid #0284c7; outline-offset: 2px; }
+  .asset-chart-panel { margin-top: 1rem; }
+  .asset-comparison h3 { margin: 0 0 .5rem; font-size: .95rem; }
+  .asset-periods { margin: .8rem 0; display: flex; flex-wrap: wrap; gap: .4rem; }
+  .asset-date-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: .6rem; align-items: end; margin: .8rem 0 1rem; }
+  .asset-date-form label { color: #475569; font-size: .78rem; font-weight: 700; }
+  .asset-date-form input { display: block; width: 100%; min-width: 0; box-sizing: border-box; margin-top: .3rem; padding: .65rem .5rem; border: 1px solid #cbd5e1; border-radius: .6rem; background: #fff; font: inherit; }
+  .asset-date-form button { min-height: 44px; padding: .65rem .9rem; border: 0; border-radius: .6rem; background: #0b2545; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+  .asset-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: .75rem; margin-top: 1rem; }
+  .asset-metrics dl { margin: .75rem 0 0; }
+  .asset-metrics dl > div { padding-top: .6rem; }
+  .asset-metrics dt { color: #64748b; font-size: .78rem; }
+  .asset-metrics dd { margin: .2rem 0 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .asset-comparison [hidden] { display: none !important; }
+  @media (max-width: 479px) { .asset-date-form { grid-template-columns: 1fr 1fr; } .asset-date-form button { grid-column: 1 / -1; } }
 {% endblock %}
 
 {% block content %}
+<form class="portfolio-filter" method="get">
+  <input type="hidden" name="range" value="{{ range_key }}">
+  <input type="hidden" name="class_range" value="{{ class_range_key }}">
+  {% if class_range_key == 'custom' %}<input type="hidden" name="class_start" value="{{ class_start_value }}"><input type="hidden" name="class_end" value="{{ class_end_value }}">{% endif %}
+  <div>
+    <label for="portfolio-select">포트폴리오별 보기</label>
+    <select id="portfolio-select" name="portfolio">
+      <option value="all"{% if portfolio_key == 'all' %} selected{% endif %}>KB증권 전체</option>
+      {% for account in portfolios %}
+      <option value="{{ account.pk }}"{% if portfolio_key == account.pk %} selected{% endif %}>{{ account.alias }} · {{ account.get_account_type_display }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit">조회</button>
+</form>
 {% if not has_data %}
 <div class="panel empty">
-  아직 성과를 계산할 자료가 없습니다.<br>
+  {{ portfolio_label }}에는 아직 성과를 계산할 자료가 없습니다.<br>
   완전 수집일이 이틀 이상 쌓이면 수익률과 낙폭이 나옵니다.
 </div>
 {% else %}
@@ -36,23 +80,28 @@
   </div>
   <div class="tile">
     <div class="tile-value {% if summary.profit %}tile-up{% else %}tile-down{% endif %}">{{ summary.investment_pl_text }}</div>
-    <div class="tile-label">누적 투자손익</div>
+    <div class="tile-label">{{ range_label }} 투자손익</div>
   </div>
   <div class="tile">
     <div class="tile-value {% if summary.profit %}tile-up{% else %}tile-down{% endif %}">{{ summary.cumulative_return_text }}</div>
-    <div class="tile-label">누적 수익률</div>
+    <div class="tile-label">{{ range_label }} 수익률</div>
   </div>
   <div class="tile">
     <div class="tile-value tile-down">{{ summary.max_drawdown_text }}</div>
-    <div class="tile-label">MDD</div>
+    <div class="tile-label">{{ range_label }} MDD</div>
   </div>
 </div>
 
 <div class="section-title">기간별 성과</div>
 <div class="panel">
+  {% if using_hable %}
+  <div class="hint">
+    {{ portfolio_label }}의 일별 기록입니다. 코인 지갑은 포함하지 않습니다.
+  </div>
+  {% endif %}
   <div class="ranges">
     {% for item in ranges %}
-    <a class="range{% if item.key == range_key %} current{% endif %}" href="?range={{ item.key }}">{{ item.label }}</a>
+    <a class="range{% if item.key == range_key %} current{% endif %}" href="?range={{ item.key }}&amp;portfolio={{ portfolio_key|urlencode }}&amp;class_range={{ class_range_key }}{% if class_range_key == 'custom' %}&amp;class_start={{ class_start_value }}&amp;class_end={{ class_end_value }}{% endif %}"{% if item.key == range_key %} aria-current="page"{% endif %}>{{ item.label }}</a>
     {% endfor %}
   </div>
   {% if chart %}
@@ -81,95 +130,21 @@
   {% endif %}
 </div>
 
-<div class="section-title">현금흐름과 낙폭</div>
-<div class="table-wrap">
-  <table>
-    <tbody>
-      <tr><td>최초 평가액 ({{ first_day|date:"Y.m.d" }})</td><td>{{ summary.first_value_text }}</td></tr>
-      <tr><td>누적 순외부입금</td><td>{{ summary.net_flow_text }}</td></tr>
-      <tr><td>누적 투자손익</td><td class="{% if summary.profit %}buy{% else %}sell{% endif %}">{{ summary.investment_pl_text }}</td></tr>
-      <tr><td>현재 낙폭</td><td>{{ summary.drawdown_text }}</td></tr>
-      <tr><td>MDD (최대 낙폭)</td><td>{{ summary.max_drawdown_text }}</td></tr>
-    </tbody>
-  </table>
-</div>
+<div class="section-title">현금흐름과 낙폭 · {{ portfolio_label }}</div>
+<dl class="cash-grid">
+  <div><dt>시작 평가액 · {{ first_day|date:"Y.m.d" }}</dt><dd>{{ summary.first_value_text }}</dd></div>
+  <div><dt>{{ range_label }} 순입금</dt><dd>{{ summary.net_flow_text }}</dd></div>
+  <div><dt>{{ range_label }} 투자손익</dt><dd class="{% if summary.profit %}buy{% else %}sell{% endif %}">{{ summary.investment_pl_text }}</dd></div>
+  <div><dt>현재 낙폭 · 기간 내 고점 대비</dt><dd>{{ summary.drawdown_text }}</dd></div>
+  <div><dt>{{ range_label }} 최대 낙폭 (MDD)</dt><dd>{{ summary.max_drawdown_text }}</dd></div>
+  <div><dt>{{ range_label }} 수익률</dt><dd>{{ summary.period_return_text }}</dd></div>
+</dl>
 <div class="hint">
   입금과 출금은 수익률의 분모만 조정하고 손익으로 세지 않습니다.
-  매수·매도와 포함 계좌 사이 이체는 내부 이동, 배당·이자·수수료·세금은 투자성과입니다.
+  {% if portfolio_key != 'all' %}다른 계좌와의 이체도 선택한 계좌 기준으로 입출금에 포함됩니다.{% else %}포함된 계좌 사이의 이체는 전체 기준으로 상쇄됩니다.{% endif %}
   MDD는 평가액이 아니라 현금흐름을 제거한 누적 성과지수의 고점 대비 하락률입니다.
 </div>
 
-{% if classes %}
-<div class="section-title">자산분류별 {{ range_label }} 수익률</div>
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr><th>자산분류</th><th>평가액</th><th>{{ range_label }} 수익률</th><th>관측일</th></tr>
-    </thead>
-    <tbody>
-      {% for row in classes %}
-      <tr>
-        <td>{{ row.name }}</td>
-        <td>{{ row.value_text }}</td>
-        <td class="{% if row.trend == 'up' %}buy{% elif row.trend == 'down' %}sell{% endif %}">{{ row.return_text }}</td>
-        <td>{{ row.observed_days }}일</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-<div class="hint">
-  분류 안팎으로 오간 매수·매도를 그 분류의 현금흐름으로 처리해, 돈을 더 넣어
-  늘어난 부분과 값이 올라 늘어난 부분을 나눴습니다.
-  관측일이 이틀 미만인 분류는 수익률을 표시하지 않습니다.
-</div>
 {% endif %}
-
-{% if realized %}
-<div class="section-title">확정된 손익 (거래내역)</div>
-<div class="hint">
-  위의 수익률은 <b>수집을 시작한 뒤</b> 평가액이 어떻게 변했는지이고, 여기는
-  실제로 팔거나 받아서 <b>확정된 금액</b>입니다. 거래내역은 지난 1년치를 받아오므로
-  수집 이전 기간도 말할 수 있습니다. 두 숫자는 성격이 다르니 섞어 읽지 마세요.
-</div>
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr><th>기간</th><th>누적 확정손익</th><th>기록된 날</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>{{ realized.first_day|date:"Y.m.d" }} ~ {{ realized.last_day|date:"Y.m.d" }}</td>
-        <td>{{ realized.total_text }}</td>
-        <td>{{ realized.day_count }}일</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
-{% if realized.unknown_cost_sales %}
-<div class="hint warn">
-  <b>이 금액은 실제보다 큽니다.</b> 매도 {{ realized.unknown_cost_sales }}건은 산 기록이
-  조회 기간(1년) 밖에 있어 <b>취득원가를 알 수 없습니다</b>. 그런 매도는 판 금액이
-  통째로 이익으로 잡힙니다. 배당과 이자는 원가와 무관하므로 그대로 정확합니다.
-</div>
-{% endif %}
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr><th>날짜</th><th>그날</th><th>누적</th></tr>
-    </thead>
-    <tbody>
-      {% for row in realized.recent %}
-      <tr>
-        <td>{{ row.as_of|date:"Y.m.d" }}</td>
-        <td class="{{ row.trend }}">{{ row.day_text }}</td>
-        <td>{{ row.total_text }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% endif %}
-
-{% endif %}
+{% include "report/stock_class_charts.html" %}
 {% endblock %}

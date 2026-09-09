@@ -78,3 +78,29 @@ class PopulatedScreenTests(TestCase):
         response = self.client.get(PERFORMANCE_URL, {"range": "nonsense"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "1년")
+
+    def test_asset_comparison_has_its_own_quick_ranges(self) -> None:
+        response = self.client.get(
+            PERFORMANCE_URL, {"range": "1m", "class_range": "3m"}
+        )
+        self.assertEqual(response.context["range_key"], "1m")
+        self.assertEqual(response.context["class_range_key"], "3m")
+        self.assertEqual(response.context["class_start_value"], "2026-06-02")
+        self.assertContains(response, 'name="class_start"')
+        self.assertContains(response, 'name="class_end"')
+        self.assertContains(response, "기간 적용")
+
+    def test_asset_comparison_accepts_direct_dates(self) -> None:
+        response = self.client.get(
+            PERFORMANCE_URL,
+            {
+                "range": "1y",
+                "class_range": "custom",
+                "class_start": "2026-08-31",
+                "class_end": "2026-09-01",
+            },
+        )
+        self.assertEqual(response.context["class_range_key"], "custom")
+        self.assertEqual(response.context["class_start_value"], "2026-08-31")
+        self.assertEqual(response.context["class_end_value"], "2026-09-01")
+        self.assertContains(response, "2026.08.31 ~ 2026.09.01")

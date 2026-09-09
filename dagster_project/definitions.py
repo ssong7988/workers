@@ -299,12 +299,22 @@ def collect_stock_op(context) -> None:
 
 @dg.op(ins={"start": dg.In(dg.Nothing)})
 def update_manual_positions_op(context) -> None:
-    """직접 입력한 보유(코인 등)에 오늘 시세를 붙인다.
+    """직접 입력한 보유(코인 등)에 오늘 시세와 1년 일봉을 붙인다.
 
     KB 밖의 자산이라 H-able에는 없다. 수량은 admin에, 가격은 공개 시세에서 온다.
     """
-    result = _run_manage("update_manual_positions", timeout=120, capture=True)
-    context.log.info((result.stdout or "").strip() or "출력이 없습니다.")
+    for args, timeout in (
+        (("update_price_history", "--days", "365"), 180),
+        (("update_manual_positions",), 120),
+    ):
+        result = _run_manage(*args, timeout=timeout, capture=True)
+        context.log.info((result.stdout or "").strip() or "출력이 없습니다.")
+        if result.returncode != 0:
+            detail = (result.stderr or "").strip().splitlines()
+            suffix = f": {detail[-1]}" if detail else ""
+            raise RuntimeError(
+                f"manage.py {' '.join(args)} 실패 (종료 코드 {result.returncode}){suffix}"
+            )
 
 
 @dg.op(

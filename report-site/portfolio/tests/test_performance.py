@@ -5,7 +5,8 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from portfolio.models import CashFlow, DailyPortfolioMetric
+from portfolio.models import CashFlow, DailyPortfolioMetric, HableAccountDailyMetric
+from portfolio.hable_history import portfolio_history
 from portfolio.performance import class_performance, rebuild_metrics
 
 from .factories import make_account, make_asset_class, make_instrument, record_balance
@@ -13,6 +14,29 @@ from .factories import make_account, make_asset_class, make_instrument, record_b
 
 def close(value: Decimal, expected: str, places: int = 6) -> bool:
     return abs(value - Decimal(expected)) < Decimal(10) ** -places
+
+
+class HableHistoryTests(TestCase):
+    def test_combines_only_days_present_for_every_kb_account(self) -> None:
+        first = make_account("kb-a", masked_number="1**")
+        second = make_account("kb-b", masked_number="2**")
+        for account, first_value, second_value, second_return in (
+            (first, "100000", "110000", "0.10"),
+            (second, "300000", "270000", "-0.10"),
+        ):
+            for day, value, daily_return in (
+                (date(2026, 1, 1), first_value, "0"),
+                (date(2026, 1, 2), second_value, second_return),
+            ):
+                HableAccountDailyMetric.objects.create(
+                    account=account, as_of=day, market_value=value,
+                    investment_pl="0", daily_return=daily_return,
+                    account_cumulative_return=daily_return,
+                )
+        rows = portfolio_history()
+        self.assertEqual(len(rows), 2)
+        # 10% * 100/400 + -10% * 300/400 = -5%
+        self.assertTrue(close(rows[-1].cumulative_return, "-0.05"))
 
 
 class RebuildMetricsTests(TestCase):

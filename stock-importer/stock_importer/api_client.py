@@ -131,3 +131,6 @@ class StockApiClient:
 
     def post_import_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/import-runs/", payload)
+
+    def post_performance_history(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/performance-history/", payload)

@@ -10,12 +10,15 @@ from decimal import Decimal
 
 from django.contrib import admin, messages
 
+from portfolio.prices import PriceError, fetch_prices_cached
+
 from .models import (
     ManualHolding,
     AssetClass,
     BenchmarkAllocation,
     CashFlow,
     DailyPortfolioMetric,
+    HableAccountDailyMetric,
     ImportRun,
     Instrument,
     InvestmentAccount,
@@ -55,9 +58,10 @@ class InstrumentAdmin(admin.ModelAdmin):
         "benchmark_category",
         "currency",
         "is_cash",
+        "price_source",
     )
     # 새 종목이 미분류로 들어오므로 목록에서 바로 옮길 수 있어야 한다.
-    list_editable = ("asset_class", "benchmark_category")
+    list_editable = ("asset_class", "benchmark_category", "price_source")
     list_filter = ("asset_class", "currency", "is_cash")
     search_fields = ("code", "name")
 
@@ -70,10 +74,38 @@ class ManualHoldingAdmin(admin.ModelAdmin):
     종목의 `시세 출처`가 비어 있으면 그 종목은 건너뛴다.
     """
 
-    list_display = ("account", "instrument", "quantity", "active", "updated_at")
+    list_display = (
+        "account",
+        "instrument",
+        "quantity",
+        "live_price",
+        "live_value",
+        "active",
+        "updated_at",
+    )
     list_filter = ("active", "account")
     search_fields = ("instrument__name", "instrument__code", "note")
     autocomplete_fields = ("instrument",)
+
+    def _price(self, obj):
+        """이 행의 지금 시세. 못 받으면 None - 목록이 통째로 죽으면 안 된다."""
+        source = obj.instrument.price_source
+        if not source:
+            return None
+        try:
+            return fetch_prices_cached([source]).get(source)
+        except PriceError:
+            return None
+
+    @admin.display(description="현재가")
+    def live_price(self, obj):
+        price = self._price(obj)
+        return "-" if price is None else f"{price:,.0f}"
+
+    @admin.display(description="평가액(지금)")
+    def live_value(self, obj):
+        price = self._price(obj)
+        return "-" if price is None else f"{obj.quantity * price:,.0f}원"
 
 
 @admin.register(PortfolioTarget)
@@ -186,3 +218,17 @@ class DailyPortfolioMetricAdmin(ReadOnlyAdmin):
     def has_delete_permission(self, request, obj=None) -> bool:
         # 재계산이 언제든 다시 만든다.
         return True
+
+
+@admin.register(HableAccountDailyMetric)
+class HableAccountDailyMetricAdmin(ReadOnlyAdmin):
+    list_display = (
+        "as_of",
+        "account",
+        "market_value",
+        "investment_pl",
+        "daily_return",
+        "account_cumulative_return",
+        "imported_at",
+    )
+    list_filter = ("account", "as_of")

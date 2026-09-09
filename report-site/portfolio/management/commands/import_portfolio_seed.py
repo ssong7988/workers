@@ -49,12 +49,14 @@ class Command(BaseCommand):
         classes = self._load_asset_classes(raw.get("asset_classes", []))
         accounts = self._load_accounts(raw.get("accounts", []))
         benchmarks = self._load_benchmark(raw.get("benchmark") or {})
+        instruments = self._load_instruments(raw.get("instruments") or [])
         reclassified = self._apply_instrument_names(raw.get("instrument_names") or {})
 
         self.stdout.write(
             self.style.SUCCESS(
                 f"시드 완료: 자산분류 {classes}개, 계좌 {accounts}개, "
-                f"국민연금 기준 {benchmarks}개, 종목 재분류 {reclassified}개"
+                f"국민연금 기준 {benchmarks}개, 종목 {instruments}개, "
+                f"종목 재분류 {reclassified}개"
             )
         )
 
@@ -130,6 +132,41 @@ class Command(BaseCommand):
             BenchmarkAllocation.objects.update_or_create(
                 as_of=as_of, source_category=category, defaults=values
             )
+        return len(rows)
+
+    def _load_instruments(self, rows: list[dict]) -> int:
+        """수집기가 만들지 못하는 종목(코인 등)의 자리를 만든다.
+
+        이미 있는 종목의 이름·분류는 건드리지 않는다. admin에서 손으로 정한
+        값을 시드가 되돌리면 안 되기 때문이다. 시세 출처만은 비어 있을 때
+        채워준다 - 비어 있으면 어차피 시세를 못 받는다.
+        """
+        for row in rows:
+            try:
+                code = str(row["code"])
+                values = {
+                    "name": str(row["name"]),
+                    "asset_class_id": str(row["asset_class"]),
+                    "currency": str(row.get("currency", "KRW")),
+                    "is_cash": bool(row.get("is_cash", False)),
+                    "price_source": str(row.get("price_source", "")),
+                }
+            except (KeyError, TypeError) as exc:
+                raise CommandError(
+                    "각 종목에는 code, name, asset_class가 필요합니다."
+                ) from exc
+            if not AssetClass.objects.filter(pk=values["asset_class_id"]).exists():
+                raise CommandError(f"없는 자산분류입니다: {values['asset_class_id']}")
+
+            existing = Instrument.objects.filter(pk=code).first()
+            if existing is None:
+                candidate = Instrument(pk=code, **values)
+                candidate.full_clean(validate_unique=False, validate_constraints=False)
+                candidate.save()
+                continue
+            if not existing.price_source and values["price_source"]:
+                existing.price_source = values["price_source"]
+                existing.save(update_fields=["price_source", "updated_at"])
         return len(rows)
 
     def _apply_instrument_names(self, mapping: dict[str, list[str]]) -> int:

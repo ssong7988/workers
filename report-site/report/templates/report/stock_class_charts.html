@@ -1,0 +1,83 @@
+{% if comparison.series %}
+<section class="asset-comparison" aria-labelledby="asset-comparison-title">
+  <h2 class="section-title" id="asset-comparison-title">자산 포트폴리오별 비교</h2>
+  <div class="asset-periods" aria-label="자산 포트폴리오 비교 기간">
+    {% for item in class_ranges %}
+    <a class="range{% if item.key == class_range_key %} current{% endif %}" href="?range={{ range_key }}&amp;portfolio={{ portfolio_key|urlencode }}&amp;class_range={{ item.key }}"{% if item.key == class_range_key %} aria-current="page"{% endif %}>{{ item.label }}</a>
+    {% endfor %}
+  </div>
+  <form class="asset-date-form" method="get">
+    <input type="hidden" name="range" value="{{ range_key }}">
+    <input type="hidden" name="portfolio" value="{{ portfolio_key }}">
+    <input type="hidden" name="class_range" value="custom">
+    <label>시작일<input type="date" name="class_start" value="{{ class_start_value }}" required></label>
+    <label>종료일<input type="date" name="class_end" value="{{ class_end_value }}" required></label>
+    <button type="submit">기간 적용</button>
+  </form>
+  <p class="hint">{{ class_range_label }} 조회 범위 안에서 실제 관측한 날짜만 비교합니다. 범례를 누르면 해당 자산의 선과 지표를 숨기거나 다시 표시합니다.</p>
+  <p class="notice">자산분류별 선은 현재 보유 종목과 수량을 고정하고 외부 일 종가로 다시 계산한 가격지수입니다.
+    한국거래소 상장 종목은 Yahoo Finance, 코인은 업비트 일봉을 사용합니다. 안전자산은 현재 현금 금액을 고정합니다.
+    실제 과거 보유량·입출금·매매손익을 뜻하지 않습니다.
+    {% if comparison.charts %}실제 관측 구간: {{ comparison.first|date:"Y.m.d" }} ~ {{ comparison.last|date:"Y.m.d" }}.{% endif %}
+    관측 사이의 고점·낙폭은 알 수 없으므로 표시된 MDD가 실제보다 작을 수 있습니다. 계좌별 과거 수익률과 관측 기간이 다릅니다.</p>
+  <div class="asset-legend" aria-label="자산분류 표시 설정">
+    {% for asset in comparison.series %}
+    <button type="button" class="asset-toggle" data-asset="{{ asset.id }}" aria-pressed="true"{% if not asset.available %} disabled{% endif %}>
+      <span class="swatch" style="background: {{ asset.color }}"></span>{{ asset.name }}{% if not asset.available %} · 관측 부족{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+  <p class="hint asset-none" hidden role="status">모든 자산이 숨겨져 있습니다. 범례를 눌러 다시 표시하세요.</p>
+  {% for graph in comparison.charts %}
+  <div class="panel asset-chart-panel">
+    <h3>{{ graph.title }}</h3>
+    <svg class="chart asset-chart" viewBox="0 0 720 230" role="img" aria-label="자산분류별 {{ graph.title }} 비교">
+      {% for tick in graph.ticks %}
+      <line class="grid-line" x1="76" y1="{{ tick.y }}" x2="700" y2="{{ tick.y }}"/>
+      <text class="axis-label" x="68" y="{{ tick.y }}" text-anchor="end" dominant-baseline="middle">{{ tick.text }}</text>
+      {% endfor %}
+      <line class="zero-line" x1="76" y1="{{ graph.zero }}" x2="700" y2="{{ graph.zero }}"/>
+      {% for line in graph.lines %}
+      <g data-asset-series="{{ line.id }}">
+        <title>{{ line.name }} · {{ graph.title }}</title>
+        <polyline points="{{ line.points }}" fill="none" stroke="{{ line.color }}" stroke-width="2.5" vector-effect="non-scaling-stroke"/>
+        {% for dot in line.dots %}<circle cx="{{ dot.x }}" cy="{{ dot.y }}" r="3" fill="{{ line.color }}"><title>{{ line.name }} · {{ dot.label }}</title></circle>{% endfor %}
+      </g>
+      {% endfor %}
+    </svg>
+    <div class="x-labels"><span>{{ comparison.first|date:"Y.m.d" }}</span><span>{{ comparison.last|date:"Y.m.d" }}</span></div>
+  </div>
+  {% empty %}<div class="panel empty">수익률·낙폭 그래프에는 최소 두 번의 관측이 필요합니다.</div>{% endfor %}
+  <div class="asset-metrics">
+    {% for asset in comparison.series %}
+    <article class="panel" data-asset-card="{{ asset.id }}">
+      <h3><span class="swatch" style="background: {{ asset.color }}"></span>{{ asset.name }}</h3>
+      <p class="hint">{{ asset.first|date:"Y.m.d" }} ~ {{ asset.last|date:"Y.m.d" }} · {{ asset.observed }}회 관측{% if asset.basis == "current_holdings_price_index" %} · 현재 보유 구성 가격지수{% endif %}</p>
+      <dl>
+        <div><dt>현재 낙폭 · 관측 고점 대비</dt><dd>{{ asset.drawdown_text }}</dd></div>
+        <div><dt>{{ class_range_label }} 내 관측 최대 낙폭 (MDD)</dt><dd>{{ asset.mdd_text }}</dd></div>
+        <div><dt>{{ class_range_label }} 내 관측 수익률</dt><dd>{{ asset.return_text }}</dd></div>
+      </dl>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+<script>
+(() => {
+  const section = document.querySelector('.asset-comparison');
+  if (!section) return;
+  const buttons = Array.from(section.querySelectorAll('.asset-toggle:not(:disabled)'));
+  buttons.forEach(button => button.addEventListener('click', () => {
+    const visible = button.getAttribute('aria-pressed') !== 'true';
+    button.setAttribute('aria-pressed', String(visible));
+    section.querySelectorAll('[data-asset-series]').forEach(el => {
+      if (el.dataset.assetSeries === button.dataset.asset) el.style.display = visible ? '' : 'none';
+    });
+    section.querySelectorAll('[data-asset-card]').forEach(el => {
+      if (el.dataset.assetCard === button.dataset.asset) el.hidden = !visible;
+    });
+    section.querySelector('.asset-none').hidden = buttons.some(el => el.getAttribute('aria-pressed') === 'true');
+  }));
+})();
+</script>
+{% endif %}

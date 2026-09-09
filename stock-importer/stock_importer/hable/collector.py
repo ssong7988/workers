@@ -71,9 +71,19 @@ class HableCollector:
         window.ensure_input_allowed(main)
         if window.ensure_restored(main):
             print("H-able 창이 최소화돼 있어 복원했습니다.")
+        # KB의 필수 고지 팝업은 모달이라 본창을 통째로 비활성으로 만든다. 이게
+        # 떠 있으면 화면을 찾는 것도 클릭도 아무 의미가 없으므로 먼저 치운다.
+        # `WM_CLOSE`만 보낸다 - 무엇에도 동의하지 않는다.
+        dismissed = window.dismiss_blocking_dialogs(main)
+        if dismissed:
+            print("본창을 막고 있던 대화상자를 닫았습니다: " + ", ".join(dismissed))
         # 클릭이 닿으려면 H-able이 z-order 위에 있어야 한다. 활성화는 자주
         # 거절당하지만 z-order를 올리는 것은 거절되지 않는다. 끝나면 되돌린다.
-        screen = window.find_screen(main, number or self.screen)
+        # 닫혀 있으면 화면번호를 넣어 직접 연다. H-able이 스스로 화면을 닫기도
+        # 하고 재로그인 뒤에는 아무것도 열려 있지 않다 - 그때마다 사람을 부르면
+        # 18:30 무인 수집이 성립하지 않는다.
+        wanted = number or self.screen
+        screen = window.ensure_screen_open(main, wanted)
         # 겹쳐 있는 다른 화면이 우리 좌표를 가로채지 않게 먼저 앞으로 올린다.
         window.activate_screen(screen)
         window.ensure_query_ready(main, screen)

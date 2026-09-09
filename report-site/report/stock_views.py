@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -24,9 +24,10 @@ from portfolio.display import (
     signed_man_won_text,
     signed_percent_text,
 )
-from portfolio.models import DailyPortfolioMetric
-from portfolio.performance import class_performance
-from portfolio.realized import build_realized
+from portfolio.models import DailyPortfolioMetric, InvestmentAccount
+from portfolio.hable_history import portfolio_history
+from portfolio.class_history import class_history
+from .class_charts import class_charts
 
 
 ZERO = Decimal("0")
@@ -40,6 +41,8 @@ RANGES: tuple[tuple[str, str, int | None], ...] = (
     ("all", "전체", None),
 )
 DEFAULT_RANGE = "1y"
+CLASS_RANGES = tuple(item for item in RANGES if item[0] != "all")
+DEFAULT_CLASS_RANGE = "1y"
 
 CHART_WIDTH = 720
 CHART_HEIGHT = 240
@@ -125,11 +128,42 @@ def _resolve_range(raw: str | None) -> tuple[str, str, int | None]:
     return next((r for r in RANGES if r[0] == DEFAULT_RANGE), RANGES[-1])
 
 
-def _line_chart(rows: list[DailyPortfolioMetric]) -> dict | None:
+def _date_value(raw: str | None) -> date | None:
+    try:
+        return date.fromisoformat(raw or "")
+    except ValueError:
+        return None
+
+
+def _resolve_class_range(request: HttpRequest, latest: date) -> dict:
+    """자산분류 비교 전용 기간. 직접 입력은 최신 관측일을 넘지 않는다."""
+    raw = request.GET.get("class_range", DEFAULT_CLASS_RANGE)
+    if raw == "custom":
+        end = _date_value(request.GET.get("class_end")) or latest
+        start = _date_value(request.GET.get("class_start")) or end - timedelta(days=365)
+        if start > end:
+            start, end = end, start
+        end = min(end, latest)
+        start = min(start, end)
+        return {
+            "key": "custom",
+            "label": f"{start:%Y.%m.%d} ~ {end:%Y.%m.%d}",
+            "start": start,
+            "end": end,
+        }
+    key, label, days = next(
+        (item for item in CLASS_RANGES if item[0] == raw),
+        next(item for item in CLASS_RANGES if item[0] == DEFAULT_CLASS_RANGE),
+    )
+    return {"key": key, "label": label, "start": latest - timedelta(days=days), "end": latest}
+
+
+def _line_chart(rows: list) -> dict | None:
     """성과지수 선과 그 아래 면적. 0% 기준선을 항상 축에 포함한다."""
     if len(rows) < 2:
         return None
-    values = [(row.cumulative_return - rows[0].cumulative_return) for row in rows]
+    base = rows[0].index_value
+    values = [(row.index_value / base - Decimal("1")) for row in rows]
     # 기간 안에서의 상대 수익률로 다시 잡는다. 1개월을 골랐으면 그 1개월의
     # 시작을 0%로 보는 것이 읽기 쉽다.
     low, high = min(values + [ZERO]), max(values + [ZERO])
@@ -175,9 +209,29 @@ def _line_chart(rows: list[DailyPortfolioMetric]) -> dict | None:
 
 def performance(request: HttpRequest) -> HttpResponse:
     range_key, range_label, days = _resolve_range(request.GET.get("range"))
-    latest = DailyPortfolioMetric.objects.order_by("-as_of").first()
-    rows: list[DailyPortfolioMetric] = []
-    if latest is not None:
+    portfolios = list(InvestmentAccount.objects.filter(active=True, institution="KB증권")
+                      .exclude(account_type=""))
+    requested = request.GET.get("portfolio", "all")
+    selected = next((account for account in portfolios if account.pk == requested), None)
+    portfolio_key = selected.pk if selected else "all"
+    portfolio_label = selected.alias if selected else "KB증권 전체"
+    hable_rows = portfolio_history(selected.pk if selected else None)
+    using_hable = bool(hable_rows)
+    latest = (
+        hable_rows[-1]
+        if using_hable
+        else (None if selected else DailyPortfolioMetric.objects.order_by("-as_of").first())
+    )
+    rows: list = []
+    if using_hable:
+        rows = hable_rows
+        if days is not None:
+            rows = [
+                row
+                for row in rows
+                if row.as_of >= latest.as_of - timedelta(days=days)
+            ]
+    elif latest is not None:
         query = DailyPortfolioMetric.objects.order_by("as_of")
         if days is not None:
             query = query.filter(as_of__gte=latest.as_of - timedelta(days=days))
@@ -189,20 +243,15 @@ def performance(request: HttpRequest) -> HttpResponse:
     if len(rows) >= 2 and rows[0].index_value > ZERO:
         period_return = rows[-1].index_value / rows[0].index_value - Decimal("1")
 
-    classes = [
-        {
-            "name": row.name,
-            "value_text": man_won_text(row.market_value),
-            "return_text": signed_percent_text(row.period_return),
-            "observed_days": row.observed_days,
-            "trend": (
-                ""
-                if row.period_return is None
-                else ("up" if row.period_return > ZERO else "down")
-            ),
-        }
-        for row in class_performance([row.as_of for row in rows])
-    ]
+    comparison_latest = latest.as_of if latest else date.today()
+    class_period = _resolve_class_range(request, comparison_latest)
+    comparison = class_charts(
+        class_history(
+            class_period["start"],
+            class_period["end"],
+            selected.pk if selected else None,
+        )
+    )
 
     return render(
         request,
@@ -218,39 +267,20 @@ def performance(request: HttpRequest) -> HttpResponse:
             "observed_days": len(rows),
             "first_day": rows[0].as_of if rows else None,
             "summary": _summary(latest, rows, period_return) if latest else None,
-            "classes": classes,
-            "realized": _realized_block(),
+            "comparison": comparison,
+            "class_ranges": [
+                {"key": key, "label": label} for key, label, _ in CLASS_RANGES
+            ],
+            "class_range_key": class_period["key"],
+            "class_range_label": class_period["label"],
+            "class_start_value": class_period["start"].isoformat(),
+            "class_end_value": class_period["end"].isoformat(),
+            "using_hable": using_hable,
+            "portfolios": portfolios,
+            "portfolio_key": portfolio_key,
+            "portfolio_label": portfolio_label,
         },
     )
-
-
-def _realized_block() -> dict | None:
-    """거래내역에서 확정된 손익.
-
-    위쪽 수익률과 성격이 다르다. 저쪽은 수집을 시작한 뒤의 평가액 변화이고,
-    이쪽은 실제로 팔거나 받아서 확정된 금액이라 수집 이전 기간도 말할 수 있다.
-    섞어 읽지 않도록 따로 낸다.
-    """
-    series = build_realized()
-    if not series.has_data:
-        return None
-    recent = [
-        {
-            "as_of": day.as_of,
-            "day_text": signed_man_won_text(day.realized),
-            "total_text": signed_man_won_text(day.cumulative),
-            "trend": "up" if day.realized > ZERO else "down",
-        }
-        for day in series.days[-8:][::-1]
-    ]
-    return {
-        "total_text": signed_man_won_text(series.total),
-        "first_day": series.days[0].as_of,
-        "last_day": series.days[-1].as_of,
-        "day_count": len(series.days),
-        "unknown_cost_sales": series.unknown_cost_sales,
-        "recent": recent,
-    }
 
 
 def _summary(
@@ -258,14 +288,23 @@ def _summary(
     rows: list[DailyPortfolioMetric],
     period_return: Decimal | None,
 ) -> dict:
+    first = rows[0] if rows else latest
+    net_flow = latest.cumulative_external_flow - first.cumulative_external_flow
+    investment_pl = latest.investment_pl - first.investment_pl
+    peak = first.index_value
+    drawdown = max_drawdown = ZERO
+    for row in rows:
+        peak = max(peak, row.index_value)
+        drawdown = row.index_value / peak - Decimal("1") if peak > ZERO else ZERO
+        max_drawdown = min(max_drawdown, drawdown)
     return {
         "market_value_text": man_won_text(latest.market_value),
         "first_value_text": man_won_text(rows[0].market_value) if rows else "-",
-        "net_flow_text": signed_man_won_text(latest.cumulative_external_flow),
-        "investment_pl_text": signed_man_won_text(latest.investment_pl),
-        "cumulative_return_text": signed_percent_text(latest.cumulative_return),
+        "net_flow_text": signed_man_won_text(net_flow),
+        "investment_pl_text": signed_man_won_text(investment_pl),
+        "cumulative_return_text": signed_percent_text(period_return),
         "period_return_text": signed_percent_text(period_return),
-        "drawdown_text": percent_text(latest.drawdown, digits=2),
-        "max_drawdown_text": percent_text(latest.max_drawdown, digits=2),
-        "profit": latest.investment_pl >= ZERO,
+        "drawdown_text": percent_text(drawdown, digits=2),
+        "max_drawdown_text": percent_text(max_drawdown, digits=2),
+        "profit": investment_pl >= ZERO,
     }

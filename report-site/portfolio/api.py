@@ -9,9 +9,11 @@
 from __future__ import annotations
 
 import json
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from django.db import DatabaseError
+from django.db import DatabaseError, transaction
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -23,7 +25,12 @@ from .importing import (
     latest_complete_date,
     record_import_run,
 )
-from .models import UNCLASSIFIED_ASSET_CLASS_ID, Instrument
+from .models import (
+    HableAccountDailyMetric,
+    Instrument,
+    InvestmentAccount,
+    UNCLASSIFIED_ASSET_CLASS_ID,
+)
 from .performance import rebuild_metrics
 
 
@@ -54,6 +61,67 @@ def _read_json(request: HttpRequest) -> dict[str, Any]:
 
 def _unclassified_count() -> int:
     return Instrument.objects.filter(asset_class_id=UNCLASSIFIED_ASSET_CLASS_ID).count()
+
+
+@csrf_exempt
+@stock_bearer_required
+def performance_history(request: HttpRequest) -> JsonResponse:
+    """[0354] 계좌별 일간 기록을 멱등하게 저장한다."""
+    if request.method != "POST":
+        return _method_not_allowed("POST")
+    try:
+        payload = _read_json(request)
+        accounts = payload.get("accounts")
+        if not isinstance(accounts, list) or not accounts:
+            raise ValueError("accounts는 비어 있지 않은 배열이어야 합니다.")
+        saved = 0
+        with transaction.atomic():
+            for block in accounts:
+                if not isinstance(block, dict):
+                    raise ValueError("계좌 항목은 객체여야 합니다.")
+                number = str(block.get("account_number") or "").strip()
+                if not number or "*" not in number:
+                    raise ValueError("마스킹 계좌번호가 필요합니다.")
+                matches = list(
+                    InvestmentAccount.objects.filter(masked_number=number, active=True)
+                )
+                if len(matches) != 1:
+                    raise ValueError(f"등록된 활성 계좌 하나와 일치하지 않습니다: {number}")
+                rows = block.get("rows")
+                if not isinstance(rows, list):
+                    raise ValueError(f"rows가 배열이 아닙니다: {number}")
+                first_day = min((date.fromisoformat(str(row["as_of"])) for row in rows), default=None)
+                for row in rows:
+                    as_of = date.fromisoformat(str(row["as_of"]))
+                    values = {
+                        key: Decimal(str(row[key]))
+                        for key in ("market_value", "deposit", "withdrawal", "investment_pl", "daily_return", "cumulative_return")
+                    }
+                    if any(not value.is_finite() for value in values.values()):
+                        raise ValueError("성과 값은 유한한 숫자여야 합니다.")
+                    # [0354] 조회 첫날은 기준점이라 수익률·입출금을 0으로 준다.
+                    # 범위를 옮겨 재조회했을 때 기존 실제 일간 기록을 0으로 덮지 않는다.
+                    if as_of == first_day and HableAccountDailyMetric.objects.filter(
+                        account=matches[0], as_of=as_of
+                    ).exists():
+                        continue
+                    HableAccountDailyMetric.objects.update_or_create(
+                        account=matches[0], as_of=as_of,
+                        defaults={
+                            "market_value": values["market_value"],
+                            "deposit": values["deposit"],
+                            "withdrawal": values["withdrawal"],
+                            "investment_pl": values["investment_pl"],
+                            "daily_return": values["daily_return"],
+                            "account_cumulative_return": values["cumulative_return"],
+                        },
+                    )
+                    saved += 1
+        return JsonResponse({"saved": saved}, status=201)
+    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+        return _error(str(exc), "invalid_request", 400)
+    except DatabaseError:
+        return _error("과거 성과를 저장할 수 없습니다.", "database_error", 503)
 
 
 @csrf_exempt

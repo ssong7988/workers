@@ -25,6 +25,7 @@ from .api_client import ApiError, StockApiClient
 from .hable import keepalive
 from .trades import rows_to_cash_flows, summarize, unknown_kinds
 from .hable.collector import HableCollector
+from .hable.history_screen import collect_history
 from .hable.extract import ExtractionError
 from .hable.window import HableError
 from .parsing import RowError
@@ -231,6 +232,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="화면을 만지지 않고 지난번 원본(hable-trades-raw.json)으로 다시 처리한다",
     )
+    history = commands.add_parser(
+        "hable-history", help="H-able [0354]에서 계좌별 최근 1년 성과를 읽는다"
+    )
+    history.add_argument("--send", action="store_true", help="리포트 서버로 보낸다")
     balance = commands.add_parser(
         "hable-import", help="H-able [1285] 잔고와 최근 거래내역을 리포트 서버로 전달"
     )
@@ -402,6 +407,17 @@ def main(argv: list[str] | None = None) -> None:
                 _send_trades(flows, snapshot, StockApiClient(args.api_base))
             return
 
+        if args.command == "hable-history":
+            with run_lock():
+                history = collect_history(DATA_DIR)
+            print(f"원본 저장: {_write_json('hable-history-latest.json', history)}")
+            count = sum(len(account["rows"]) for account in history["accounts"])
+            print(f"계좌 {len(history['accounts'])}개, 일간 기록 {count}건")
+            if args.send:
+                result = StockApiClient(args.api_base).post_performance_history(history)
+                print(f"리포트 서버 저장: {result.get('saved', 0)}건")
+            return
+
         if args.command == "hable-collect":
             with run_lock():
                 snapshot = collector.collect_holdings()
@@ -419,6 +435,10 @@ def main(argv: list[str] | None = None) -> None:
             if not _import(snapshot, client):
                 raise SystemExit(1)
             _import_recent_trades(collector, client, args.trade_days)
+            history = collect_history(DATA_DIR)
+            _write_json("hable-history-latest.json", history)
+            result = client.post_performance_history(history)
+            print(f"과거 성과 저장: {result.get('saved', 0)}건")
     except ApiError as exc:
         print(f"실행 실패: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

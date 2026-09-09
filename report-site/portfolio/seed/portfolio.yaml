@@ -48,8 +48,8 @@ asset_classes:
     benchmark_category: ""
     display_order: 999
 
-# KB증권 계좌만 넣는다. 업비트 등 KB 밖 자산은 첫 버전의 범위 밖이다.
-# 마스킹 계좌번호는 수집기가 실제 값으로 채운다.
+# KB증권 계좌는 수집기가 채운다. 마스킹 계좌번호도 수집기가 실제 값으로 넣는다.
+# 코인 지갑만 예외다 - [1285]에 나오지 않으므로 수량을 사람이 admin에 넣는다.
 accounts:
   - id: kb-brokerage
     alias: 종합위탁
@@ -66,6 +66,15 @@ accounts:
   - id: kb-retirement
     alias: 퇴직연금
     account_type: retirement
+  # 코인 지갑. `required: false`인 이유는 두 가지다. 하나는 시세를 못 받은 날
+  # 주식 쪽 성과까지 통째로 사라지면 안 되기 때문이고, 다른 하나는 이 계좌가
+  # 생기기 전의 과거 날짜가 전부 불완전으로 바뀌어 성과 이력이 지워지기
+  # 때문이다. 시세를 못 받은 날은 리포트의 계좌 상태에 `missing`으로 뜬다.
+  - id: coin-wallet
+    institution: 코인 지갑
+    alias: 코인
+    account_type: brokerage
+    required: false
 
 # 원본 합계는 99.8%다. 그대로 보존하고 비교 차트에서만 100%로 정규화한다.
 benchmark:
@@ -106,3 +115,19 @@ instrument_names:
     - KODEX CD금리액티브(합성)
   gold: [ACE KRX금현물]
   crypto: [비트코인, 이더리움]
+
+# 수집기가 닿지 않는 종목의 자리. 여기 있는 종목은 admin의 `직접 입력 보유`에
+# 수량만 넣으면 매일 `update_manual_positions`가 `price_source`의 시세를 붙여
+# 스냅샷을 만든다. 목록에 없는 코인은 admin에서 종목을 하나 추가하고
+# 시세 출처에 `upbit:KRW-<심볼>`만 적으면 된다 - 업비트 KRW 마켓이면 다 된다.
+#
+# 이미 있는 종목은 건드리지 않는다. 시세 출처가 비어 있을 때만 채운다.
+instruments:
+  - code: KRW-BTC
+    name: 비트코인
+    asset_class: crypto
+    price_source: upbit:KRW-BTC
+  - code: KRW-ETH
+    name: 이더리움
+    asset_class: crypto
+    price_source: upbit:KRW-ETH
