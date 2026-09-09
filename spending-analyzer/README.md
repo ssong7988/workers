@@ -77,11 +77,62 @@ python -m unittest discover -s tests -t . -v
 - 메일함은 **읽기 전용(readonly)** 으로 엽니다 — 진단이 명세서를 읽음 처리하지 않습니다
 - 자동 분류에는 **가맹점명만** 보냅니다. 금액·날짜·카드번호는 보내지 않습니다
 
+## 명세서가 오기 전에 화면부터 보기
+
+파서만 실물 명세서를 기다립니다. 분류·집계·대시보드는 이미 동작하므로, 가짜 명세서로
+전체 흐름과 화면을 지금 확인할 수 있습니다.
+
+```powershell
+python -m spending_analyzer --data-dir data\demo demo
+python -m spending_analyzer --data-dir data\demo run
+python -m spending_analyzer --data-dir data\demo serve
+```
+
+`--data-dir`를 따로 준 이유는 데모 데이터가 진짜 명세서와 섞이지 않게 하기 위해서입니다.
+금액은 전부 만들어낸 값이며, 생성기는 시드가 고정돼 있어 같은 명령은 늘 같은 결과를 냅니다.
+
+## 정규 파이프라인
+
+```powershell
+python -m spending_analyzer fetch        # (2단계 완료 후) 메일 → statements/
+python -m spending_analyzer categorize   # 규칙 + AI 폴백
+python -m spending_analyzer analyze      # 집계 → analysis.json
+python -m spending_analyzer report       # 대시보드 HTML
+python -m spending_analyzer serve        # 127.0.0.1에서 열기
+python -m spending_analyzer run          # categorize → analyze → report
+```
+
+### 분류
+
+`config/rules.yaml`의 키워드로 먼저 맞춥니다. 위에서부터 먼저 맞는 규칙이 이기므로 좁은
+규칙을 위에 둡니다 — `이마트24`(편의점)가 `이마트`(마트)보다 위에 있어야 하는 이유입니다.
+연회비와 이자는 가맹점 소비가 아니라 청구이므로 키워드를 거치지 않고 `금융비용`으로 갑니다.
+
+규칙에서 빠진 가맹점만 Claude로 넘어갑니다. **가맹점명만 보냅니다 — 금액·날짜·카드번호는
+보내지 않습니다.** 결과는 `data/category-cache.json`에 남고, `--promote`를 붙이면
+`rules.yaml`에 승격되어 다음 달부터는 API 호출이 없습니다.
+
+```powershell
+python -m spending_analyzer categorize --promote
+python -m spending_analyzer categorize --no-ai      # 규칙만
+```
+
+`ANTHROPIC_API_KEY`가 없으면 이 단계만 건너뛰고 나머지는 정상 동작합니다.
+
+## 대시보드
+
+`data/report/index.html` 한 파일입니다. 외부 폰트·스크립트·CDN이 없어 더블클릭으로 열립니다.
+라이트/다크 모두 지원하며 OS 설정을 따르고, 우상단 버튼으로 뒤집을 수 있습니다.
+
+담긴 것: 월별 청구액 추이(6개월 평균선), 카테고리별 지출과 전월 대비 증감, 결제 유형 구성,
+**할부 잔여 부담**(앞으로 몇 달간 얼마씩 더 나가는지), **고정비/변동비** 분리, 가맹점 TOP,
+검색·정렬되는 전체 거래표, 미분류 가맹점 목록.
+
 ## 진행 상황
 
 - [x] 1단계 — 골격과 `scan-mail` 진단
-- [ ] 2단계 — 명세서 파서 (`scan-mail` 결과를 보고 작성)
-- [ ] 3단계 — 분류 (규칙 우선, 미분류만 Claude 폴백)
-- [ ] 4단계 — 집계
-- [ ] 5단계 — 대시보드 페이지
+- [ ] 2단계 — 명세서 파서 ← **첫 명세서 메일을 기다리는 중**
+- [x] 3단계 — 분류 (규칙 우선, 미분류만 Claude 폴백)
+- [x] 4단계 — 집계
+- [x] 5단계 — 대시보드 페이지
 - [ ] 6단계 — 카카오 월간 요약 카드

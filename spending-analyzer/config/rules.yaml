@@ -1,0 +1,62 @@
+# 가맹점 키워드 → 카테고리 규칙
+#
+# merchant_norm(공백·법인 표기를 지운 가맹점명)에 키워드가 들어 있으면 그 카테고리가 됩니다.
+# 위에서부터 먼저 맞는 규칙이 이기므로, 좁은 규칙을 위에 두세요.
+# 예: "이마트24"는 편의점이고 "이마트"는 대형마트라, 이마트24가 먼저 와야 합니다.
+#
+# 규칙에 없는 가맹점은 `categorize --promote`가 Claude 분류 결과를 여기에 추가합니다.
+
+categories:
+  - 식비
+  - 카페·간식
+  - 편의점·마트
+  - 교통
+  - 주유
+  - 통신
+  - 구독
+  - 의료
+  - 쇼핑
+  - 문화·여가
+  - 주거·공과금
+  - 교육
+  - 경조사
+  - 금융비용
+  - 기타
+
+rules:
+  # 좁은 규칙 먼저 — 이마트24는 편의점, 이마트는 마트입니다.
+  - category: 편의점·마트
+    keywords: [이마트24, GS25, CU, 씨유, 세븐일레븐, 이마트, 홈플러스, 롯데마트, 코스트코, 하나로마트, 노브랜드]
+
+  - category: 카페·간식
+    keywords: [스타벅스, STARBUCKS, 투썸, 이디야, 메가엠지씨, 메가커피, 커피빈, 폴바셋, 빽다방, 컴포즈, 파리바게뜨, 뚜레쥬르, 배스킨, 던킨]
+
+  - category: 식비
+    keywords: [배달의민족, 배민, 쿠팡이츠, 요기요, 맥도날드, 버거킹, 롯데리아, 서브웨이, 김밥, 국밥, food, 식당, 반점, 곱창, 삼겹]
+
+  - category: 교통
+    keywords: [티머니, TMONEY, 카카오T, 카카오택시, 코레일, SRT, 고속버스, 지하철, 택시, 쏘카, 그린카]
+
+  - category: 주유
+    keywords: [주유소, SK에너지, GS칼텍스, 현대오일뱅크, S-OIL, 에쓰오일, 오일뱅크, 충전소]
+
+  - category: 통신
+    keywords: [SKT, SK텔레콤, KT, LGU, LG유플러스, 유플러스, 알뜰폰]
+
+  - category: 구독
+    keywords: [NETFLIX, 넷플릭스, YOUTUBE, 유튜브, SPOTIFY, 멜론, 왓챠, 티빙, 웨이브, 쿠팡플레이, ICLOUD, GOOGLE, APPLE.COM, MICROSOFT, OPENAI, ANTHROPIC, CHATGPT, NOTION, ADOBE]
+
+  - category: 의료
+    keywords: [의원, 병원, 약국, 치과, 한의원, 클리닉, 메디컬]
+
+  - category: 쇼핑
+    keywords: [쿠팡, COUPANG, 네이버페이, 11번가, G마켓, 지마켓, 옥션, SSG, 무신사, 올리브영, 다이소, 알리익스프레스, ALIEXPRESS, AMAZON]
+
+  - category: 문화·여가
+    keywords: [CGV, 메가박스, 롯데시네마, 교보문고, 예스24, 알라딘, 인터파크, 스팀, STEAM, 플레이스테이션, 헬스, 피트니스, 골프]
+
+  - category: 주거·공과금
+    keywords: [한국전력, 도시가스, 수도사업소, 관리사무소, 아파트관리, 상하수도]
+
+  - category: 교육
+    keywords: [학원, 교육원, 인프런, UDEMY, 대학교, 도서관]
