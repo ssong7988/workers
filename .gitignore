@@ -37,3 +37,6 @@ dagster_project/data/
 
 # stock-importer/ - browser dumps, run lock, collected JSON
 stock-importer/data/
+
+# 스크린샷·PDF 등 확인용 임시 산출물
+tmp/
