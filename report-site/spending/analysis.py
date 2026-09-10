@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 
 from .models import (
     UNCLASSIFIED_CATEGORY_ID,
@@ -21,6 +21,16 @@ from .models import (
 AVERAGE_WINDOW = 6
 TOP_MERCHANTS = 15
 INSTALMENT_PROJECTION_MONTHS = 12
+
+
+def counted(statement: Statement):
+    """집계에 넣을 거래.
+
+    제외 표시된 줄은 여기서 빠진다. 대신 결제해 주고 돌려받는 돈 같은 것이라
+    내 소비가 아니다. 명세서와의 금액 대조는 `Statement.parsed_total_won`이
+    따로 들고 있으므로, 여기서 빼도 그 검증은 깨지지 않는다.
+    """
+    return statement.transactions.filter(excluded=False)
 
 
 def next_month(month: str) -> str:
@@ -57,7 +67,11 @@ def monthly_totals() -> list[MonthTotal]:
     """
     rows = (
         Statement.objects.annotate(
-            billed=Sum("transactions__billed_won"), rows=Count("transactions")
+            # 제외한 줄은 월별 합계에도 들어가지 않는다.
+            billed=Sum(
+                "transactions__billed_won", filter=Q(transactions__excluded=False)
+            ),
+            rows=Count("transactions", filter=Q(transactions__excluded=False)),
         )
         .order_by("billing_month")
         .values("billing_month", "billed", "rows")
@@ -120,7 +134,7 @@ def _category_totals(statement: Statement | None) -> dict[str, tuple[int, str]]:
     if statement is None:
         return {}
     rows = (
-        statement.transactions.values("category_id", "category__name")
+        counted(statement).values("category_id", "category__name")
         .annotate(total=Sum("billed_won"))
         .order_by()
     )
@@ -167,7 +181,7 @@ def _group_totals(statement: Statement | None) -> dict[str, int]:
     if statement is None:
         return {}
     rows = (
-        statement.transactions.values("category__group_id")
+        counted(statement).values("category__group_id")
         .annotate(total=Sum("billed_won"))
         .order_by()
     )
@@ -207,7 +221,7 @@ def group_series(months: int = 12) -> dict:
 
 def payment_type_rows(statement: Statement) -> list[dict]:
     rows = (
-        statement.transactions.values("payment_type")
+        counted(statement).values("payment_type")
         .annotate(total=Sum("billed_won"))
         .order_by()
     )
@@ -236,7 +250,7 @@ def installment_outlook(statement: Statement) -> dict:
     """
     active = [
         item
-        for item in statement.transactions.all()
+        for item in counted(statement)
         if item.is_installment and item.remaining_installments > 0
     ]
     projection: dict[str, int] = defaultdict(int)
@@ -267,13 +281,13 @@ def installment_outlook(statement: Statement) -> dict:
 
 def top_merchants(statement: Statement, limit: int = TOP_MERCHANTS) -> list[dict]:
     rows = (
-        statement.transactions.values("merchant_norm")
+        counted(statement).values("merchant_norm")
         .annotate(total=Sum("billed_won"), count=Count("id"))
         .order_by("-total")[:limit]
     )
     names = {
         item.merchant_norm: item.merchant
-        for item in statement.transactions.all()
+        for item in counted(statement)
     }
     return [
         {
@@ -289,14 +303,18 @@ def top_merchants(statement: Statement, limit: int = TOP_MERCHANTS) -> list[dict
 def unclassified_merchants(limit: int = 30) -> list[dict]:
     """규칙을 만들 차례를 정해주는 목록. 합계가 큰 순이다."""
     rows = (
-        Transaction.objects.filter(category_id=UNCLASSIFIED_CATEGORY_ID)
+        Transaction.objects.filter(
+        category_id=UNCLASSIFIED_CATEGORY_ID, excluded=False
+    )
         .values("merchant_norm")
         .annotate(total=Sum("billed_won"), count=Count("id"))
         .order_by("-total")[:limit]
     )
     names = {
         item.merchant_norm: item.merchant
-        for item in Transaction.objects.filter(category_id=UNCLASSIFIED_CATEGORY_ID)
+        for item in Transaction.objects.filter(
+        category_id=UNCLASSIFIED_CATEGORY_ID, excluded=False
+    )
     }
     return [
         {
@@ -317,7 +335,8 @@ class MonthView:
 
     @property
     def total(self) -> int:
-        return self.statement.parsed_total_won
+        """화면과 요약이 쓰는 합계. 제외한 줄은 빠진다."""
+        return self.statement.analysed_total_won
 
 
 def latest_statement() -> Statement | None:

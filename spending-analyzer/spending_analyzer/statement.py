@@ -17,6 +17,7 @@ exactly, or the statement is rejected rather than stored half-read.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 
 from .categorize import normalize_merchant
@@ -38,6 +39,8 @@ MORE_BUTTON = "a:has-text('더보기'), button:has-text('더보기')"
 ROW_SELECTOR = "p.store_word"
 SETTLE_QUIET_SECONDS = 1.5
 SETTLE_TIMEOUT_SECONDS = 30.0
+# 지난 달 화면은 카드사 서버에서 새로 받아 오므로 파일을 여는 것보다 오래 걸린다.
+NAVIGATION_TIMEOUT_MS = 60_000
 
 # Reads every section's 소계 and rows in one pass.
 EXTRACT_JS = """
@@ -167,9 +170,26 @@ class SectionResult:
 
     @property
     def matches(self) -> bool:
+        """금액만 본다. 지켜야 할 불변식은 돈이 빠지지 않았다는 것이다.
+
+        건수는 기준으로 쓸 수 없다. 카드사가 0원짜리 줄(알림 이용료 같은 것)을
+        어떤 달에는 건수에 넣고 어떤 달에는 빼기 때문이다 - 2026-09는 넣었고
+        2026-08은 빼서, 같은 추출기가 한 달은 통과하고 한 달은 걸렸다. 금액은
+        아홉 달 모두 원 단위까지 맞았다.
+        """
+        return self.parsed_sum == self.declared_sum
+
+    @property
+    def count_note(self) -> str:
+        """건수 차이는 거절 사유가 아니라 적어 둘 사실이다."""
+        gap = len(self.transactions) - self.declared_count
+        if not gap:
+            return ""
+        zeros = sum(1 for item in self.transactions if item.billed_won == 0)
+        detail = f" (0원 줄 {zeros}개)" if zeros else ""
         return (
-            len(self.transactions) == self.declared_count
-            and self.parsed_sum == self.declared_sum
+            f"{self.name or '구분 미상'} 건수 {len(self.transactions)}/"
+            f"{self.declared_count}{detail}"
         )
 
     def describe(self) -> str:
@@ -241,10 +261,147 @@ def parse(
     fallback_month: str = "",
 ) -> Statement:
     """Open, page through, and read one statement attachment."""
-    known = "[" + ",".join(f'"{name}"' for name in SECTION_TYPES) + "]"
     with open_decrypted(content, password) as page:
-        _load_every_page(page)
-        data = page.evaluate(EXTRACT_JS % known)
+        return _read_open_page(page, source_ref=source_ref, fallback_month=fallback_month)
+
+
+def available_months(page) -> list[tuple[str, str]]:
+    """지난 명세서 목록. `(stlmDt, 청구월)` 쌍을 오래된 것부터 돌려준다.
+
+    명세서 화면은 결제일(`20260813`)로 지난 달을 고르게 되어 있고, 그 결제일의
+    달이 곧 청구월이다.
+    """
+    values = page.evaluate(
+        """() => {
+            const sel = document.getElementById('selectBill');
+            return sel ? [...sel.options].map(o => o.value).filter(v => /^20\\d{6}$/.test(v)) : [];
+        }"""
+    )
+    pairs = [(value, f"{value[:4]}-{value[4:6]}") for value in values]
+    return sorted(set(pairs))
+
+
+STLM_DATE = re.compile(r"stlmDt=\d+")
+
+
+def month_url(template: str, stlm_date: str) -> str:
+    """이미 열어 본 명세서 주소에서 달만 바꾼다.
+
+    주소에 든 `bilMngtNoEncr`은 그 달이 아니라 계좌를 가리키므로 달마다 바뀌지
+    않는다 - 9월 화면에서 8월을 골랐을 때도 같은 값이었다. 그래서 한 번만
+    select로 이동해 주소 모양을 얻으면, 나머지 달은 그 주소의 `stlmDt`만
+    갈아 끼워 바로 열 수 있다.
+    """
+    return STLM_DATE.sub(f"stlmDt={stlm_date}", template)
+
+
+def open_month(page, stlm_date: str, *, template: str = "") -> None:
+    """지난 명세서 하나를 연다.
+
+    주소 모양을 이미 알면 그리로 바로 간다. 모를 때만 화면의 select를 쓴다 -
+    카드사가 주소를 어떻게 만드는지 우리가 조립하지 않기 위해서다.
+
+    select는 한 번 이동하고 나면 다시 듣지 않는다(커스텀 위젯이 새 화면에서
+    자기 방식으로 다시 붙는다). 주소로 가는 길이 필요한 실질적인 이유다.
+    """
+    if template:
+        page.goto(month_url(template, stlm_date), wait_until="domcontentloaded")
+        page.wait_for_selector("li.top_total", timeout=NAVIGATION_TIMEOUT_MS)
+        page.wait_for_timeout(1_000)
+        if f"stlmDt={stlm_date}" not in page.url:
+            raise StatementParseError(
+                f"{stlm_date}를 요청했는데 다른 화면이 열렸습니다: {page.url[:120]}"
+            )
+        return
+
+    select_month = """(value) => {
+        const sel = document.getElementById('selectBill');
+        if (!sel) throw new Error('지난 명세서 목록을 찾지 못했습니다.');
+        sel.value = value;
+        sel.dispatchEvent(new Event('change', {bubbles: true}));
+        if (window.jQuery) window.jQuery(sel).trigger('change');
+    }"""
+    page.evaluate(select_month, stlm_date)
+
+    # 이동이 실제로 일어났는지 주소로 확인한다. 기다리지 않고 읽으면 이전 달
+    # 화면을 그대로 읽어 같은 숫자를 다른 달로 저장하게 된다.
+    deadline = time.monotonic() + NAVIGATION_TIMEOUT_MS / 1000
+    while time.monotonic() < deadline:
+        if f"stlmDt={stlm_date}" in page.url:
+            break
+        page.wait_for_timeout(400)
+    else:
+        raise StatementParseError(
+            f"{stlm_date} 명세서로 이동하지 못했습니다. 현재 주소: {page.url[:120]}"
+        )
+
+    page.wait_for_selector("li.top_total", timeout=NAVIGATION_TIMEOUT_MS)
+    page.wait_for_timeout(1_000)
+
+
+def parse_history(
+    content: bytes,
+    password: str,
+    *,
+    months: set[str] | None = None,
+    source_ref: str = "",
+    on_month=None,
+) -> list[Statement]:
+    """첨부 한 통으로 지난 청구월까지 읽는다.
+
+    명세서 화면에는 지난 명세서를 고르는 목록이 있고, 고르면 카드사 서버의 그
+    달 화면으로 이동한다. 주소에 암호화된 식별자가 들어 있어 로그인 없이 열리며,
+    구조가 같으므로 같은 추출기가 그대로 통한다.
+
+    `months`를 주면 그 청구월만 읽는다. 한 달이 실패해도 나머지는 계속 읽는다 -
+    한 달의 서식이 달라졌다고 읽을 수 있는 달까지 막을 이유가 없다.
+    """
+    collected: list[Statement] = []
+    with open_decrypted(content, password) as page:
+        first = _read_open_page(page, source_ref=source_ref)
+        if months is None or first.billing_month in months:
+            collected.append(first)
+            if on_month:
+                on_month(first, None)
+
+        # 첫 이동만 select로 하고, 그때 얻은 주소 모양을 나머지 달에 재사용한다.
+        template = ""
+        for stlm_date, billing_month in available_months(page):
+            if billing_month == first.billing_month:
+                continue
+            if months is not None and billing_month not in months:
+                continue
+            try:
+                open_month(page, stlm_date, template=template)
+                template = template or page.url
+                statement = _read_open_page(
+                    page, source_ref=source_ref, fallback_month=billing_month
+                )
+            except (StatementParseError, SecureMailError) as exc:
+                if on_month:
+                    on_month(None, f"{billing_month}: {exc}")
+                continue
+            if statement.billing_month != billing_month:
+                # 화면이 요청한 달을 열지 않았다면 그 숫자를 다른 달로 저장해서는
+                # 안 된다. 조용히 틀린 달보다 빠진 달이 낫다.
+                if on_month:
+                    on_month(
+                        None,
+                        f"{billing_month}: 화면은 {statement.billing_month}을 보여줍니다",
+                    )
+                continue
+            collected.append(statement)
+            if on_month:
+                on_month(statement, None)
+
+    return collected
+
+
+def _read_open_page(page, *, source_ref: str = "", fallback_month: str = "") -> Statement:
+    """이미 열려 있는 명세서 화면 하나를 읽는다."""
+    known = "[" + ",".join(f'"{name}"' for name in SECTION_TYPES) + "]"
+    _load_every_page(page)
+    data = page.evaluate(EXTRACT_JS % known)
 
     billing_month = _billing_month(data.get("monthRaw"), fallback_month)
     if not billing_month:
@@ -292,7 +449,8 @@ def parse(
     if mismatched:
         detail = "\n  ".join(section.describe() for section in mismatched)
         raise StatementParseError(
-            "명세서의 소계와 읽어낸 행이 맞지 않습니다. 저장하지 않았습니다.\n  " + detail
+            "명세서의 소계 금액과 읽어낸 행이 맞지 않습니다. 저장하지 않았습니다.\n  "
+            + detail
         )
 
     transactions = [item for section in sections for item in section.transactions]
@@ -300,7 +458,7 @@ def parse(
         section.declared_sum for section in sections
     )
 
-    return Statement(
+    statement = Statement(
         billing_month=billing_month,
         payment_date=_payment_date(data.get("dueRaw")),
         total_billed_won=declared_total,
@@ -308,6 +466,10 @@ def parse(
         source_ref=source_ref,
         parsed_at=iso_now(),
     )
+    statement.count_notes = [
+        note for note in (section.count_note for section in sections) if note
+    ]
+    return statement
 
 
 __all__ = [

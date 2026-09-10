@@ -121,6 +121,11 @@ def ingest_statement(payload: dict) -> IngestResult:
             "merchant_norm", "category_id"
         )
     )
+    # 집계에서 뺀 표시도 같은 이유로 지켜야 한다. 정정 명세서 한 통에 사람이
+    # 골라 둔 것이 통째로 되살아나면 다시 골라야 한다.
+    dropped = set(
+        statement.transactions.filter(excluded=True).values_list("merchant_norm", flat=True)
+    )
     statement.transactions.all().delete()
 
     unclassified = unclassified_category()
@@ -137,6 +142,7 @@ def ingest_statement(payload: dict) -> IngestResult:
             installment_months=_int(row.get("installment_months", 0), "installment_months"),
             card_last4=str(row.get("card_last4", ""))[:4],
             category=unclassified,
+            excluded=normalize_merchant(str(row.get("merchant", ""))) in dropped,
         )
         for row in rows
     ]

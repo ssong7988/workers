@@ -47,6 +47,25 @@ def landing(request, *, show_links: bool = True) -> HttpResponse:
         },
         {
             "index": "02",
+            "namespace": "spending",
+            "name": "소비 분석",
+            "description": "카드 명세서를 읽어 대분류별 구성과 가맹점을 보고, 매달 요약을 카카오톡으로 받습니다.",
+            "tone": "spending",
+            "links": [
+                {
+                    "label": "소비 리포트",
+                    "path": reverse("spending-report"),
+                    "note": "관리자 로그인",
+                },
+                {
+                    "label": "전체 거래",
+                    "path": reverse("spending-transactions"),
+                    "note": "관리자 로그인",
+                },
+            ],
+        },
+        {
+            "index": "03",
             "namespace": "property",
             "name": "부동산",
             "description": "관심 단지의 조건 충족 매물과 급매, 지역·단지별 호가 추이를 살펴봅니다.",
@@ -57,14 +76,22 @@ def landing(request, *, show_links: bool = True) -> HttpResponse:
             ],
         },
         {
-            "index": "03",
+            "index": "04",
             "namespace": "stock",
             "name": "금융자산",
             "description": "자산 비중과 목표 대비 리밸런싱, 기간별 수익률과 낙폭을 확인합니다.",
             "tone": "stock",
             "links": [
-                {"label": "비중·리밸런싱", "path": reverse("stock-allocation")},
-                {"label": "수익률·MDD", "path": reverse("stock-performance")},
+                {
+                    "label": "비중·리밸런싱",
+                    "path": reverse("stock-allocation"),
+                    "note": "관리자 로그인",
+                },
+                {
+                    "label": "수익률·MDD",
+                    "path": reverse("stock-performance"),
+                    "note": "관리자 로그인",
+                },
             ],
         },
     ]

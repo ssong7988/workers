@@ -2,58 +2,138 @@
 
 {% block title %}전체 거래 · {{ month_label }}{% endblock %}
 {% block heading %}{{ month_label }} 전체 거래{% endblock %}
-{% block observed %}{{ count }}건 · {{ total_text }}{% endblock %}
+{% block observed %}{{ count }}건 · 집계 {{ total_text }}{% if excluded_count %} · 제외 {{ excluded_count }}건 {{ excluded_text }}{% endif %}{% endblock %}
 
 {% block extra_style %}
-  .filter { margin-bottom: 1rem; }
-  .filter input { width: 100%; padding: .6rem .8rem; font: inherit; border: 1px solid #e2e8f0; border-radius: .75rem; }
-  .count { margin-top: .5rem; font-size: 12px; color: #64748b; }
+  .filter { display: flex; gap: .6rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+  .filter input[type=search] { flex: 1; min-width: 12rem; padding: .6rem .8rem; font: inherit; border: 1px solid #e2e8f0; border-radius: .75rem; }
+  .count { font-size: 12px; color: #64748b; }
+  .apply { position: sticky; bottom: 0; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap;
+           background: rgba(245,247,246,.94); border-top: 1px solid #e2e8f0; padding: .75rem .25rem; margin-top: .5rem; }
+  .btn { border: 0; border-radius: .6rem; padding: .55rem 1.1rem; font: inherit; font-weight: 700; cursor: pointer; background: #14532d; color: #fff; }
+  .btn.ghost { background: #fff; color: #14532d; border: 1px solid #cbd5e1; font-weight: 600; }
+  td.pick, th.pick { text-align: center; width: 4.5rem; }
+  /* 첫 칸이 체크박스가 되면서 기본 규칙(첫 칸만 왼쪽)이 이용일·가맹점을
+     오른쪽으로 밀었다. 금액만 오른쪽이면 된다. */
+  th:nth-child(2), td:nth-child(2),
+  th:nth-child(3), td:nth-child(3),
+  th:nth-child(4), td:nth-child(4),
+  th:nth-child(5), td:nth-child(5) { text-align: left; }
+  th:last-child, td:last-child { text-align: right; }
+  tr.dropped td:not(.pick) { opacity: .45; text-decoration: line-through; }
+  .note { margin: 0 0 1rem; font-size: 12px; color: #64748b; line-height: 1.6; }
+  .flash { margin-bottom: 1rem; border-radius: .5rem; border: 1px solid #bbf7d0; background: #f0fdf4; padding: .6rem .75rem; font-size: 13px; color: #14532d; }
 {% endblock %}
 
 {% block content %}
-<div class="filter">
-  <input id="q" type="search" placeholder="가맹점, 카테고리로 검색" autocomplete="off">
-  <div class="count" id="count">{{ count }}건</div>
-</div>
+{% if messages %}
+  {% for message in messages %}<div class="flash">{{ message }}</div>{% endfor %}
+{% endif %}
 
-<div class="table-wrap">
-  <table id="rows">
-    <thead>
-      <tr><th>이용일</th><th>가맹점</th><th>카테고리</th><th>결제</th><th>청구액</th></tr>
-    </thead>
-    <tbody>
-      {% for row in rows %}
-      <tr>
-        <td>{{ row.used_at|date:"m.d" }}</td>
-        <td>{{ row.merchant }}</td>
-        <td>{% if row.unclassified %}<span class="tag warn">{{ row.category }}</span>{% else %}<span class="tag">{{ row.category }}</span>{% endif %}</td>
-        <td>{{ row.payment }}{% if row.installment %} {{ row.installment }}{% endif %}</td>
-        <td>{{ row.amount }}</td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="5" class="empty">거래가 없습니다.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+<p class="note">
+  <b>선택 여부</b>를 끄면 그 거래를 집계에서 뺍니다. 대신 결제해 주고 돌려받는 돈처럼
+  내 소비가 아닌 줄에 씁니다. 지워지지 않으므로 언제든 다시 켤 수 있고,
+  명세서 청구총액({{ billed_text }})과의 대조에는 그대로 남습니다.
+</p>
+
+<form method="post">
+  {% csrf_token %}
+  <input type="hidden" name="month" value="{{ statement.billing_month }}">
+
+  <div class="filter">
+    <input id="q" type="search" placeholder="가맹점, 카테고리로 검색" autocomplete="off">
+    <span class="count" id="count">{{ count }}건</span>
+  </div>
+
+  <div class="table-wrap">
+    <table id="rows">
+      <thead>
+        <tr>
+          <th class="pick">선택 여부</th>
+          <th>이용일</th><th>가맹점</th><th>카테고리</th><th>결제</th><th>청구액</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr{% if not row.selected %} class="dropped"{% endif %}>
+          <td class="pick" data-label="선택 여부">
+            <input type="checkbox" name="keep" value="{{ row.id }}"{% if row.selected %} checked{% endif %}>
+          </td>
+          <td data-label="이용일">{{ row.used_at|date:"m.d" }}</td>
+          <td data-label="가맹점">{{ row.merchant }}</td>
+          <td data-label="카테고리">{% if row.unclassified %}<span class="tag warn">{{ row.category }}</span>{% else %}<span class="tag">{{ row.category }}</span>{% endif %}</td>
+          <td data-label="결제">{{ row.payment }}{% if row.installment %} {{ row.installment }}{% endif %}</td>
+          <td data-label="청구액">{{ row.amount }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="empty">거래가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="apply">
+    <button class="btn" type="submit">체크한 것만으로 재집계</button>
+    <button class="btn ghost" type="button" id="all">모두 선택</button>
+    <button class="btn ghost" type="button" id="none">모두 해제</button>
+    <span class="count" id="picked"></span>
+  </div>
+</form>
 
 <script>
 (function () {
   var box = document.getElementById('q');
   var table = document.getElementById('rows');
-  var count = document.getElementById('count');
-  if (!box || !table) return;
+  if (!table) return;
   var rows = Array.prototype.slice.call(table.tBodies[0].rows);
-  box.addEventListener('input', function () {
-    var term = box.value.trim().toLowerCase();
+  var count = document.getElementById('count');
+  var picked = document.getElementById('picked');
+
+  function boxes(onlyVisible) {
+    return rows
+      .filter(function (row) { return !onlyVisible || !row.hidden; })
+      .map(function (row) { return row.querySelector('input[name=keep]'); })
+      .filter(Boolean);
+  }
+
+  function refreshPicked() {
+    var all = boxes(false);
+    var on = all.filter(function (b) { return b.checked; }).length;
+    picked.textContent = on + ' / ' + all.length + '건 선택';
+  }
+
+  function refresh() {
+    var term = (box && box.value || '').trim().toLowerCase();
     var shown = 0;
     rows.forEach(function (row) {
       var hit = !term || row.textContent.toLowerCase().indexOf(term) !== -1;
       row.hidden = !hit;
       if (hit) shown++;
     });
-    count.textContent = shown + ' / ' + rows.length + '건';
+    if (count) count.textContent = shown + ' / ' + rows.length + '건';
+  }
+
+  if (box) box.addEventListener('input', refresh);
+  table.addEventListener('change', function (event) {
+    if (event.target.name !== 'keep') return;
+    // 체크를 끈 줄은 그 자리에서 흐려져, 재집계를 누르기 전에 무엇이 빠질지 보인다.
+    event.target.closest('tr').classList.toggle('dropped', !event.target.checked);
+    refreshPicked();
   });
+
+  // 검색 중이면 보이는 것만 바꾼다. 걸러 놓고 '모두 해제'를 눌렀을 때
+  // 화면 밖의 줄까지 꺼지면 놀라게 된다.
+  document.getElementById('all').addEventListener('click', function () {
+    boxes(true).forEach(function (b) { b.checked = true; b.closest('tr').classList.remove('dropped'); });
+    refreshPicked();
+  });
+  document.getElementById('none').addEventListener('click', function () {
+    boxes(true).forEach(function (b) { b.checked = false; b.closest('tr').classList.add('dropped'); });
+    refreshPicked();
+  });
+
+  refresh();
+  refreshPicked();
 })();
 </script>
 {% endblock %}

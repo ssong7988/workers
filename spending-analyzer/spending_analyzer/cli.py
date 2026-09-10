@@ -33,6 +33,7 @@ from .report import load_analysis, write_report
 from .securemail import SecureMailError
 from .statement import StatementParseError
 from .statement import parse as parse_statement
+from .statement import parse_history
 from .storage import StatementStore, write_json
 
 
@@ -93,6 +94,16 @@ def build_parser() -> argparse.ArgumentParser:
     push.add_argument("--since", default=None, help="YYYY-MM-DD, 설정값을 덮어씀")
     push.add_argument(
         "--force", action="store_true", help="서버에 이미 있는 청구월도 다시 보냄"
+    )
+    push.add_argument(
+        "--history",
+        action="store_true",
+        help="명세서 화면의 지난 명세서 목록까지 따라가 과거 청구월도 읽음",
+    )
+    push.add_argument(
+        "--months",
+        default="",
+        help="--history와 함께, 읽을 청구월을 콤마로 (예: 2026-01,2026-02)",
     )
 
     demo = commands.add_parser(
@@ -311,10 +322,55 @@ def _push(config, args) -> None:
                 candidates.append((message, attachments))
 
     print(f"명세서 첨부가 있는 메일 {len(candidates)}통\n")
+    wanted = {m.strip() for m in args.months.split(",") if m.strip()} or None
     sent, skipped, failed = 0, 0, 0
+
+    def deliver(statement) -> None:
+        nonlocal sent, skipped, failed
+        if statement.billing_month in existing and not args.force:
+            skipped += 1
+            print(f"  · {statement.billing_month} 서버에 이미 있음 (--force로 다시 보내기)")
+            return
+        try:
+            result = push_statement(base_url, token, statement)
+        except PushError as exc:
+            failed += 1
+            print(f"  ✗ {statement.billing_month}\n    {exc}")
+            return
+        existing.add(result.billing_month)
+        sent += 1
+        print(f"  ✓ {result.message}")
+        for note in statement.count_notes:
+            # 금액은 맞고 건수만 다른 경우다. 거절 사유는 아니지만 남겨 둔다.
+            print(f"      참고: {note}")
+
     for message, attachments in candidates:
         for attachment in attachments:
             label = f"{message.date[:16]} {attachment.filename}"
+            if args.history:
+                errors: list[str] = []
+
+                def report(statement, error, _errors=errors):
+                    if error:
+                        _errors.append(error)
+                        print(f"  ✗ {error}")
+                    else:
+                        deliver(statement)
+
+                try:
+                    parse_history(
+                        attachment.content,
+                        password,
+                        months=wanted,
+                        source_ref=message.message_id,
+                        on_month=report,
+                    )
+                except SecureMailError as exc:
+                    errors.append(str(exc))
+                    print(f"  ✗ {label}\n    {exc}")
+                failed += len(errors)
+                continue
+
             try:
                 statement = parse_statement(
                     attachment.content, password, source_ref=message.message_id
@@ -323,22 +379,7 @@ def _push(config, args) -> None:
                 failed += 1
                 print(f"  ✗ {label}\n    {exc}")
                 continue
-
-            if statement.billing_month in existing and not args.force:
-                skipped += 1
-                print(f"  · {statement.billing_month} 서버에 이미 있음 (--force로 다시 보내기)")
-                continue
-
-            try:
-                result = push_statement(base_url, token, statement)
-            except PushError as exc:
-                failed += 1
-                print(f"  ✗ {statement.billing_month}\n    {exc}")
-                continue
-
-            existing.add(result.billing_month)
-            sent += 1
-            print(f"  ✓ {result.message}")
+            deliver(statement)
 
     print(
         f"\n전송 {sent}개월"

@@ -177,7 +177,23 @@ class Statement(models.Model):
 
     @property
     def parsed_total_won(self) -> int:
+        """명세서 대조용 합계. 제외한 줄도 포함한다.
+
+        카드사가 청구한 금액과 견주는 값이라, 내가 집계에서 뺀 줄이라고 해서
+        빼면 대조가 성립하지 않는다.
+        """
         return sum(item.billed_won for item in self.transactions.all())
+
+    @property
+    def analysed_total_won(self) -> int:
+        """화면과 요약이 쓰는 합계. 제외한 줄은 빠진다."""
+        return sum(
+            item.billed_won for item in self.transactions.all() if not item.excluded
+        )
+
+    @property
+    def excluded_total_won(self) -> int:
+        return self.parsed_total_won - self.analysed_total_won
 
     @property
     def discrepancy_won(self) -> int:
@@ -213,6 +229,12 @@ class Transaction(models.Model):
     )
     category_source = models.CharField(
         "분류 근거", max_length=20, choices=CATEGORY_SOURCES, blank=True
+    )
+    # 대신 결제해 주고 돌려받는 돈처럼, 청구는 됐지만 내 소비가 아닌 줄이 있다.
+    # 지우지 않고 표시만 해 둔다 - 명세서의 청구총액과 대조하려면 그 줄도
+    # 그대로 있어야 하고, 언제든 되돌릴 수 있어야 한다.
+    excluded = models.BooleanField(
+        "집계 제외", default=False, help_text="체크하면 분석에서 빼지만 명세서 대조에는 남는다"
     )
 
     class Meta:

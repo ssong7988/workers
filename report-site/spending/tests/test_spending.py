@@ -15,6 +15,7 @@ from spending.analysis import (
     group_rows,
     installment_outlook,
     month_view,
+    monthly_totals,
 )
 from spending.ingest import IngestError, ingest_statement
 from spending.models import (
@@ -245,6 +246,61 @@ class GroupTest(TestCase):
         ingest_statement(statement_payload(rows=[row("이마트", 900_000)]))
         second = [r["id"] for r in group_rows(month_view().statement)]
         self.assertEqual(first, second)
+
+
+class ExclusionTest(TestCase):
+    """대신 결제해 주고 돌려받는 돈처럼, 청구는 됐지만 내 소비가 아닌 줄."""
+
+    def setUp(self):
+        ingest_statement(
+            statement_payload(
+                rows=[row("스타벅스", 10_000), row("남의카드결제대행", 500_000)]
+            )
+        )
+        self.dropped = Transaction.objects.get(merchant="남의카드결제대행")
+
+    def exclude(self):
+        self.dropped.excluded = True
+        self.dropped.save()
+
+    def test_excluding_removes_it_from_the_analysed_total(self):
+        self.exclude()
+        statement = Statement.objects.get()
+        self.assertEqual(statement.analysed_total_won, 10_000)
+        self.assertEqual(statement.excluded_total_won, 500_000)
+
+    def test_the_statement_check_still_sees_every_row(self):
+        """제외는 집계에서만 빼는 것이지 명세서와의 대조를 흔들면 안 된다."""
+        self.exclude()
+        statement = Statement.objects.get()
+        self.assertEqual(statement.parsed_total_won, 510_000)
+        self.assertEqual(statement.discrepancy_won, 0)
+
+    def test_excluded_rows_leave_the_category_and_group_totals(self):
+        self.exclude()
+        view = month_view()
+        self.assertEqual(sum(r["total"] for r in group_rows(view.statement)), 10_000)
+        self.assertEqual(sum(r["total"] for r in category_rows(view.statement, None)), 10_000)
+
+    def test_monthly_totals_drop_the_excluded_row(self):
+        self.exclude()
+        self.assertEqual(monthly_totals()[-1].total, 10_000)
+
+    def test_a_resent_statement_keeps_the_exclusion(self):
+        """정정 명세서 한 통에 사람이 골라 둔 것이 되살아나면 다시 골라야 한다."""
+        self.exclude()
+        ingest_statement(
+            statement_payload(
+                rows=[row("스타벅스", 10_000), row("남의카드결제대행", 500_000)]
+            )
+        )
+        restored = Transaction.objects.get(merchant="남의카드결제대행")
+        self.assertTrue(restored.excluded)
+        self.assertEqual(Statement.objects.get().analysed_total_won, 10_000)
+
+    def test_the_digest_reports_the_analysed_total(self):
+        self.exclude()
+        self.assertIn("1.0만", build_digest().message)
 
 
 class DigestTest(TestCase):

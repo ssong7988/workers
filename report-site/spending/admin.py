@@ -134,9 +134,12 @@ class StatementAdmin(admin.ModelAdmin):
 
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):
-    list_display = ("used_at", "merchant", "billed", "payment_type", "category", "category_source")
-    list_editable = ("category",)
-    list_filter = ("category", "payment_type", "statement__billing_month")
+    list_display = (
+        "used_at", "merchant", "billed", "payment_type", "category",
+        "category_source", "excluded",
+    )
+    list_editable = ("category", "excluded")
+    list_filter = ("excluded", "category", "payment_type", "statement__billing_month")
     search_fields = ("merchant", "merchant_norm")
     ordering = ("-used_at", "-billed_won")
     list_display_links = ("used_at",)

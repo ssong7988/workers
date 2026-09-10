@@ -74,6 +74,9 @@ class Statement:
     transactions: list[Transaction] = field(default_factory=list)
     source_ref: str = ""  # originating mail Message-ID
     parsed_at: str = ""
+    # 건수가 명세서의 소계와 다를 때 남기는 메모. 거절 사유는 아니다 - 카드사가
+    # 0원짜리 줄을 달마다 다르게 세기 때문이며, 금액은 그와 무관하게 맞는다.
+    count_notes: list[str] = field(default_factory=list)
 
     @property
     def parsed_total_won(self) -> int:
