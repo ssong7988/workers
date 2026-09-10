@@ -8,7 +8,7 @@ from django.urls import reverse
 
 from portfolio.models import HableAccountDailyMetric
 from report.stock_views import _summary
-from .factories import make_account
+from .factories import login_staff, make_account
 
 
 class PeriodSummaryTests(SimpleTestCase):
@@ -63,6 +63,7 @@ class HistoryImportTests(TestCase):
 
 class PortfolioSelectionTests(TestCase):
     def setUp(self):
+        login_staff(self.client)
         for key, rate in (("first", "0.1"), ("second", "-0.1")):
             account = make_account(key, alias=key)
             for day in (1, 2):

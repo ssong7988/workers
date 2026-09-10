@@ -9,14 +9,35 @@ from django.test import TestCase
 from portfolio.models import CashFlow, PortfolioTarget
 from portfolio.performance import rebuild_metrics
 
-from .factories import make_account, make_asset_class, make_instrument, record_balance
+from .factories import (
+    login_staff,
+    make_account,
+    make_asset_class,
+    make_instrument,
+    record_balance,
+)
 
 
 ALLOCATION_URL = f"{settings.ALLOCATION_URL_PATH}/"
 PERFORMANCE_URL = f"{settings.PERFORMANCE_URL_PATH}/"
 
 
+class ScreenGateTests(TestCase):
+    def test_screens_require_staff_login(self) -> None:
+        """계좌 잔고가 보이는 화면이라 로그인 없이는 열리지 않는다."""
+        for url in (ALLOCATION_URL, PERFORMANCE_URL):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 302)
+                self.assertIn("/admin/login/", response["Location"])
+                # 로그인 뒤 원래 화면으로 돌아가야 카카오 버튼이 쓸모가 있다.
+                self.assertIn(url, response["Location"])
+
+
 class EmptyScreenTests(TestCase):
+    def setUp(self) -> None:
+        login_staff(self.client)
+
     def test_both_screens_render_without_any_data(self) -> None:
         for url, expected in (
             (ALLOCATION_URL, "아직 완전한 수집 결과가 없습니다"),
@@ -30,6 +51,7 @@ class EmptyScreenTests(TestCase):
 
 class PopulatedScreenTests(TestCase):
     def setUp(self) -> None:
+        login_staff(self.client)
         account = make_account()
         stocks = make_asset_class("korea-stock", "한국 주식", "domestic_stock", 10)
         bonds = make_asset_class("bond", "채권", "bond", 20)

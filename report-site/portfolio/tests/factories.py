@@ -103,3 +103,18 @@ def record_balance(
         market_value=Decimal(value),
         market_value_krw=Decimal(value),
     )
+
+
+def login_staff(client, username: str = "screen-tester"):
+    """금융자산 화면은 admin 로그인을 요구하므로 테스트도 로그인하고 연다.
+
+    화면이 그리는 내용을 확인하는 테스트라 게이트 자체를 검사하지는 않는다.
+    게이트는 `test_screens_require_staff_login`이 따로 본다.
+    """
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.create_user(
+        username=username, password="test-pass", is_staff=True
+    )
+    client.force_login(user)
+    return user

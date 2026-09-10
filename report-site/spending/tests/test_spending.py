@@ -110,13 +110,13 @@ class CategorizeTest(TestCase):
         self.assertEqual(transaction.category_source, "payment_type")
 
     def test_an_unknown_merchant_lands_in_unclassified(self):
-        ingest_statement(statement_payload(rows=[row("동네분식", 9_000)]))
+        ingest_statement(statement_payload(rows=[row("이름없는가게ZZ", 9_000)]))
         self.assertEqual(Transaction.objects.get().category_id, UNCLASSIFIED_CATEGORY_ID)
 
     def test_a_new_rule_reclassifies_without_recollecting(self):
-        ingest_statement(statement_payload(rows=[row("동네분식", 9_000)]))
+        ingest_statement(statement_payload(rows=[row("이름없는가게ZZ", 9_000)]))
         MerchantRule.objects.create(
-            keyword="동네분식", category=SpendingCategory.objects.get(pk="food"), order=5
+            keyword="이름없는가게ZZ", category=SpendingCategory.objects.get(pk="food"), order=5
         )
         recategorize_all()
         self.assertEqual(Transaction.objects.get().category_id, "food")
