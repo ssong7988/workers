@@ -260,7 +260,24 @@ class DigestTest(TestCase):
 
     def test_unclassified_is_named_once_not_twice(self):
         ingest_statement(
-            statement_payload(rows=[row("낯선가게", 500_000), row("스타벅스", 5_000)])
+            statement_payload(rows=[row("이름없는가게ZZ", 500_000), row("스타벅스", 5_000)])
         )
         digest = build_digest()
         self.assertEqual(digest.message.count("미분류"), 1)
+
+    def test_message_reports_groups_not_categories(self):
+        """대분류라야 200자 안에서 한 달의 성격을 말할 수 있다."""
+        ingest_statement(
+            statement_payload(
+                rows=[
+                    row("스타벅스", 100_000),   # 외식
+                    row("이마트", 200_000),     # 필수생활
+                    row("SKT 요금", 50_000),    # 고정비
+                ]
+            )
+        )
+        message = build_digest().message
+        for name in ("외식", "필수생활", "고정비"):
+            self.assertIn(name, message)
+        # 카테고리 이름이 아니라 대분류 이름이 나가야 한다.
+        self.assertNotIn("카페·간식", message)

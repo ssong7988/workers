@@ -22,10 +22,9 @@ from properties.publish import is_public_report_url
 
 from .analysis import (
     category_rows,
-    monthly_totals,
+    group_rows,
     month_view,
     trailing_average,
-    unclassified_merchants,
 )
 from .display import man_text, month_text, signed_percent_text
 from .models import Statement
@@ -76,17 +75,26 @@ def build_digest(billing_month: str | None = None) -> Digest:
     if parts:
         lines.append(" · ".join(parts))
 
-    rows = category_rows(statement, view.previous)
-    # 미분류는 아래에서 따로 말한다. 상위 목록에 끼면 같은 금액이 두 번 나온다.
-    top = [row for row in rows if row["total"] > 0 and not row["unclassified"]][:3]
-    if top:
-        lines.append(" · ".join(f"{row['name']} {man_text(row['total'])}" for row in top))
+    # 카테고리 열여섯 개는 200자에 담기지도 않고 담아도 성격이 안 보인다.
+    # 대분류는 다섯 줄이면 한 달이 어떤 달이었는지 말해 준다.
+    groups = [row for row in group_rows(statement, view.previous) if row["total"] > 0]
+    groups.sort(key=lambda row: -row["total"])
+    for chunk in (groups[:3], groups[3:]):
+        if chunk:
+            lines.append(
+                " · ".join(f"{row['name']} {man_text(row['total'])}" for row in chunk)
+            )
 
     unclassified = next(
-        (row for row in rows if row["unclassified"] and row["total"] > 0), None
+        (
+            row
+            for row in category_rows(statement, view.previous)
+            if row["unclassified"] and row["total"] > 0
+        ),
+        None,
     )
     if unclassified:
-        # 미분류가 남아 있으면 카테고리 숫자를 곧이곧대로 읽으면 안 된다.
+        # 미분류가 남아 있으면 대분류 숫자를 곧이곧대로 읽으면 안 된다.
         lines.append(f"미분류 {man_text(unclassified['total'])} 포함")
 
     message = "\n".join(lines)[:TEXT_LIMIT]
