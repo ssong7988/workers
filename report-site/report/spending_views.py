@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import math
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib import messages
@@ -35,10 +36,23 @@ from spending.display import man_text, month_text, signed_percent_text, won_text
 from spending.categorize import recategorize_all
 from spending.models import (
     UNCLASSIFIED_CATEGORY_ID,
+    CardHolder,
     MerchantRule,
     SpendingCategory,
     Transaction,
 )
+
+# 사람 이름이 없는 카드는 여기로 묶인다.
+UNASSIGNED_HOLDER = "미지정"
+# 메모는 목록에서 한눈에 훑히는 길이로 잡는다.
+NOTE_LIMIT = 15
+
+
+def _truncate_note(text: str, limit: int = NOTE_LIMIT) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
 
 # 이보다 낮은 조각에는 안에 숫자를 적을 수 없다.
 STACK_LABEL_MIN_HEIGHT = 15
@@ -363,8 +377,23 @@ def transactions(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         return _save_selection(request, statement)
 
-    rows = statement.transactions.select_related("category").order_by("-billed_won")
+    rows = list(statement.transactions.select_related("category").order_by("-billed_won"))
     excluded_count = sum(1 for item in rows if item.excluded)
+
+    holder_map = {item.card_last4: item.name for item in CardHolder.objects.all()}
+    holder_choices = sorted(set(holder_map.values()))
+    if any(not holder_map.get(item.card_last4) for item in rows):
+        holder_choices.append(UNASSIGNED_HOLDER)
+
+    def holder_of(item) -> str:
+        return holder_map.get(item.card_last4) or UNASSIGNED_HOLDER
+
+    holder = request.GET.get("holder") or ""
+    if holder not in holder_choices:
+        holder = ""
+
+    shown = [item for item in rows if not holder or holder_of(item) == holder]
+
     context = {
         **_links("transactions"),
         "statement": statement,
@@ -373,13 +402,14 @@ def transactions(request: HttpRequest) -> HttpResponse:
         "billed_text": won_text(statement.parsed_total_won),
         "excluded_count": excluded_count,
         "excluded_text": won_text(statement.excluded_total_won),
-        "count": len(rows),
+        "count": len(shown),
         "rows": [
             {
                 "id": item.pk,
                 "used_at": item.used_at,
                 "merchant": item.merchant,
                 "category": item.category.name,
+                "category_id": item.category_id,
                 "unclassified": item.category.is_unclassified,
                 "payment": item.get_payment_type_display(),
                 "installment": (
@@ -388,10 +418,12 @@ def transactions(request: HttpRequest) -> HttpResponse:
                     else ""
                 ),
                 "card": item.card_last4,
+                "holder": holder_of(item),
+                "note": item.note,
                 "amount": won_text(item.billed_won),
                 "selected": not item.excluded,
             }
-            for item in rows
+            for item in shown
         ],
         "months": [
             {"month": row.month, "label": month_text(row.month)}
@@ -399,8 +431,30 @@ def transactions(request: HttpRequest) -> HttpResponse:
         ],
         # 미분류 줄에서 고를 목록. 미분류 자신은 고를 수 있으면 안 된다.
         "categories": _category_choices(),
+        # 사람을 고르면 그 사람이 어떤 카드로 얼마를 썼는지, 전체를 보면
+        # 사람별로 얼마씩 썼는지를 견준다. 제외한 줄은 실제 집계와 맞추려고 뺀다.
+        "holder": holder,
+        "holder_choices": holder_choices,
+        "holder_breakdown": (
+            _breakdown(shown, lambda item: item.card_last4 or "미기재")
+            if holder
+            else _breakdown(rows, holder_of)
+        ),
     }
     return render(request, "report/spending_transactions.html", context)
+
+
+def _breakdown(rows, key) -> list[dict]:
+    """제외하지 않은 줄만 이름별로 합친 뒤, 큰 금액부터 늘어놓는다."""
+    totals: dict[str, int] = {}
+    for item in rows:
+        if item.excluded:
+            continue
+        totals[key(item)] = totals.get(key(item), 0) + item.billed_won
+    return [
+        {"name": name, "amount": won_text(total)}
+        for name, total in sorted(totals.items(), key=lambda pair: -pair[1])
+    ]
 
 
 def _save_selection(request: HttpRequest, statement) -> HttpResponse:
@@ -428,10 +482,34 @@ def _save_selection(request: HttpRequest, statement) -> HttpResponse:
     rule_note = _learn_categories(request, rows)
     if rule_note:
         notes.append(rule_note)
+    _save_notes(request, rows)
     messages.success(request, " ".join(notes))
-    return redirect(
-        f"{settings.SPENDING_TRANSACTIONS_URL_PATH}/?month={statement.billing_month}"
-    )
+    holder = request.POST.get("holder") or ""
+    query = f"month={statement.billing_month}"
+    if holder:
+        query += f"&holder={quote(holder)}"
+    return redirect(f"{settings.SPENDING_TRANSACTIONS_URL_PATH}/?{query}")
+
+
+def _save_notes(request: HttpRequest, rows) -> None:
+    """한 줄 메모를 저장한다. 15자를 넘기면 잘라서 목록이 늘어지지 않게 한다."""
+    by_id = {item.pk: item for item in rows}
+    changed = []
+    for key, value in request.POST.items():
+        if not key.startswith("note-"):
+            continue
+        raw_id = key.removeprefix("note-")
+        if not raw_id.isdigit():
+            continue
+        item = by_id.get(int(raw_id))
+        if item is None:
+            continue
+        value = _truncate_note(value)
+        if item.note != value:
+            item.note = value
+            changed.append(item)
+    if changed:
+        Transaction.objects.bulk_update(changed, ["note"])
 
 
 def _category_choices() -> list[dict]:
@@ -471,7 +549,9 @@ def _learn_categories(request: HttpRequest, rows) -> str:
         if not raw_id.isdigit():
             continue
         item = by_id.get(int(raw_id))
-        if item and item.merchant_norm:
+        # 이미 그 카테고리인 줄을 다시 골라 봤자 규칙이 하나 더 생길 뿐이다 -
+        # 바뀐 것만 규칙으로 남긴다.
+        if item and item.merchant_norm and value != str(item.category_id):
             picks[item.merchant_norm] = value
 
     if not picks:

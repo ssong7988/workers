@@ -11,6 +11,7 @@ from django.db.models import Count, Sum
 
 from .categorize import recategorize_all
 from .models import (
+    CardHolder,
     MerchantRule,
     SpendingCategory,
     SpendingGroup,
@@ -95,6 +96,13 @@ class MerchantRuleAdmin(admin.ModelAdmin):
         )
 
 
+@admin.register(CardHolder)
+class CardHolderAdmin(admin.ModelAdmin):
+    list_display = ("name", "card_last4")
+    list_editable = ("card_last4",)
+    ordering = ("name", "card_last4")
+
+
 class TransactionInline(admin.TabularInline):
     model = Transaction
     extra = 0
@@ -136,9 +144,9 @@ class StatementAdmin(admin.ModelAdmin):
 class TransactionAdmin(admin.ModelAdmin):
     list_display = (
         "used_at", "merchant", "billed", "payment_type", "category",
-        "category_source", "excluded",
+        "category_source", "excluded", "note",
     )
-    list_editable = ("category", "excluded")
+    list_editable = ("category", "excluded", "note")
     list_filter = ("excluded", "category", "payment_type", "statement__billing_month")
     search_fields = ("merchant", "merchant_norm")
     ordering = ("-used_at", "-billed_won")

@@ -236,6 +236,9 @@ class Transaction(models.Model):
     excluded = models.BooleanField(
         "집계 제외", default=False, help_text="체크하면 분석에서 빼지만 명세서 대조에는 남는다"
     )
+    # 가맹점명만으로는 "이게 뭐였더라"가 나중에 기억나지 않는 줄이 있다. 15자로
+    # 짧게 잡아 목록에서 한눈에 훑히게 한다 - 길게 쓰는 메모장이 아니다.
+    note = models.CharField("메모", max_length=15, blank=True)
 
     class Meta:
         verbose_name = "거래"
@@ -263,6 +266,26 @@ class Transaction(models.Model):
         if not self.is_installment:
             return 0
         return max(0, self.installment_months - self.installment_seq)
+
+
+class CardHolder(models.Model):
+    """카드 뒤 4자리와 실제 쓰는 사람을 잇는다.
+
+    명세서에는 카드 번호 끝 4자리만 나오고 사람 이름은 없다. 이 표를 채워야
+    "누가 얼마나 썼는지", "이 사람은 어떤 카드로 썼는지"를 물을 수 있다. 한
+    사람이 카드를 여러 장 쓸 수 있어 이름은 유일하지 않고, 카드 번호만 유일하다.
+    """
+
+    card_last4 = models.CharField("카드 뒤 4자리", max_length=4, unique=True)
+    name = models.CharField("사용자", max_length=50)
+
+    class Meta:
+        verbose_name = "카드 사용자"
+        verbose_name_plural = "카드 사용자"
+        ordering = ("name", "card_last4")
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.card_last4})"
 
 
 # 법인 표기는 정보가 없고 같은 가맹점인데도 명세서마다 다르게 찍힌다.
