@@ -24,6 +24,64 @@
   </div>
 </div>
 
+<h2 class="section-title">대분류 구성</h2>
+<div class="panel">
+  <svg viewBox="0 0 100 9" preserveAspectRatio="none" class="split" role="img"
+       aria-label="대분류별 비중">
+    {% for part in segments %}
+    <g><title>{{ part.name }} {{ part.percent }}</title>
+      <rect x="{{ part.x }}" y="0" width="{{ part.width }}" height="9" fill="{{ part.color }}"/>
+    </g>
+    {% endfor %}
+  </svg>
+  <div class="legend">
+    {% for row in groups %}
+    <span class="legend-item">
+      <span class="swatch" style="background:{{ row.color }}"></span>
+      {{ row.name }} <b>{{ row.percent }}</b>
+    </span>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>대분류</th><th>비중</th><th>청구액</th><th>전월 대비</th></tr></thead>
+    <tbody>
+      {% for row in groups %}
+      <tr>
+        <td><span class="swatch" style="background:{{ row.color }}"></span>{{ row.name }}</td>
+        <td>{{ row.percent }}</td>
+        <td>{{ row.amount }}</td>
+        <td class="{% if row.up %}tile-up{% else %}tile-down{% endif %}">{{ row.delta_text|default:"—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="hint">
+  {% for row in groups %}{% if row.note %}<b>{{ row.name }}</b> {{ row.note }}<br>{% endif %}{% endfor %}
+</p>
+
+{% if group_trend %}
+<h2 class="section-title">대분류 추이</h2>
+<div class="panel">
+  <svg viewBox="0 0 {{ group_trend.width }} {{ group_trend.height|add:30 }}" role="img"
+       aria-label="달마다 대분류 구성">
+    {% for column in group_trend.columns %}
+      {% for piece in column.pieces %}
+      <g><title>{{ piece.title }}</title>
+        <rect x="{{ piece.x }}" y="{{ piece.y }}" width="{{ piece.width }}"
+              height="{{ piece.height }}" fill="{{ piece.color }}"/>
+      </g>
+      {% endfor %}
+    <text x="{{ column.centre }}" y="{{ group_trend.height|add:18 }}" text-anchor="middle"
+          font-size="11" fill="#64748b">{{ column.label }}</text>
+    {% endfor %}
+  </svg>
+</div>
+{% endif %}
+
 {% if trend %}
 <h2 class="section-title">월별 청구액</h2>
 <div class="panel">
@@ -53,7 +111,7 @@
       {% for row in categories %}
       <tr>
         <td>{% if row.unclassified %}<span class="tag warn">{{ row.name }}</span>{% else %}{{ row.name }}{% endif %}</td>
-        <td style="width:45%"><div class="bar-track"><div class="bar-fill" style="width:{{ row.bar }}%"></div></div></td>
+        <td style="width:45%"><div class="bar-track"><div class="bar-fill" style="width:{{ row.bar }}%;background:{{ row.color }}"></div></div></td>
         <td>{{ row.amount }}</td>
       </tr>
       {% empty %}

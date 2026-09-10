@@ -53,11 +53,47 @@ def validate_billing_month(value: str) -> None:
         raise ValidationError("청구월은 YYYY-MM 형식이어야 합니다.")
 
 
+class SpendingGroup(models.Model):
+    """카테고리를 묶는 대분류.
+
+    카테고리 열여섯 개는 한 달 지출의 성격을 한눈에 말해 주지 못한다. 대분류는
+    "줄일 수 없는 돈이 얼마고 내가 조절하는 돈이 얼마인가"를 답하는 축이라,
+    다섯에서 여섯 개를 넘기지 않는다. 늘어나면 그 질문에 답하지 못한다.
+
+    `color`는 차트의 조각 색이다. 대분류마다 고정이라 달이 바뀌어도 같은
+    성격이 같은 색으로 보인다 - 색이 순위를 따라다니면 비교가 안 된다.
+    """
+
+    id = models.SlugField("코드", primary_key=True, max_length=40)
+    name = models.CharField("이름", max_length=40)
+    order = models.PositiveSmallIntegerField("정렬", default=100)
+    color = models.CharField(
+        "색", max_length=7, default="#94a3b8", help_text="#rrggbb"
+    )
+    note = models.CharField("설명", max_length=120, blank=True)
+
+    class Meta:
+        verbose_name = "대분류"
+        verbose_name_plural = "대분류"
+        ordering = ("order", "name")
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class SpendingCategory(models.Model):
     """소비 카테고리. admin에서 더하고 이름을 바꿀 수 있다."""
 
     id = models.SlugField("코드", primary_key=True, max_length=40)
     name = models.CharField("이름", max_length=40)
+    group = models.ForeignKey(
+        SpendingGroup,
+        on_delete=models.PROTECT,
+        related_name="categories",
+        verbose_name="대분류",
+        null=True,
+        blank=True,
+    )
     order = models.PositiveSmallIntegerField("정렬", default=100)
     is_financial_cost = models.BooleanField(
         "금융비용", default=False, help_text="연회비·이자가 자동으로 들어갈 카테고리"

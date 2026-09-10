@@ -10,7 +10,12 @@ from django.test import TestCase
 
 from spending.categorize import categorize, recategorize_all
 from spending.delivery import build_digest
-from spending.analysis import category_rows, installment_outlook, month_view
+from spending.analysis import (
+    category_rows,
+    group_rows,
+    installment_outlook,
+    month_view,
+)
 from spending.ingest import IngestError, ingest_statement
 from spending.models import (
     UNCLASSIFIED_CATEGORY_ID,
@@ -196,6 +201,50 @@ class AnalysisTest(TestCase):
         self.assertEqual(outlook["active"][0]["remaining"], 4)
         self.assertEqual(outlook["future_total"], 200_000)
         self.assertEqual(outlook["by_month"][0]["month"], "2026-10")
+
+
+class GroupTest(TestCase):
+    def test_every_category_belongs_to_a_group(self):
+        """대분류가 비면 그 금액이 차트에서 조용히 사라져 합계가 안 맞는다."""
+        orphans = SpendingCategory.objects.filter(group__isnull=True)
+        self.assertEqual(list(orphans), [])
+
+    def test_group_shares_add_up_to_the_month(self):
+        ingest_statement(
+            statement_payload(
+                rows=[
+                    row("스타벅스", 100_000),      # 외식
+                    row("이마트", 200_000),        # 필수생활
+                    row("SKT 요금", 50_000),       # 고정비
+                ]
+            )
+        )
+        view = month_view()
+        rows = group_rows(view.statement)
+        self.assertEqual(sum(r["total"] for r in rows), 350_000)
+        self.assertAlmostEqual(sum(r["share"] for r in rows), 1.0, places=3)
+
+    def test_the_therapy_category_counts_as_a_fixed_cost(self):
+        """매달 같은 금액이 정해진 횟수만큼 나가므로 통신·구독과 같은 자리다."""
+        ingest_statement(statement_payload(rows=[row("내인생봄날의원", 85_000)]))
+        transaction = Transaction.objects.get()
+        self.assertEqual(transaction.category_id, "care")
+        self.assertEqual(transaction.category.group_id, "fixed")
+
+    def test_an_ordinary_clinic_is_not_a_fixed_cost(self):
+        """의료를 통째로 고정비에 넣었다면 감기 진료가 고정비로 잡혔을 것이다."""
+        ingest_statement(statement_payload(rows=[row("한빛의원", 15_000)]))
+        transaction = Transaction.objects.get()
+        self.assertEqual(transaction.category_id, "medical")
+        self.assertEqual(transaction.category.group_id, "essential")
+
+    def test_group_order_is_stable_so_colours_do_not_move(self):
+        ingest_statement(statement_payload(rows=[row("스타벅스", 100_000)]))
+        view = month_view()
+        first = [r["id"] for r in group_rows(view.statement)]
+        ingest_statement(statement_payload(rows=[row("이마트", 900_000)]))
+        second = [r["id"] for r in group_rows(month_view().statement)]
+        self.assertEqual(first, second)
 
 
 class DigestTest(TestCase):

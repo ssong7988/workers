@@ -11,7 +11,12 @@ from dataclasses import dataclass, field
 
 from django.db.models import Count, Sum
 
-from .models import UNCLASSIFIED_CATEGORY_ID, Statement, Transaction
+from .models import (
+    UNCLASSIFIED_CATEGORY_ID,
+    SpendingGroup,
+    Statement,
+    Transaction,
+)
 
 AVERAGE_WINDOW = 6
 TOP_MERCHANTS = 15
@@ -123,6 +128,81 @@ def _category_totals(statement: Statement | None) -> dict[str, tuple[int, str]]:
         row["category_id"]: (row["total"] or 0, row["category__name"])
         for row in rows
     }
+
+
+def group_rows(statement: Statement, previous: Statement | None = None) -> list[dict]:
+    """대분류별 합계와 비중.
+
+    카테고리 열여섯 개로는 한 달의 성격이 안 보인다. 이 표가 답하는 질문은
+    하나다 - 줄일 수 없는 돈이 얼마고 내가 조절하는 돈이 얼마인가.
+
+    합계가 0인 대분류도 남긴다. 이번 달에 안 쓴 것 자체가 비교할 값이고,
+    조각 색이 달마다 자리를 바꾸지 않게 하려면 순서가 고정돼야 한다.
+    """
+    now = _group_totals(statement)
+    before = _group_totals(previous) if previous else {}
+    whole = sum(now.values())
+
+    rows = []
+    for group in SpendingGroup.objects.all():
+        total = now.get(group.pk, 0)
+        prior = before.get(group.pk, 0)
+        rows.append(
+            {
+                "id": group.pk,
+                "name": group.name,
+                "note": group.note,
+                "color": group.color,
+                "total": total,
+                "share": _share(total, whole),
+                "previous": prior,
+                "delta": total - prior,
+                "percent": _percent_change(total, prior),
+            }
+        )
+    return rows
+
+
+def _group_totals(statement: Statement | None) -> dict[str, int]:
+    if statement is None:
+        return {}
+    rows = (
+        statement.transactions.values("category__group_id")
+        .annotate(total=Sum("billed_won"))
+        .order_by()
+    )
+    return {
+        row["category__group_id"]: row["total"] or 0
+        for row in rows
+        if row["category__group_id"]
+    }
+
+
+def group_series(months: int = 12) -> dict:
+    """최근 달들의 대분류 구성. 성격이 어떻게 변해 왔는지 본다."""
+    statements = list(Statement.objects.order_by("billing_month"))[-months:]
+    groups = list(SpendingGroup.objects.all())
+    series = []
+    for statement in statements:
+        totals = _group_totals(statement)
+        whole = sum(totals.values())
+        series.append(
+            {
+                "month": statement.billing_month,
+                "total": whole,
+                "parts": [
+                    {
+                        "id": group.pk,
+                        "name": group.name,
+                        "color": group.color,
+                        "total": totals.get(group.pk, 0),
+                        "share": _share(totals.get(group.pk, 0), whole),
+                    }
+                    for group in groups
+                ],
+            }
+        )
+    return {"groups": groups, "months": series}
 
 
 def payment_type_rows(statement: Statement) -> list[dict]:

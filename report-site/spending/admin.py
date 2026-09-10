@@ -10,7 +10,13 @@ from django.contrib import admin, messages
 from django.db.models import Count, Sum
 
 from .categorize import recategorize_all
-from .models import MerchantRule, SpendingCategory, Statement, Transaction
+from .models import (
+    MerchantRule,
+    SpendingCategory,
+    SpendingGroup,
+    Statement,
+    Transaction,
+)
 
 
 @admin.action(description="규칙으로 전체 거래를 다시 분류")
@@ -23,10 +29,33 @@ def recategorize(modeladmin, request, queryset):
     )
 
 
+@admin.register(SpendingGroup)
+class SpendingGroupAdmin(admin.ModelAdmin):
+    list_display = ("name", "id", "order", "swatch", "category_names", "note")
+    list_editable = ("order",)
+    ordering = ("order", "name")
+
+    @admin.display(description="색")
+    def swatch(self, obj) -> str:
+        from django.utils.html import format_html
+
+        return format_html(
+            '<span style="display:inline-block;width:1.1rem;height:1.1rem;'
+            'border-radius:3px;background:{}"></span> {}',
+            obj.color,
+            obj.color,
+        )
+
+    @admin.display(description="포함 카테고리")
+    def category_names(self, obj) -> str:
+        return ", ".join(obj.categories.values_list("name", flat=True)) or "—"
+
+
 @admin.register(SpendingCategory)
 class SpendingCategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "id", "order", "is_financial_cost", "rule_count", "spent")
-    list_editable = ("order", "is_financial_cost")
+    list_display = ("name", "id", "group", "order", "is_financial_cost", "rule_count", "spent")
+    list_editable = ("group", "order", "is_financial_cost")
+    list_filter = ("group",)
     ordering = ("order", "name")
     actions = [recategorize]
 

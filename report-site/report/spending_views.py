@@ -16,6 +16,8 @@ from django.shortcuts import render
 
 from spending.analysis import (
     category_rows,
+    group_rows,
+    group_series,
     installment_outlook,
     month_view,
     monthly_totals,
@@ -25,6 +27,7 @@ from spending.analysis import (
     unclassified_merchants,
 )
 from spending.display import man_text, month_text, signed_percent_text, won_text
+from spending.models import SpendingCategory
 
 MONTH_TREND_LIMIT = 12
 
@@ -72,6 +75,50 @@ def _trend(totals, latest_month: str) -> dict | None:
     }
 
 
+def _group_trend() -> dict | None:
+    """달마다 대분류 구성을 쌓은 막대.
+
+    한 달만 있으면 추이가 아니라 같은 정보의 반복이라 그리지 않는다.
+    """
+    series = group_series()
+    if len(series["months"]) < 2:
+        return None
+
+    width, height = 720, 190
+    ceiling = max((month["total"] for month in series["months"]), default=0) or 1
+    slot = width / len(series["months"])
+    bar = min(54.0, slot - 16)
+
+    columns = []
+    for index, month in enumerate(series["months"]):
+        x = slot * (index + 0.5) - bar / 2
+        top = height - height * month["total"] / ceiling
+        pieces = []
+        for part in month["parts"]:
+            if not part["total"]:
+                continue
+            piece_height = height * part["total"] / ceiling
+            pieces.append(
+                {
+                    "x": x,
+                    "y": top,
+                    "width": bar,
+                    "height": piece_height,
+                    "color": part["color"],
+                    "title": f"{month['month']} {part['name']} {won_text(part['total'])}",
+                }
+            )
+            top += piece_height
+        columns.append(
+            {
+                "pieces": pieces,
+                "label": month["month"][2:].replace("-", "."),
+                "centre": slot * (index + 0.5),
+            }
+        )
+    return {"width": width, "height": height, "columns": columns}
+
+
 @staff_member_required
 def report(request: HttpRequest) -> HttpResponse:
     view = month_view(request.GET.get("month"))
@@ -83,16 +130,48 @@ def report(request: HttpRequest) -> HttpResponse:
     current = next((item for item in totals if item.month == statement.billing_month), None)
     average = trailing_average(totals)
     categories = category_rows(statement, view.previous)
-    changed = sorted(
-        (row for row in categories if row["delta"]),
-        key=lambda row: -abs(row["delta"]),
-    )[:8]
+    # 직전 달이 없으면 증감이 아니라 이번 달 금액 그 자체다. 0에서 늘어난 것으로
+    # 그리면 첫 달이 전부 급증한 것처럼 읽힌다.
+    changed = (
+        sorted(
+            (row for row in categories if row["delta"]),
+            key=lambda row: -abs(row["delta"]),
+        )[:8]
+        if view.previous
+        else []
+    )
     ceiling = max((row["total"] for row in categories), default=0) or 1
     delta_ceiling = max((abs(row["delta"]) for row in changed), default=0) or 1
+
+    groups = [row for row in group_rows(statement, view.previous) if row["total"] > 0]
+    group_colors = {
+        category.pk: category.group.color
+        for category in SpendingCategory.objects.select_related("group")
+        if category.group
+    }
+    # 한 줄짜리 100% 막대. 조각 폭이 곧 비중이라 눈금이 필요 없다.
+    offset = 0.0
+    segments = []
+    for row in groups:
+        width = row["share"] * 100
+        segments.append({**row, "x": offset, "width": width, "percent": f"{width:.0f}%"})
+        offset += width
 
     context = {
         **_links("report"),
         "statement": statement,
+        "groups": [
+            {
+                **row,
+                "amount": won_text(row["total"]),
+                "percent": f"{row['share'] * 100:.1f}%",
+                "delta_text": man_text(row["delta"]) if row["previous"] else "",
+                "up": row["delta"] > 0,
+            }
+            for row in groups
+        ],
+        "segments": segments,
+        "group_trend": _group_trend(),
         "month_label": month_text(statement.billing_month),
         "total": statement.parsed_total_won,
         "total_text": won_text(statement.parsed_total_won),
@@ -103,9 +182,17 @@ def report(request: HttpRequest) -> HttpResponse:
         "average_text": won_text(average),
         "gap_text": man_text(statement.parsed_total_won - average) if average else "—",
         "gap_up": bool(average and statement.parsed_total_won > average),
-        "trend": _trend(totals, statement.billing_month),
+        # 달이 하나뿐이면 추이가 아니라 막대 한 개다. 대분류 추이와 같은 기준.
+        "trend": _trend(totals, statement.billing_month) if len(totals) > 1 else None,
         "categories": [
-            {**row, "bar": 100 * row["total"] / ceiling, "amount": won_text(row["total"])}
+            {
+                **row,
+                "bar": 100 * row["total"] / ceiling,
+                "amount": won_text(row["total"]),
+                # 카테고리 막대에 대분류 색을 쓴다. 어느 성격의 지출인지 표를
+                # 따라 내려가지 않고도 보인다.
+                "color": group_colors.get(row["id"], "#16a34a"),
+            }
             for row in categories
             if row["total"] > 0
         ],
