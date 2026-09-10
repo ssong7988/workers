@@ -44,7 +44,10 @@
     content: ""; position: absolute; top: -1.5rem; left: 0; right: 0;
     height: 1px; background: linear-gradient(90deg, transparent, rgba(148, 163, 184, .45), transparent);
   }
-  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+  /* 서비스가 넷이라 한 줄에 넷을 둔다. 좁은 화면에서는 아래 미디어 쿼리가
+     둘, 다시 하나로 접는다. */
+  .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+  @media (max-width: 1180px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .card {
     --accent: #38bdf8;
     position: relative; display: flex; min-height: 27rem; flex-direction: column; overflow: hidden;

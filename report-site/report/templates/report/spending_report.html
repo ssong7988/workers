@@ -83,7 +83,8 @@
 {% if group_trend %}
 <h2 class="section-title">대분류 추이</h2>
 <div class="panel">
-  <svg viewBox="0 0 {{ group_trend.width }} {{ group_trend.height|add:30 }}" role="img"
+  {# 월별 청구액과 같은 이유로 위쪽에 총액 자리를 낸다. #}
+  <svg viewBox="0 -20 {{ group_trend.width }} {{ group_trend.height|add:50 }}" role="img"
        aria-label="달마다 대분류 구성">
     {% for column in group_trend.columns %}
       {% for piece in column.pieces %}
@@ -91,7 +92,13 @@
         <rect x="{{ piece.x }}" y="{{ piece.y }}" width="{{ piece.width }}"
               height="{{ piece.height }}" fill="{{ piece.color }}"/>
       </g>
+      {% if piece.show_label %}
+      <text x="{{ piece.centre }}" y="{{ piece.label_y }}" text-anchor="middle"
+            font-size="10" font-weight="700" fill="#fff">{{ piece.percent }}</text>
+      {% endif %}
       {% endfor %}
+    <text x="{{ column.centre }}" y="{{ column.top|add:"-6" }}" text-anchor="middle"
+          font-size="11" font-weight="700" fill="#0f172a">{{ column.total }}</text>
     <text x="{{ column.centre }}" y="{{ group_trend.height|add:18 }}" text-anchor="middle"
           font-size="11" fill="#64748b">{{ column.label }}</text>
     {% endfor %}
@@ -109,7 +116,8 @@
 {% if trend %}
 <h2 class="section-title">월별 청구액</h2>
 <div class="panel">
-  <svg viewBox="0 0 {{ trend.width }} {{ trend.height|add:30 }}" role="img" aria-label="월별 청구액 추이">
+  {# 가장 높은 막대의 y가 0이라, 그 위에 얹는 금액이 들어갈 자리를 위로 낸다. #}
+  <svg viewBox="0 -20 {{ trend.width }} {{ trend.height|add:50 }}" role="img" aria-label="월별 청구액 추이">
     {% if trend.average_y %}
     <line x1="0" y1="{{ trend.average_y }}" x2="{{ trend.width }}" y2="{{ trend.average_y }}"
           stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 4"/>
@@ -119,6 +127,10 @@
       <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}"
             rx="4" fill="{% if bar.current %}#16a34a{% else %}#86efac{% endif %}"/>
     </g>
+    <text x="{{ bar.centre }}" y="{{ bar.y|add:"-6" }}" text-anchor="middle"
+          font-size="11" font-weight="700" fill="#0f172a"
+          paint-order="stroke" stroke="#fff" stroke-width="3"
+          stroke-linejoin="round">{{ bar.value }}</text>
     <text x="{{ bar.centre }}" y="{{ trend.height|add:18 }}" text-anchor="middle"
           font-size="11" fill="#64748b">{{ bar.label }}</text>
     {% endfor %}
@@ -135,7 +147,12 @@
       {% for row in categories %}
       <tr>
         <td>{% if row.unclassified %}<span class="tag warn">{{ row.name }}</span>{% else %}{{ row.name }}{% endif %}</td>
-        <td style="width:45%"><div class="bar-track"><div class="bar-fill" style="width:{{ row.bar }}%;background:{{ row.color }}"></div></div></td>
+        <td style="width:45%">
+          <div class="meter-row">
+            <div class="bar-track"><div class="bar-fill" style="width:{{ row.bar }}%;background:{{ row.color }}"></div></div>
+            <span class="pct">{{ row.percent_text }}</span>
+          </div>
+        </td>
         <td>{{ row.amount }}</td>
       </tr>
       {% empty %}
@@ -154,7 +171,12 @@
       {% for row in changes %}
       <tr>
         <td>{{ row.name }}</td>
-        <td style="width:45%"><div class="bar-track"><div class="bar-fill {% if row.up %}bar-up{% else %}bar-down{% endif %}" style="width:{{ row.bar }}%"></div></div></td>
+        <td style="width:45%">
+          <div class="meter-row">
+            <div class="bar-track"><div class="bar-fill {% if row.up %}bar-up{% else %}bar-down{% endif %}" style="width:{{ row.bar }}%"></div></div>
+            <span class="pct {% if row.up %}tile-up{% else %}tile-down{% endif %}">{{ row.percent_text }}</span>
+          </div>
+        </td>
         <td class="{% if row.up %}tile-up{% else %}tile-down{% endif %}">{{ row.amount }}</td>
       </tr>
       {% endfor %}
@@ -198,7 +220,18 @@
 </div>
 {% endif %}
 
-<h2 class="section-title">가맹점 TOP</h2>
+<h2 class="section-title">
+  가맹점 TOP {{ top }}
+  <form method="get" class="inline-pick">
+    <input type="hidden" name="month" value="{{ statement.billing_month }}">
+    <select name="top" onchange="this.form.submit()" aria-label="가맹점 표시 개수">
+      {% for choice in top_choices %}
+      <option value="{{ choice }}"{% if choice == top %} selected{% endif %}>상위 {{ choice }}개</option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit">보기</button></noscript>
+  </form>
+</h2>
 <div class="table-wrap">
   <table>
     <thead><tr><th>가맹점</th><th>건수</th><th>평균</th><th>합계</th></tr></thead>

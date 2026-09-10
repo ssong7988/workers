@@ -39,6 +39,11 @@ from spending.models import (
 )
 
 MONTH_TREND_LIMIT = 12
+# 이보다 낮은 조각에는 안에 숫자를 적을 수 없다.
+STACK_LABEL_MIN_HEIGHT = 15
+# 가맹점 TOP에서 고를 수 있는 개수.
+TOP_CHOICES = (5, 10, 20)
+DEFAULT_TOP = 10
 
 
 def _links(page: str) -> dict[str, str]:
@@ -187,7 +192,16 @@ def _group_trend() -> dict | None:
                     "width": bar,
                     "height": piece_height,
                     "color": part["color"],
-                    "title": f"{month['month']} {part['name']} {won_text(part['total'])}",
+                    "percent": f"{part['share'] * 100:.0f}%",
+                    # 조각이 글자보다 낮으면 안에 적을 수 없다. 그런 조각은
+                    # 숫자를 빼고 색과 마우스 올림으로만 읽게 둔다.
+                    "show_label": piece_height >= STACK_LABEL_MIN_HEIGHT,
+                    "label_y": top + piece_height / 2 + 3.5,
+                    "centre": slot * (index + 0.5),
+                    "title": (
+                        f"{month['month']} {part['name']} {won_text(part['total'])} "
+                        f"({part['share'] * 100:.1f}%)"
+                    ),
                 }
             )
             top += piece_height
@@ -196,6 +210,8 @@ def _group_trend() -> dict | None:
                 "pieces": pieces,
                 "label": month["month"][2:].replace("-", "."),
                 "centre": slot * (index + 0.5),
+                "total": man_text(month["total"]),
+                "top": height - height * month["total"] / ceiling,
             }
         )
     # 위쪽 도넛까지 스크롤을 올려야 색을 알 수 있으면 차트가 혼자 설 수 없다.
@@ -240,6 +256,14 @@ def report(request: HttpRequest) -> HttpResponse:
 
     # 비중이 큰 것부터 읽는다. 색은 대분류에 묶여 있으므로 순서를 바꿔도
     # 조각 색이 달마다 자리를 옮기지 않는다.
+    # 고를 수 있는 값만 받는다. 주소로 아무 숫자나 넣어 표를 늘리지 못한다.
+    try:
+        top = int(request.GET.get("top", DEFAULT_TOP))
+    except ValueError:
+        top = DEFAULT_TOP
+    if top not in TOP_CHOICES:
+        top = DEFAULT_TOP
+
     groups = sorted(
         (row for row in group_rows(statement, view.previous) if row["total"] > 0),
         key=lambda row: -row["total"],
@@ -285,6 +309,8 @@ def report(request: HttpRequest) -> HttpResponse:
                 **row,
                 "bar": 100 * row["total"] / ceiling,
                 "amount": won_text(row["total"]),
+                # 막대만 있으면 "저게 몇 퍼센트지"를 눈으로 재야 한다.
+                "percent_text": f"{row['share'] * 100:.1f}%",
                 # 카테고리 막대에 대분류 색을 쓴다. 어느 성격의 지출인지 표를
                 # 따라 내려가지 않고도 보인다.
                 "color": group_colors.get(row["id"], "#16a34a"),
@@ -297,6 +323,15 @@ def report(request: HttpRequest) -> HttpResponse:
                 **row,
                 "bar": 100 * abs(row["delta"]) / delta_ceiling,
                 "amount": f"{row['delta']:+,}원",
+                # 막대 길이는 이번 달 최대 증감 대비다. 읽을 값은 그게 아니라
+                # 직전 달 대비 몇 퍼센트 움직였는가다. 전월에 없던 항목은
+                # 증감률이 정의되지 않으므로 그렇다고 말한다 - 빈칸으로 두면
+                # 계산에 실패한 것처럼 보인다.
+                "percent_text": (
+                    "신규"
+                    if row["percent"] is None and row["previous"] == 0
+                    else signed_percent_text(row["percent"])
+                ),
                 "up": row["delta"] > 0,
             }
             for row in changed
@@ -308,8 +343,10 @@ def report(request: HttpRequest) -> HttpResponse:
         "installments": installment_outlook(statement),
         "merchants": [
             {**row, "amount": won_text(row["total"]), "mean": won_text(row["average"])}
-            for row in top_merchants(statement)
+            for row in top_merchants(statement, limit=top)
         ],
+        "top": top,
+        "top_choices": TOP_CHOICES,
         "unclassified": [
             {**row, "amount": won_text(row["total"])} for row in unclassified_merchants()
         ],
