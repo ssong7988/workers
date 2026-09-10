@@ -11,12 +11,17 @@ import json
 from dataclasses import dataclass, field
 
 from .categorize import RuleSet
-from .env import optional
 
 
 # Classification is a simple judgement, so it runs at low effort. The categories
 # and instructions are stable across months and go in the cached system prefix;
 # only the merchant list varies per request.
+NO_CREDENTIAL_HINT = (
+    "Anthropic 자격증명이 없어 자동 분류를 건너뜁니다.\n"
+    "  .env에 ANTHROPIC_API_KEY를 넣으세요 (console.anthropic.com에서 발급).\n"
+    "  Claude Code 구독과 API는 별도 결제입니다."
+)
+
 SYSTEM_PROMPT = """당신은 한국 신용카드 명세서의 가맹점명을 소비 카테고리로 분류합니다.
 
 입력은 명세서에 찍힌 가맹점명이며, 공백과 법인 표기가 제거되고 영문은 대문자로 통일된 상태입니다.
@@ -42,6 +47,29 @@ class ClassifyResult:
     @property
     def ran(self) -> bool:
         return not self.skipped_reason
+
+
+def _explain(exc: BaseException) -> str:
+    """Turn an SDK failure into something the reader can act on.
+
+    A missing credential surfaces as a plain TypeError at call time rather than
+    as an auth error class, so the message has to be read, not just the type.
+    """
+    name = type(exc).__name__
+    text = str(exc).lower()
+    missing = (
+        "authentication" in text
+        or "api_key" in text
+        or "Authentication" in name
+        or "PermissionDenied" in name
+    )
+    if missing:
+        return NO_CREDENTIAL_HINT
+    if "RateLimit" in name:
+        return f"요청 한도에 걸렸습니다. 잠시 후 다시 실행하세요. ({name})"
+    if "Connection" in name or "Timeout" in name:
+        return f"네트워크 문제로 분류하지 못했습니다: {name}"
+    return f"분류 요청이 실패했습니다: {name}: {exc}"
 
 
 def _schema(categories: tuple[str, ...]) -> dict:
@@ -86,16 +114,20 @@ def classify_merchants(
     if not merchants:
         result.skipped_reason = "분류할 미분류 가맹점이 없습니다."
         return result
-    if not optional("ANTHROPIC_API_KEY"):
-        result.skipped_reason = "ANTHROPIC_API_KEY가 없어 자동 분류를 건너뜁니다."
-        return result
     try:
         import anthropic
     except ImportError:
         result.skipped_reason = "anthropic 패키지가 없어 자동 분류를 건너뜁니다."
         return result
 
-    client = anthropic.Anthropic()
+    # An unset ANTHROPIC_API_KEY does not mean there are no credentials — the
+    # SDK also resolves ANTHROPIC_AUTH_TOKEN and a stored profile. Let it try,
+    # and only report a missing key when it actually fails to authenticate.
+    try:
+        client = anthropic.Anthropic()
+    except Exception as exc:
+        result.skipped_reason = _explain(exc)
+        return result
     allowed = set(rules.categories)
     system = [
         {
@@ -123,7 +155,7 @@ def classify_merchants(
                 ],
             )
         except Exception as exc:  # the SDK raises several unrelated error types
-            result.skipped_reason = f"분류 요청이 실패했습니다: {type(exc).__name__}: {exc}"
+            result.skipped_reason = _explain(exc)
             return result
 
         usage = getattr(response, "usage", None)
