@@ -25,7 +25,7 @@ from .claude_client import classify_merchants, describe_usage
 from .config import load_config
 from .demo import build_demo_statements
 from .diagnose import describe_message, verdict
-from .env import MissingCredential, load_env, optional, require
+from .env import MissingCredential, load_env, optional, require, require_secret
 from .mailbox import Mailbox, MailboxError
 from .models import Statement
 from .report import load_analysis, write_report
@@ -102,7 +102,11 @@ def _paths(data_dir: Path) -> dict[str, Path]:
 
 
 def _open_mailbox(config) -> Mailbox:
-    return Mailbox(config.mail, require("GMAIL_USER", GMAIL_HINT), require("GMAIL_APP_PASSWORD", GMAIL_HINT))
+    return Mailbox(
+        config.mail,
+        require("GMAIL_USER", GMAIL_HINT),
+        require_secret("GMAIL_APP_PASSWORD", GMAIL_HINT),
+    )
 
 
 def _require_statements(store: StatementStore) -> list[Statement]:
@@ -126,7 +130,7 @@ def _validate_config(config, config_path: Path, store: StatementStore) -> None:
     for name in ("GMAIL_USER", "GMAIL_APP_PASSWORD"):
         status = "설정됨" if optional(name) else "없음   ← scan-mail을 돌리려면 필요합니다"
         print(f"  {name}: {status}")
-    for name in ("SAMSUNG_PDF_PASSWORD", "ANTHROPIC_API_KEY"):
+    for name in ("SAMSUNG_STATEMENT_PASSWORD", "ANTHROPIC_API_KEY"):
         print(f"  {name}: {'설정됨' if optional(name) else '없음 (선택)'}")
 
     rules = load_rules(RULES_PATH)
@@ -156,7 +160,7 @@ def _dump_message(message, index: int, samples_dir: Path) -> None:
 
 
 def _scan_mail(config, args, samples_dir: Path) -> None:
-    pdf_password = optional("SAMSUNG_PDF_PASSWORD")
+    pdf_password = optional("SAMSUNG_STATEMENT_PASSWORD")
     with _open_mailbox(config) as mailbox:
         uids = mailbox.search_uids(args.since)
         window = args.since if args.since is not None else config.mail.since
