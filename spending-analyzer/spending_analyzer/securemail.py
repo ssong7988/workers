@@ -19,8 +19,10 @@ Microsoft Edge is driven directly, so no Playwright browser download is needed �
 from __future__ import annotations
 
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
 # Browser channels to try, in order. Edge ships with Windows; Chrome is the
 # fallback; the bundled Chromium is used only if someone ran `playwright install`.
@@ -73,10 +75,13 @@ def _launch(playwright):
         ) from exc
 
 
-def decrypt(content: bytes, password: str, *, source_name: str = "") -> DecryptedStatement:
-    """Decrypt one attachment and return the statement markup it reveals.
+@contextmanager
+def open_decrypted(content: bytes, password: str, *, source_name: str = "") -> Iterator:
+    """Open an attachment, unlock it, and hand back the live page.
 
-    `content` is the raw attachment bytes as they arrived in the mail.
+    The page stays open for the caller because the statement's detail list
+    renders ten rows at a time behind a 더보기 control — reading a static
+    snapshot would capture only the first page.
     """
     if not password:
         raise SecureMailError(
@@ -93,7 +98,7 @@ def decrypt(content: bytes, password: str, *, source_name: str = "") -> Decrypte
         with sync_playwright() as playwright:
             browser = _launch(playwright)
             try:
-                page = browser.new_page()
+                page = browser.new_page(viewport={"width": 1000, "height": 1400})
                 dialogs: list[str] = []
                 page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
                 page.goto(target.as_uri())
@@ -108,7 +113,7 @@ def decrypt(content: bytes, password: str, *, source_name: str = "") -> Decrypte
 
                 page.fill("#password", password)
                 page.click("#confirm")
-                page.wait_for_timeout(2_500)
+                page.wait_for_timeout(3_000)
 
                 for message in dialogs:
                     if any(marker in message for marker in WRONG_PASSWORD_MARKERS):
@@ -118,14 +123,24 @@ def decrypt(content: bytes, password: str, *, source_name: str = "") -> Decrypte
                             "(생년월일 6자리, 예: 900101)."
                         )
 
-                frame = _statement_frame(page)
-                return DecryptedStatement(
-                    html=frame.content(),
-                    text=frame.inner_text("body"),
-                    source_name=source_name,
-                )
+                if page.evaluate("() => document.body.textContent.length") < 2_000:
+                    raise SecureMailError(
+                        "복호화 후에도 내용이 비어 있습니다. 비밀번호가 맞는지 확인하세요."
+                    )
+                yield page
             finally:
                 browser.close()
+
+
+def decrypt(content: bytes, password: str, *, source_name: str = "") -> DecryptedStatement:
+    """Decrypt one attachment and return the statement markup it reveals."""
+    with open_decrypted(content, password, source_name=source_name) as page:
+        frame = _statement_frame(page)
+        return DecryptedStatement(
+            html=frame.content(),
+            text=frame.inner_text("body"),
+            source_name=source_name,
+        )
 
 
 def _statement_frame(page):
