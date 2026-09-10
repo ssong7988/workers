@@ -241,6 +241,39 @@ class GroupTest(TestCase):
         self.assertEqual(transaction.category_id, "medical")
         self.assertEqual(transaction.category.group_id, "essential")
 
+    def test_every_group_but_기타_has_a_catchall(self):
+        """성격은 분명한데 맞는 카테고리가 없는 지출이 갈 곳."""
+        for group_id in ("fixed", "essential", "dining", "transport", "leisure"):
+            with self.subTest(group=group_id):
+                self.assertTrue(
+                    SpendingCategory.objects.filter(
+                        group_id=group_id, name__endswith="기타"
+                    ).exists()
+                )
+
+    def test_a_catchall_still_counts_towards_its_own_group(self):
+        """통짜 기타로 보내면 대분류 비중이 틀어진다. 그걸 막는 것이 목적이다."""
+        ingest_statement(statement_payload(rows=[row("광교세탁소", 50_000)]))
+        transaction = Transaction.objects.get()
+        transaction.category = SpendingCategory.objects.get(pk="essential_etc")
+        transaction.category_source = "manual"
+        transaction.save()
+
+        view = month_view()
+        essential = next(r for r in group_rows(view.statement) if r["id"] == "essential")
+        self.assertEqual(essential["total"], 50_000)
+        other = next(r for r in group_rows(view.statement) if r["id"] == "other")
+        self.assertEqual(other["total"], 0)
+
+    def test_the_catchall_sorts_last_inside_its_group(self):
+        """구체적인 카테고리를 먼저 훑고 나서 기타에 닿아야 한다."""
+        within = list(
+            SpendingCategory.objects.filter(group_id="essential")
+            .order_by("order", "name")
+            .values_list("pk", flat=True)
+        )
+        self.assertEqual(within[-1], "essential_etc")
+
     def test_group_order_is_stable_so_colours_do_not_move(self):
         ingest_statement(statement_payload(rows=[row("스타벅스", 100_000)]))
         view = month_view()

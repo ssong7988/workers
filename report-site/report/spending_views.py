@@ -365,11 +365,7 @@ def transactions(request: HttpRequest) -> HttpResponse:
             for row in reversed(monthly_totals())
         ],
         # 미분류 줄에서 고를 목록. 미분류 자신은 고를 수 있으면 안 된다.
-        "categories": list(
-            SpendingCategory.objects.exclude(pk=UNCLASSIFIED_CATEGORY_ID)
-            .select_related("group")
-            .order_by("group__order", "order", "name")
-        ),
+        "categories": _category_choices(),
     }
     return render(request, "report/spending_transactions.html", context)
 
@@ -403,6 +399,27 @@ def _save_selection(request: HttpRequest, statement) -> HttpResponse:
     return redirect(
         f"{settings.SPENDING_TRANSACTIONS_URL_PATH}/?month={statement.billing_month}"
     )
+
+
+def _category_choices() -> list[dict]:
+    """드롭다운에 담을 카테고리. 대분류로 묶어 이름이 겹치지 않게 한다.
+
+    `필수생활-기타`처럼 이름이 이미 대분류를 품고 있으면 앞에 대분류를 또
+    붙이지 않는다 - "필수생활 · 필수생활-기타"는 읽을 것이 없다.
+    """
+    choices = []
+    for category in (
+        SpendingCategory.objects.exclude(pk=UNCLASSIFIED_CATEGORY_ID)
+        .select_related("group")
+        .order_by("group__order", "order", "name")
+    ):
+        group = category.group.name if category.group else ""
+        if group and not category.name.startswith(group):
+            label = f"{group} · {category.name}"
+        else:
+            label = category.name
+        choices.append({"id": category.pk, "label": label})
+    return choices
 
 
 def _learn_categories(request: HttpRequest, rows) -> str:

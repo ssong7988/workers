@@ -72,7 +72,7 @@
             <select class="pickcat" name="category-{{ row.id }}">
               <option value="">미분류 — 고르면 규칙이 됩니다</option>
               {% for category in categories %}
-              <option value="{{ category.id }}">{{ category.group.name }} · {{ category.name }}</option>
+              <option value="{{ category.id }}">{{ category.label }}</option>
               {% endfor %}
             </select>
             {% else %}<span class="tag">{{ row.category }}</span>{% endif %}
