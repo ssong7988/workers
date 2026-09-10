@@ -62,10 +62,13 @@ ROUTE_PREFIX = f"{REPORT_PATH_TOKEN}/" if REPORT_PATH_TOKEN else ""
 PROPERTY_ROUTE_PREFIX = f"{ROUTE_PREFIX}property/"
 STOCK_ROUTE_PREFIX = f"{ROUTE_PREFIX}stock/"
 COMMON_ROUTE_PREFIX = f"{ROUTE_PREFIX}common/"
+SPENDING_ROUTE_PREFIX = f"{ROUTE_PREFIX}spending/"
 REPORT_URL_PATH = f"/{PROPERTY_ROUTE_PREFIX}report"
 STATISTICS_URL_PATH = f"/{PROPERTY_ROUTE_PREFIX}statistics"
 ALLOCATION_URL_PATH = f"/{STOCK_ROUTE_PREFIX}allocation"
 PERFORMANCE_URL_PATH = f"/{STOCK_ROUTE_PREFIX}performance"
+SPENDING_REPORT_URL_PATH = f"/{SPENDING_ROUTE_PREFIX}report"
+SPENDING_TRANSACTIONS_URL_PATH = f"/{SPENDING_ROUTE_PREFIX}transactions"
 DAGSTER_SUMMARY_PATH = f"/{COMMON_ROUTE_PREFIX}dagster"
 DAGSTER_PATH_PREFIX = f"{DAGSTER_SUMMARY_PATH}/console"
 # The scanner authenticates with `Authorization: Bearer <FINDER_API_TOKEN>`.
@@ -75,6 +78,9 @@ FINDER_API_TOKEN = _required("FINDER_API_TOKEN", "<추측 불가 문자열>")
 # collecting KB data yet should not fail to boot, and `/stock/api/` answers
 # 503 until it is set rather than degrading into an open endpoint.
 STOCK_API_TOKEN = os.environ.get("STOCK_API_TOKEN", "").strip()
+# 카드 소비 수집기(`spending-analyzer/`)의 토큰. 주식과 같은 이유로 선택이며,
+# 비어 있으면 `/spending/api/`가 503으로 답하고 열린 엔드포인트가 되지 않는다.
+SPENDING_API_TOKEN = os.environ.get("SPENDING_API_TOKEN", "").strip()
 
 # Where the Kakao card links to. Falls back to the local address only so a
 # misconfigured setup fails visibly rather than sending a broken link; the
@@ -94,10 +100,24 @@ if REPORT_PUBLIC_URL:
     STOCK_PERFORMANCE_URL = urlunsplit(
         (_public_parts.scheme, _public_parts.netloc, f"{PERFORMANCE_URL_PATH}/", "", "")
     )
+    SPENDING_REPORT_URL = urlunsplit(
+        (_public_parts.scheme, _public_parts.netloc, f"{SPENDING_REPORT_URL_PATH}/", "", "")
+    )
+    SPENDING_TRANSACTIONS_URL = urlunsplit(
+        (
+            _public_parts.scheme,
+            _public_parts.netloc,
+            f"{SPENDING_TRANSACTIONS_URL_PATH}/",
+            "",
+            "",
+        )
+    )
 else:
     REPORT_STATS_URL = ""
     STOCK_ALLOCATION_URL = ""
     STOCK_PERFORMANCE_URL = ""
+    SPENDING_REPORT_URL = ""
+    SPENDING_TRANSACTIONS_URL = ""
 
 # Airflow runs the schedule from WSL2 and drives this machine through interop.
 # Django only reads its status for the operations screen, so every value here
@@ -181,6 +201,7 @@ INSTALLED_APPS = [
     "api",
     "properties",
     "portfolio",
+    "spending",
     "report",
 ]
 MIDDLEWARE = [

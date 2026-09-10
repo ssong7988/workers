@@ -1,0 +1,14 @@
+{% extends "report/spending_base.html" %}
+
+{% block title %}카드 소비{% endblock %}
+{% block heading %}카드 소비{% endblock %}
+{% block observed %}아직 저장된 명세서가 없습니다{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <p class="empty">
+    이용대금명세서가 아직 들어오지 않았습니다.<br>
+    <code>spending-analyzer</code>에서 <code>push</code>를 실행하면 이 화면이 채워집니다.
+  </p>
+</div>
+{% endblock %}

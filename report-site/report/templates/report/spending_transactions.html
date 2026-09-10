@@ -1,0 +1,59 @@
+{% extends "report/spending_base.html" %}
+
+{% block title %}전체 거래 · {{ month_label }}{% endblock %}
+{% block heading %}{{ month_label }} 전체 거래{% endblock %}
+{% block observed %}{{ count }}건 · {{ total_text }}{% endblock %}
+
+{% block extra_style %}
+  .filter { margin-bottom: 1rem; }
+  .filter input { width: 100%; padding: .6rem .8rem; font: inherit; border: 1px solid #e2e8f0; border-radius: .75rem; }
+  .count { margin-top: .5rem; font-size: 12px; color: #64748b; }
+{% endblock %}
+
+{% block content %}
+<div class="filter">
+  <input id="q" type="search" placeholder="가맹점, 카테고리로 검색" autocomplete="off">
+  <div class="count" id="count">{{ count }}건</div>
+</div>
+
+<div class="table-wrap">
+  <table id="rows">
+    <thead>
+      <tr><th>이용일</th><th>가맹점</th><th>카테고리</th><th>결제</th><th>청구액</th></tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.used_at|date:"m.d" }}</td>
+        <td>{{ row.merchant }}</td>
+        <td>{% if row.unclassified %}<span class="tag warn">{{ row.category }}</span>{% else %}<span class="tag">{{ row.category }}</span>{% endif %}</td>
+        <td>{{ row.payment }}{% if row.installment %} {{ row.installment }}{% endif %}</td>
+        <td>{{ row.amount }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="empty">거래가 없습니다.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+(function () {
+  var box = document.getElementById('q');
+  var table = document.getElementById('rows');
+  var count = document.getElementById('count');
+  if (!box || !table) return;
+  var rows = Array.prototype.slice.call(table.tBodies[0].rows);
+  box.addEventListener('input', function () {
+    var term = box.value.trim().toLowerCase();
+    var shown = 0;
+    rows.forEach(function (row) {
+      var hit = !term || row.textContent.toLowerCase().indexOf(term) !== -1;
+      row.hidden = !hit;
+      if (hit) shown++;
+    });
+    count.textContent = shown + ' / ' + rows.length + '건';
+  });
+})();
+</script>
+{% endblock %}

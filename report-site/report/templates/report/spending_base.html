@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}카드 소비{% endblock %}</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f5f7f6; color: #0f172a; font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  .header { background: #14532d; color: #fff; }
+  .header-inner { max-width: 56rem; margin: 0 auto; padding: 2rem 1.25rem; }
+  @media (min-width: 640px) { .header-inner { padding: 2.75rem 2rem; } }
+  .eyebrow { display: flex; align-items: center; gap: .5rem; font-size: .875rem; font-weight: 600; color: #bbf7d0; }
+  .title { margin: .75rem 0 0; font-size: 1.875rem; font-weight: 700; letter-spacing: -0.01em; }
+  @media (min-width: 640px) { .title { font-size: 2.25rem; } }
+  .observed { margin-top: .75rem; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .875rem; color: rgba(220, 252, 231, .75); }
+  .tabs { margin-top: 1.25rem; display: flex; flex-wrap: wrap; gap: .5rem; }
+  .tab { border: 1px solid rgba(187, 247, 208, .4); border-radius: 999px; padding: .35rem .9rem; font-size: .8125rem; font-weight: 600; color: #bbf7d0; }
+  .tab:hover { background: rgba(187, 247, 208, .12); }
+  .tab.current { background: #bbf7d0; border-color: #bbf7d0; color: #14532d; }
+  .body { max-width: 56rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+  @media (min-width: 640px) { .body { padding: 2rem 2rem; } }
+  .panel { border-radius: 1rem; border: 1px solid #e2e8f0; background: #fff; padding: 1.25rem; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+  @media (min-width: 640px) { .summary { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  .body > *, .summary > *, .panel > * { min-width: 0; }
+  .tile { border-radius: 1rem; border: 1px solid #e2e8f0; background: #fff; padding: 1rem; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .tile-value { font-size: 1.25rem; font-weight: 800; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  @media (min-width: 640px) { .tile-value { font-size: 1.5rem; } }
+  .tile-label { margin-top: .25rem; font-size: 11px; font-weight: 600; color: #64748b; }
+  .tile-up { color: #b91c1c; }
+  .tile-down { color: #1d4ed8; }
+  .section-title { margin-top: 1.75rem; display: flex; align-items: center; gap: .5rem; padding: 0 .25rem; font-size: 1.125rem; font-weight: 700; }
+  .hint { margin-top: .5rem; font-size: 12px; color: #64748b; line-height: 1.6; }
+  .notice { margin-top: .75rem; border-radius: .5rem; border: 1px solid #fde68a; background: #fffbeb; padding: .6rem .75rem; font-size: 12px; color: #92400e; }
+  .table-wrap { margin-top: 1rem; overflow-x: auto; border-radius: 1rem; border: 1px solid #e2e8f0; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  table { border-collapse: collapse; width: 100%; min-width: 30rem; font-size: .875rem; }
+  th, td { padding: .6rem .75rem; text-align: right; border-top: 1px solid #f1f5f9; white-space: nowrap; }
+  th { background: #f8fafc; font-size: 12px; color: #475569; border-top: none; }
+  th:first-child, td:first-child { text-align: left; }
+  svg { max-width: 100%; }
+  .icon { display: inline-block; vertical-align: -3px; flex-shrink: 0; }
+  .bar-track { height: .55rem; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 999px; background: #16a34a; }
+  .bar-up { background: #b91c1c; }
+  .bar-down { background: #1d4ed8; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; }
+  .tag.warn { background: #fef3c7; color: #92400e; }
+  .picker { margin-top: .75rem; }
+  .picker select { font: inherit; padding: .3rem .5rem; border-radius: .5rem; border: 1px solid rgba(187,247,208,.5); background: rgba(255,255,255,.1); color: #fff; }
+  .picker option { color: #0f172a; }
+  .empty { padding: 3rem 1rem; text-align: center; color: #64748b; }
+  .footer { padding: 1.75rem .5rem; text-align: center; font-size: 12px; line-height: 1.5; color: #94a3b8; }
+{% block extra_style %}{% endblock %}
+</style>
+</head>
+<body data-billing-month="{{ statement.billing_month|default:'' }}">
+<header class="header"><div class="header-inner">
+  <div class="eyebrow">
+    <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+    삼성카드 소비
+  </div>
+  <h1 class="title">{% block heading %}{% endblock %}</h1>
+  <div class="observed">
+    <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>
+    {% block observed %}{% endblock %}
+  </div>
+  {% if months %}
+  <form class="picker" method="get">
+    <select name="month" onchange="this.form.submit()">
+      {% for item in months %}
+      <option value="{{ item.month }}"{% if item.month == statement.billing_month %} selected{% endif %}>{{ item.label }}</option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit">보기</button></noscript>
+  </form>
+  {% endif %}
+  <nav class="tabs">
+    <a class="tab{% if page == 'report' %} current{% endif %}" href="{{ report_url }}">소비 리포트</a>
+    <a class="tab{% if page == 'transactions' %} current{% endif %}" href="{{ transactions_url }}">전체 거래</a>
+  </nav>
+</div></header>
+
+<div class="body">
+{% block content %}{% endblock %}
+</div>
+
+<footer class="footer">
+  청구 기준입니다. 할부는 그 달에 청구된 회차 금액만 잡히므로<br>
+  월 합계가 결제계좌에서 빠진 금액과 일치합니다.
+</footer>
+</body>
+</html>

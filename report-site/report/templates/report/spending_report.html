@@ -1,0 +1,147 @@
+{% extends "report/spending_base.html" %}
+
+{% block title %}소비 리포트 · {{ month_label }}{% endblock %}
+{% block heading %}{{ month_label }} 카드 소비{% endblock %}
+{% block observed %}결제일 {{ statement.payment_date|default:"-" }} · 거래 {{ count }}건{% endblock %}
+
+{% block content %}
+<div class="summary">
+  <div class="tile">
+    <div class="tile-value">{{ total_text }}</div>
+    <div class="tile-label">청구총액</div>
+  </div>
+  <div class="tile">
+    <div class="tile-value {% if delta_up %}tile-up{% else %}tile-down{% endif %}">{{ delta_text }}</div>
+    <div class="tile-label">전월 대비 {{ percent_text }}</div>
+  </div>
+  <div class="tile">
+    <div class="tile-value {% if gap_up %}tile-up{% else %}tile-down{% endif %}">{{ gap_text }}</div>
+    <div class="tile-label">평균 대비 ({{ average_text }})</div>
+  </div>
+  <div class="tile">
+    <div class="tile-value">{{ count }}건</div>
+    <div class="tile-label">거래 건수</div>
+  </div>
+</div>
+
+{% if trend %}
+<h2 class="section-title">월별 청구액</h2>
+<div class="panel">
+  <svg viewBox="0 0 {{ trend.width }} {{ trend.height|add:30 }}" role="img" aria-label="월별 청구액 추이">
+    {% if trend.average_y %}
+    <line x1="0" y1="{{ trend.average_y }}" x2="{{ trend.width }}" y2="{{ trend.average_y }}"
+          stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 4"/>
+    {% endif %}
+    {% for bar in trend.bars %}
+    <g><title>{{ bar.title }}</title>
+      <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}"
+            rx="4" fill="{% if bar.current %}#16a34a{% else %}#86efac{% endif %}"/>
+    </g>
+    <text x="{{ bar.centre }}" y="{{ trend.height|add:18 }}" text-anchor="middle"
+          font-size="11" fill="#64748b">{{ bar.label }}</text>
+    {% endfor %}
+  </svg>
+  <p class="hint">점선은 최근 6개월 평균({{ trend.average_label }})입니다.</p>
+</div>
+{% endif %}
+
+<h2 class="section-title">카테고리별</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>카테고리</th><th>비중</th><th>청구액</th></tr></thead>
+    <tbody>
+      {% for row in categories %}
+      <tr>
+        <td>{% if row.unclassified %}<span class="tag warn">{{ row.name }}</span>{% else %}{{ row.name }}{% endif %}</td>
+        <td style="width:45%"><div class="bar-track"><div class="bar-fill" style="width:{{ row.bar }}%"></div></div></td>
+        <td>{{ row.amount }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="3" class="empty">거래가 없습니다.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if changes %}
+<h2 class="section-title">전월 대비 증감</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>카테고리</th><th>변화</th><th>증감</th></tr></thead>
+    <tbody>
+      {% for row in changes %}
+      <tr>
+        <td>{{ row.name }}</td>
+        <td style="width:45%"><div class="bar-track"><div class="bar-fill {% if row.up %}bar-up{% else %}bar-down{% endif %}" style="width:{{ row.bar }}%"></div></div></td>
+        <td class="{% if row.up %}tile-up{% else %}tile-down{% endif %}">{{ row.amount }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<h2 class="section-title">결제 유형</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>유형</th><th>비중</th><th>청구액</th></tr></thead>
+    <tbody>
+      {% for row in payment_types %}
+      <tr><td>{{ row.name }}</td><td>{{ row.percent }}</td><td>{{ row.amount }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if installments.active %}
+<h2 class="section-title">할부 잔여 부담</h2>
+<div class="panel">
+  <div class="tile-value">{{ installments.future_total|floatformat:0 }}원</div>
+  <div class="tile-label">앞으로 청구될 할부 총액 · 진행 중 {{ installments.active|length }}건</div>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>가맹점</th><th>회차</th><th>월 청구</th><th>남은 금액</th></tr></thead>
+    <tbody>
+      {% for row in installments.active %}
+      <tr>
+        <td>{{ row.merchant }}</td>
+        <td>{{ row.sequence }}/{{ row.months }}</td>
+        <td>{{ row.per_month|floatformat:0 }}원</td>
+        <td>{{ row.remaining_won|floatformat:0 }}원</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<h2 class="section-title">가맹점 TOP</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>가맹점</th><th>건수</th><th>평균</th><th>합계</th></tr></thead>
+    <tbody>
+      {% for row in merchants %}
+      <tr><td>{{ row.merchant }}</td><td>{{ row.count }}</td><td>{{ row.mean }}</td><td>{{ row.amount }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if unclassified %}
+<h2 class="section-title">미분류 가맹점</h2>
+<div class="notice">
+  합계가 큰 순서입니다. admin의 <b>가맹점 규칙</b>에 키워드를 넣으면 그 자리에서 다시 분류됩니다.
+</div>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>가맹점</th><th>규칙 키워드</th><th>건수</th><th>합계</th></tr></thead>
+    <tbody>
+      {% for row in unclassified %}
+      <tr><td>{{ row.merchant }}</td><td>{{ row.keyword }}</td><td>{{ row.count }}</td><td>{{ row.amount }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

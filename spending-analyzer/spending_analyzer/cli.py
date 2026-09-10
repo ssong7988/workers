@@ -28,6 +28,7 @@ from .diagnose import describe_message, statement_attachments, verdict
 from .env import MissingCredential, load_env, optional, require, require_secret
 from .mailbox import Mailbox, MailboxError
 from .models import Statement
+from .push import PushError, push_statement, stored_months
 from .report import load_analysis, write_report
 from .securemail import SecureMailError
 from .statement import StatementParseError
@@ -47,6 +48,13 @@ GMAIL_HINT = (
     f"  {PROJECT_DIR / '.env'} 에 넣으세요:\n"
     "    GMAIL_USER=본인주소@gmail.com\n"
     "    GMAIL_APP_PASSWORD=발급받은16자리"
+)
+
+API_HINT = (
+    "리포트 서버 주소와 토큰이 필요합니다.\n"
+    f"  {PROJECT_DIR / '.env'} 에 넣으세요:\n"
+    "    SPENDING_API_URL=http://127.0.0.1:8000/spending/api\n"
+    "    SPENDING_API_TOKEN=report-site/.env의 SPENDING_API_TOKEN과 같은 값"
 )
 
 STATEMENT_HINT = (
@@ -77,6 +85,14 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--since", default=None, help="YYYY-MM-DD, 설정값을 덮어씀")
     fetch.add_argument(
         "--force", action="store_true", help="이미 저장된 청구월도 다시 읽음"
+    )
+
+    push = commands.add_parser(
+        "push", help="메일의 명세서를 읽어 리포트 서버로 보냄 (정규 경로)"
+    )
+    push.add_argument("--since", default=None, help="YYYY-MM-DD, 설정값을 덮어씀")
+    push.add_argument(
+        "--force", action="store_true", help="서버에 이미 있는 청구월도 다시 보냄"
     )
 
     demo = commands.add_parser(
@@ -267,6 +283,72 @@ def _fetch(config, store: StatementStore, args) -> None:
         print("  저장된 것이 없습니다. scan-mail로 메일 상태를 확인하세요.")
 
 
+def _push(config, args) -> None:
+    """명세서를 읽어 리포트 서버로 넘긴다.
+
+    저장소의 다른 수집기와 같은 역할 경계다 — 여기는 수집만 하고, 분류·집계·
+    화면·카카오는 report-site가 소유한다. 로컬에 저장하지 않는 이유이기도 하다.
+    """
+    password = require_secret("SAMSUNG_STATEMENT_PASSWORD", STATEMENT_HINT)
+    base_url = require("SPENDING_API_URL", API_HINT)
+    token = require_secret("SPENDING_API_TOKEN", API_HINT)
+
+    try:
+        existing = set(stored_months(base_url, token))
+    except PushError as exc:
+        raise RuntimeError(str(exc)) from exc
+    print(f"서버에 이미 있는 청구월 {len(existing)}개")
+
+    with _open_mailbox(config) as mailbox:
+        uids = mailbox.search_uids(args.since)
+        candidates = []
+        for uid in uids:
+            message = mailbox.fetch(uid)
+            if not mailbox.matches_subject(message):
+                continue
+            attachments = statement_attachments(message)
+            if attachments:
+                candidates.append((message, attachments))
+
+    print(f"명세서 첨부가 있는 메일 {len(candidates)}통\n")
+    sent, skipped, failed = 0, 0, 0
+    for message, attachments in candidates:
+        for attachment in attachments:
+            label = f"{message.date[:16]} {attachment.filename}"
+            try:
+                statement = parse_statement(
+                    attachment.content, password, source_ref=message.message_id
+                )
+            except (StatementParseError, SecureMailError) as exc:
+                failed += 1
+                print(f"  ✗ {label}\n    {exc}")
+                continue
+
+            if statement.billing_month in existing and not args.force:
+                skipped += 1
+                print(f"  · {statement.billing_month} 서버에 이미 있음 (--force로 다시 보내기)")
+                continue
+
+            try:
+                result = push_statement(base_url, token, statement)
+            except PushError as exc:
+                failed += 1
+                print(f"  ✗ {statement.billing_month}\n    {exc}")
+                continue
+
+            existing.add(result.billing_month)
+            sent += 1
+            print(f"  ✓ {result.message}")
+
+    print(
+        f"\n전송 {sent}개월"
+        + (f", 건너뜀 {skipped}개월" if skipped else "")
+        + (f", 실패 {failed}건" if failed else "")
+    )
+    if sent:
+        print("  서버에서 요약을 보내려면: manage.py send_spending_digest")
+
+
 def _demo(store: StatementStore, months: int) -> None:
     statements = build_demo_statements(months)
     for statement in statements:
@@ -363,6 +445,8 @@ def main(argv: list[str] | None = None) -> None:
             _scan_mail(config, args, paths["samples"])
         elif args.command == "fetch":
             _fetch(config, store, args)
+        elif args.command == "push":
+            _push(config, args)
         elif args.command == "demo":
             _demo(store, args.months)
         elif args.command == "categorize":

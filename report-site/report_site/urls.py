@@ -18,12 +18,13 @@ from django.contrib import admin
 from django.urls import include, path
 from django.views.generic import RedirectView
 
-from report import stock_views, views
+from report import spending_views, stock_views, views
 
 _ROUTE_PREFIX = settings.ROUTE_PREFIX
 _PROPERTY_PREFIX = settings.PROPERTY_ROUTE_PREFIX
 _STOCK_PREFIX = settings.STOCK_ROUTE_PREFIX
 _COMMON_PREFIX = settings.COMMON_ROUTE_PREFIX
+_SPENDING_PREFIX = settings.SPENDING_ROUTE_PREFIX
 
 # When a path token is configured, the public root explains the services but
 # does not disclose protected destinations. The linked directory lives at the
@@ -59,6 +60,18 @@ urlpatterns = _landing_patterns + [
         f"{_STOCK_PREFIX}performance/",
         stock_views.performance,
         name="stock-performance",
+    ),
+    # 카드 소비. 두 화면이고 카카오 버튼 두 개가 각각 이 주소로 간다. 가맹점
+    # 하나하나가 그대로 보이는 화면이라 경로 토큰만으로는 부족하고, 두 화면
+    # 모두 admin 로그인을 요구한다.
+    path(f"{_SPENDING_PREFIX}api/", include("spending.api_urls")),
+    path(
+        f"{_SPENDING_PREFIX}report/", spending_views.report, name="spending-report"
+    ),
+    path(
+        f"{_SPENDING_PREFIX}transactions/",
+        spending_views.transactions,
+        name="spending-transactions",
     ),
     # admin은 한 벌이고 두 서비스의 모델을 모두 들고 있다. 그래서 namespace
     # 안이 아니라 뿌리에 둔다. 토큰을 채우면 `/<TOKEN>/admin/`이다.
