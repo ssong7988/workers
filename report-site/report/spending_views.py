@@ -198,7 +198,20 @@ def _group_trend() -> dict | None:
                 "centre": slot * (index + 0.5),
             }
         )
-    return {"width": width, "height": height, "columns": columns}
+    # 위쪽 도넛까지 스크롤을 올려야 색을 알 수 있으면 차트가 혼자 설 수 없다.
+    # 이 달들에 실제로 나타난 대분류만 싣는다.
+    present = {
+        part["id"]
+        for month in series["months"]
+        for part in month["parts"]
+        if part["total"]
+    }
+    legend = [
+        {"name": group.name, "color": group.color}
+        for group in series["groups"]
+        if group.pk in present
+    ]
+    return {"width": width, "height": height, "columns": columns, "legend": legend}
 
 
 @staff_member_required
