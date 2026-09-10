@@ -1,0 +1,42 @@
+# 삼성카드 이용대금명세서 소비 분석 설정
+#
+# 로컬에서 값을 바꿀 때는 이 파일을 settings.local.yaml로 복사해서 쓰세요.
+# 그쪽이 있으면 CLI가 자동으로 그것을 먼저 읽고, 커밋되지 않습니다.
+
+mail:
+  host: imap.gmail.com
+  port: 993
+  folder: INBOX
+
+  # 명세서 발신 주소. scan-mail이 아무것도 못 찾으면 실제 받은 메일의
+  # 발신 주소를 확인해서 여기에 추가하세요. 부분 문자열로 검색합니다.
+  senders:
+    - samsungcard.com
+
+  # 제목 필터는 서버가 아니라 디코딩 후 로컬에서 겁니다.
+  # 비워 두면 그 발신자의 모든 메일이 통과합니다.
+  subject_keywords:
+    - 이용대금
+    - 명세서
+
+  # 이 날짜 이후 메일만 봅니다. 비우면 제한이 없습니다.
+  since: "2025-01-01"
+
+analysis:
+  # 최근 N개월 중 과반에 등장한 가맹점을 고정비로 판정합니다.
+  fixed_cost_months: 3
+  top_merchants: 15
+
+  # 카테고리별 월 예산 (원). 넣으면 대시보드에 소진율이 표시됩니다.
+  budgets: {}
+    # 식비: 600000
+    # 카페·간식: 150000
+
+ai:
+  # 규칙에서 걸리지 않은 가맹점만 Claude로 넘겨 분류합니다.
+  # ANTHROPIC_API_KEY가 없으면 이 단계만 건너뛰고 나머지는 정상 동작합니다.
+  enabled: true
+  model: claude-opus-5
+  batch_size: 200
+
+timezone: Asia/Seoul

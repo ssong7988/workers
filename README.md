@@ -1,6 +1,6 @@
-# Real Estate Finder
+# workers
 
-부동산 매물을 수집해 웹 리포트로 보여주고 카카오톡으로 알리는 모노레포입니다.
+관심 대상을 자동으로 수집해 카카오톡으로 알리고 로컬 페이지로 보는 앱들의 모노레포입니다.
 
 ## 프로젝트 구조
 
@@ -10,12 +10,15 @@ outputs/
 ├── real-estate-finder/   # 수집기. 네이버에서 본 매물을 그대로 넘긴다
 ├── report-site/          # 애플리케이션. DB, 판정, 웹 리포트, 가격 통계, 카카오 전송
 ├── dagster_project/      # 스캔 스케줄 실행기. report-site 스캔 API를 정해진 시각에 호출
+├── spending-analyzer/    # 삼성카드 이용대금명세서 메일을 파싱해 소비를 분석
 └── kakao-notifier/       # 카카오 인증, 토큰 관리, 메시지 전송
 ```
 
-역할이 둘로 갈려 있습니다. `real-estate-finder`는 **수집만** 합니다. 어떤 매물이 조건에 맞는지, 급매인지, 신규인지, 카카오톡을 보낼지, 화면에 어떻게 보일지는 전부 `report-site`(Django + PostgreSQL)가 결정합니다.
+부동산 쪽은 역할이 둘로 갈려 있습니다. `real-estate-finder`는 **수집만** 합니다. 어떤 매물이 조건에 맞는지, 급매인지, 신규인지, 카카오톡을 보낼지, 화면에 어떻게 보일지는 전부 `report-site`(Django + PostgreSQL)가 결정합니다.
 
 화면은 셋입니다. **매물 리포트**(`/property/report/`)는 지금 조건에 맞는 매물을, **가격 통계**(`/property/statistics/`)는 그동안 수집한 원본으로 만든 날짜별 호가 분포를, **공통 Dagster 운영 요약**(`/common/dagster/`)은 스캔 스케줄 실행 현황을 보여줍니다.
+
+`spending-analyzer`는 별도 앱입니다. 삼성카드 이용대금명세서 메일을 읽어 소비를 분류하고 리포트를 만듭니다.
 
 각 앱의 설치 및 실행 방법은 해당 폴더의 README에서 관리합니다.
 

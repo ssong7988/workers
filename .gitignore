@@ -22,6 +22,8 @@ Thumbs.db
 .logs/
 real-estate-finder/data/
 real-estate-finder/config/searches.local.yaml
+spending-analyzer/data/
+spending-analyzer/config/settings.local.yaml
 
 # report-site/ (Django). The database is PostgreSQL, outside the repo;
 # collectstatic output and any scratch files are generated.
