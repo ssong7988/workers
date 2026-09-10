@@ -30,7 +30,13 @@ from spending.analysis import (
     unclassified_merchants,
 )
 from spending.display import man_text, month_text, signed_percent_text, won_text
-from spending.models import SpendingCategory, Transaction
+from spending.categorize import recategorize_all
+from spending.models import (
+    UNCLASSIFIED_CATEGORY_ID,
+    MerchantRule,
+    SpendingCategory,
+    Transaction,
+)
 
 MONTH_TREND_LIMIT = 12
 
@@ -345,16 +351,22 @@ def transactions(request: HttpRequest) -> HttpResponse:
             {"month": row.month, "label": month_text(row.month)}
             for row in reversed(monthly_totals())
         ],
+        # 미분류 줄에서 고를 목록. 미분류 자신은 고를 수 있으면 안 된다.
+        "categories": list(
+            SpendingCategory.objects.exclude(pk=UNCLASSIFIED_CATEGORY_ID)
+            .select_related("group")
+            .order_by("group__order", "order", "name")
+        ),
     }
     return render(request, "report/spending_transactions.html", context)
 
 
 def _save_selection(request: HttpRequest, statement) -> HttpResponse:
-    """체크를 푼 줄을 집계에서 뺀다.
+    """체크를 푼 줄을 집계에서 빼고, 손으로 고른 분류를 규칙으로 남긴다.
 
-    지우지 않고 표시만 바꾼다 - 명세서의 청구총액과 대조하려면 그 줄도 그대로
-    있어야 하고, 언제든 되돌릴 수 있어야 한다. 체크된 것만 폼으로 올라오므로,
-    이 명세서의 줄 중 올라오지 않은 것이 곧 제외 대상이다.
+    제외는 지우지 않고 표시만 바꾼다 - 명세서의 청구총액과 대조하려면 그 줄도
+    그대로 있어야 하고, 언제든 되돌릴 수 있어야 한다. 체크된 것만 폼으로
+    올라오므로, 이 명세서의 줄 중 올라오지 않은 것이 곧 제외 대상이다.
     """
     keep = {int(value) for value in request.POST.getlist("keep") if value.isdigit()}
     rows = list(statement.transactions.all())
@@ -367,12 +379,57 @@ def _save_selection(request: HttpRequest, statement) -> HttpResponse:
     if changed:
         Transaction.objects.bulk_update(changed, ["excluded"])
 
-    messages.success(
-        request,
-        f"{len(rows) - len(keep)}건을 집계에서 제외했습니다."
-        if len(keep) < len(rows)
-        else "모든 거래를 집계에 넣었습니다.",
-    )
+    dropped = len(rows) - len(keep)
+    notes = [
+        f"{dropped}건을 집계에서 제외했습니다." if dropped else "모든 거래를 집계에 넣었습니다."
+    ]
+    rule_note = _learn_categories(request, rows)
+    if rule_note:
+        notes.append(rule_note)
+    messages.success(request, " ".join(notes))
     return redirect(
         f"{settings.SPENDING_TRANSACTIONS_URL_PATH}/?month={statement.billing_month}"
+    )
+
+
+def _learn_categories(request: HttpRequest, rows) -> str:
+    """손으로 고른 분류를 규칙으로 만들어 다른 달까지 함께 맞춘다.
+
+    한 줄만 고쳐 두면 같은 가맹점이 다음 달에 또 미분류로 온다. 가맹점명을
+    그대로 키워드로 삼는 규칙을 만들면 이미 저장된 달과 앞으로 올 명세서가
+    한 번에 정리된다 - 그게 이 화면에서 고르는 일의 값이다.
+    """
+    by_id = {item.pk: item for item in rows}
+    picks: dict[str, str] = {}
+    for key, value in request.POST.items():
+        if not key.startswith("category-") or not value:
+            continue
+        raw_id = key.removeprefix("category-")
+        if not raw_id.isdigit():
+            continue
+        item = by_id.get(int(raw_id))
+        if item and item.merchant_norm:
+            picks[item.merchant_norm] = value
+
+    if not picks:
+        return ""
+
+    valid = set(SpendingCategory.objects.values_list("pk", flat=True))
+    created = 0
+    for merchant_norm, category_id in picks.items():
+        if category_id not in valid or category_id == UNCLASSIFIED_CATEGORY_ID:
+            continue
+        # 손으로 고른 것이 규칙보다 위에 오도록 우선순위를 앞에 둔다.
+        MerchantRule.objects.update_or_create(
+            keyword=merchant_norm,
+            defaults={"category_id": category_id, "order": 1, "note": "화면에서 지정"},
+        )
+        created += 1
+
+    if not created:
+        return ""
+    result = recategorize_all()
+    return (
+        f"가맹점 {created}곳을 규칙으로 등록했습니다 - 다른 달과 앞으로 오는 "
+        f"명세서에도 적용됩니다. 남은 미분류 가맹점 {len(result.unmatched)}곳."
     )

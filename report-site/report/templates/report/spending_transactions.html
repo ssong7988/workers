@@ -23,6 +23,10 @@
   tr.dropped td:not(.pick) { opacity: .45; text-decoration: line-through; }
   .note { margin: 0 0 1rem; font-size: 12px; color: #64748b; line-height: 1.6; }
   .flash { margin-bottom: 1rem; border-radius: .5rem; border: 1px solid #bbf7d0; background: #f0fdf4; padding: .6rem .75rem; font-size: 13px; color: #14532d; }
+  .pickcat { font: inherit; font-size: 12px; padding: .25rem .4rem; border-radius: .4rem;
+             border: 1px solid #fbbf24; background: #fffbeb; color: #92400e; max-width: 14rem; }
+  .pickcat:focus { outline: 2px solid #14532d; outline-offset: 1px; }
+  .pickcat.chosen { border-color: #16a34a; background: #f0fdf4; color: #14532d; }
 {% endblock %}
 
 {% block content %}
@@ -33,7 +37,9 @@
 <p class="note">
   <b>선택 여부</b>를 끄면 그 거래를 집계에서 뺍니다. 대신 결제해 주고 돌려받는 돈처럼
   내 소비가 아닌 줄에 씁니다. 지워지지 않으므로 언제든 다시 켤 수 있고,
-  명세서 청구총액({{ billed_text }})과의 대조에는 그대로 남습니다.
+  명세서 청구총액({{ billed_text }})과의 대조에는 그대로 남습니다.<br>
+  <b>미분류</b> 줄에서 카테고리를 고르면 그 가맹점의 규칙이 됩니다 —
+  다른 달에 있는 같은 가맹점과 앞으로 오는 명세서까지 한 번에 정리됩니다.
 </p>
 
 <form method="post">
@@ -61,7 +67,16 @@
           </td>
           <td data-label="이용일">{{ row.used_at|date:"m.d" }}</td>
           <td data-label="가맹점">{{ row.merchant }}</td>
-          <td data-label="카테고리">{% if row.unclassified %}<span class="tag warn">{{ row.category }}</span>{% else %}<span class="tag">{{ row.category }}</span>{% endif %}</td>
+          <td data-label="카테고리">
+            {% if row.unclassified %}
+            <select class="pickcat" name="category-{{ row.id }}">
+              <option value="">미분류 — 고르면 규칙이 됩니다</option>
+              {% for category in categories %}
+              <option value="{{ category.id }}">{{ category.group.name }} · {{ category.name }}</option>
+              {% endfor %}
+            </select>
+            {% else %}<span class="tag">{{ row.category }}</span>{% endif %}
+          </td>
           <td data-label="결제">{{ row.payment }}{% if row.installment %} {{ row.installment }}{% endif %}</td>
           <td data-label="청구액">{{ row.amount }}</td>
         </tr>
@@ -73,7 +88,7 @@
   </div>
 
   <div class="apply">
-    <button class="btn" type="submit">체크한 것만으로 재집계</button>
+    <button class="btn" type="submit">저장하고 재집계</button>
     <button class="btn ghost" type="button" id="all">모두 선택</button>
     <button class="btn ghost" type="button" id="none">모두 해제</button>
     <span class="count" id="picked"></span>
@@ -115,6 +130,11 @@
 
   if (box) box.addEventListener('input', refresh);
   table.addEventListener('change', function (event) {
+    if (event.target.classList.contains('pickcat')) {
+      // 고른 줄은 색이 바뀌어, 저장을 누르기 전에 무엇이 분류될지 보인다.
+      event.target.classList.toggle('chosen', !!event.target.value);
+      return;
+    }
     if (event.target.name !== 'keep') return;
     // 체크를 끈 줄은 그 자리에서 흐려져, 재집계를 누르기 전에 무엇이 빠질지 보인다.
     event.target.closest('tr').classList.toggle('dropped', !event.target.checked);

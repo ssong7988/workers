@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from spending.categorize import categorize, recategorize_all
@@ -301,6 +303,71 @@ class ExclusionTest(TestCase):
     def test_the_digest_reports_the_analysed_total(self):
         self.exclude()
         self.assertIn("1.0만", build_digest().message)
+
+
+class PickCategoryTest(TestCase):
+    """전체 거래 화면에서 미분류를 고르면 규칙이 된다."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            "picker", password="x", is_staff=True
+        )
+        self.client.force_login(self.user)
+        ingest_statement(
+            statement_payload(month="2026-08", rows=[row("이름없는가게ZZ", 30_000)])
+        )
+        ingest_statement(
+            statement_payload(month="2026-09", rows=[row("이름없는가게ZZ", 20_000)])
+        )
+        self.september = Transaction.objects.get(statement__billing_month="2026-09")
+
+    def post(self, **extra):
+        payload = {"month": "2026-09", "keep": [str(self.september.pk)]}
+        payload.update(extra)
+        return self.client.post(settings.SPENDING_TRANSACTIONS_URL_PATH + "/", payload)
+
+    def test_picking_a_category_classifies_the_row(self):
+        self.post(**{f"category-{self.september.pk}": "food"})
+        self.september.refresh_from_db()
+        self.assertEqual(self.september.category_id, "food")
+
+    def test_the_pick_becomes_a_rule_for_later_statements(self):
+        self.post(**{f"category-{self.september.pk}": "food"})
+        rule = MerchantRule.objects.get(keyword="이름없는가게ZZ")
+        self.assertEqual(rule.category_id, "food")
+
+    def test_the_same_merchant_in_another_month_is_classified_too(self):
+        """한 줄만 고쳐지면 다음 달에 또 손이 간다."""
+        self.post(**{f"category-{self.september.pk}": "food"})
+        august = Transaction.objects.get(statement__billing_month="2026-08")
+        self.assertEqual(august.category_id, "food")
+
+    def test_a_new_statement_uses_the_learned_rule(self):
+        self.post(**{f"category-{self.september.pk}": "food"})
+        ingest_statement(
+            statement_payload(month="2026-10", rows=[row("이름없는가게ZZ 2호점", 5_000)])
+        )
+        october = Transaction.objects.get(statement__billing_month="2026-10")
+        self.assertEqual(october.category_id, "food")
+
+    def test_leaving_it_unpicked_changes_nothing(self):
+        self.post(**{f"category-{self.september.pk}": ""})
+        self.september.refresh_from_db()
+        self.assertEqual(self.september.category_id, UNCLASSIFIED_CATEGORY_ID)
+        self.assertFalse(MerchantRule.objects.filter(keyword="이름없는가게ZZ").exists())
+
+    def test_unclassified_cannot_be_picked_as_a_category(self):
+        self.post(**{f"category-{self.september.pk}": UNCLASSIFIED_CATEGORY_ID})
+        self.assertFalse(MerchantRule.objects.filter(keyword="이름없는가게ZZ").exists())
+
+    def test_picking_and_excluding_work_in_the_same_save(self):
+        self.client.post(
+            settings.SPENDING_TRANSACTIONS_URL_PATH + "/",
+            {"month": "2026-09", "keep": [], f"category-{self.september.pk}": "food"},
+        )
+        self.september.refresh_from_db()
+        self.assertEqual(self.september.category_id, "food")
+        self.assertTrue(self.september.excluded)
 
 
 class DigestTest(TestCase):
