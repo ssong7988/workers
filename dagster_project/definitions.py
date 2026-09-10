@@ -59,6 +59,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 REAL_ESTATE_FINDER = REPO_ROOT / "real-estate-finder"
 REPORT_SITE = REPO_ROOT / "report-site"
 STOCK_IMPORTER = REPO_ROOT / "stock-importer"
+SPENDING_ANALYZER = REPO_ROOT / "spending-analyzer"
 PYTHON_EXE = REAL_ESTATE_FINDER / ".venv" / "Scripts" / "python.exe"
 MANAGE_PY = REPORT_SITE / "manage.py"
 
@@ -481,6 +482,53 @@ def stock_daily_job() -> None:
     update_manual_positions_op(start=collect_stock_op())
 
 
+@dg.op(retry_policy=RETRY_POLICY)
+def collect_spending_op(context) -> None:
+    """이용대금명세서 메일을 읽어 서버로 넘긴다.
+
+    명세서는 한 달에 한 통뿐이지만 언제 도착할지는 카드사가 정한다. 그래서
+    매일 확인하고, 이미 서버에 있는 청구월은 수집기가 스스로 건너뛴다 -
+    같은 달을 다시 파싱하지도, 다시 보내지도 않는다.
+
+    첨부를 여는 데 브라우저가 필요해 시간이 걸리므로 타임아웃이 넉넉하다.
+    """
+    result = subprocess.run(
+        [str(PYTHON_EXE), "-m", "spending_analyzer", "push"],
+        cwd=SPENDING_ANALYZER,
+        timeout=1800,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    context.log.info(result.stdout or "")
+    if result.returncode != 0:
+        raise RuntimeError(f"명세서 수집 실패:\n{result.stderr or result.stdout}")
+
+
+@dg.op(ins={"start": dg.In(dg.Nothing)})
+def send_spending_digest_op(context) -> None:
+    """소비 요약을 카카오톡으로 보낸다.
+
+    청구월당 한 번만 나간다. 매일 돌아도 이미 보낸 달은 명령이 스스로
+    건너뛰므로, 새 명세서가 들어온 날에만 실제로 발송된다 - 사실상 '메일이
+    도착한 시점'이 발송 시점이 된다.
+    """
+    result = _run_manage("send_spending_digest", timeout=180, capture=True)
+    context.log.info(result.stdout or "")
+    if result.returncode != 0:
+        raise RuntimeError(f"소비 요약 전송 실패:\n{result.stderr or result.stdout}")
+
+
+@dg.job(
+    hooks={alert_on_failure},
+    description="명세서 메일을 확인해 서버에 넣고, 새 청구월이면 카카오톡으로 알린다.",
+)
+def spending_daily_job() -> None:
+    """수집이 먼저, 발송이 나중이다. 둘 다 이미 처리한 달은 스스로 건너뛴다."""
+    send_spending_digest_op(start=collect_spending_op())
+
+
 @dg.job(hooks={alert_on_failure})
 def restart_report_site_job() -> None:
     """report-site 코드를 바꾼 뒤 수동으로 실행하는 재시작 전용 job.
@@ -551,6 +599,17 @@ morning_report_schedule = dg.ScheduleDefinition(
     run_config=_scan_config("ensure_fresh"),
 )
 
+spending_daily_schedule = dg.ScheduleDefinition(
+    name="spending_daily_schedule",
+    job=spending_daily_job,
+    # 명세서는 한 달에 한 통이지만 도착 시각은 카드사가 정한다(9월 건은 23:52에
+    # 왔다). 매일 09시에 확인하면 늦어도 다음 날 아침에는 알림이 가고, 이미
+    # 처리한 청구월은 수집과 발송 양쪽이 스스로 건너뛴다.
+    cron_schedule="0 9 * * *",
+    execution_timezone="Asia/Seoul",
+    default_status=dg.DefaultScheduleStatus.RUNNING,
+)
+
 defs = dg.Definitions(
     assets=[naver_listings, morning_report],
     jobs=[
@@ -558,6 +617,7 @@ defs = dg.Definitions(
         pre_scan_health_job,
         hable_ready_job,
         stock_daily_job,
+        spending_daily_job,
         scan_job,
         morning_report_job,
         restart_report_site_job,
@@ -567,6 +627,7 @@ defs = dg.Definitions(
         pre_scan_health_schedule,
         hable_ready_schedule,
         stock_daily_schedule,
+        spending_daily_schedule,
         scan_schedule,
         morning_report_schedule,
     ],

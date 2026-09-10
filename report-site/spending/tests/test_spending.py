@@ -121,6 +121,23 @@ class CategorizeTest(TestCase):
         recategorize_all()
         self.assertEqual(Transaction.objects.get().category_id, "food")
 
+    def test_a_hand_picked_category_survives_a_resent_statement(self):
+        """정정 명세서가 와도 사람이 고른 분류는 남는다.
+
+        그 달을 통째로 바꾸느라 행이 새로 만들어지는데, 그때 사람의 판단까지
+        날려 버리면 손으로 고칠 이유가 없어진다.
+        """
+        ingest_statement(statement_payload(rows=[row("이름없는가게ZZ", 9_000)]))
+        transaction = Transaction.objects.get()
+        transaction.category = SpendingCategory.objects.get(pk="culture")
+        transaction.category_source = "manual"
+        transaction.save()
+
+        ingest_statement(statement_payload(rows=[row("이름없는가게ZZ", 9_000)]))
+        restored = Transaction.objects.get()
+        self.assertEqual(restored.category_id, "culture")
+        self.assertEqual(restored.category_source, "manual")
+
     def test_a_hand_picked_category_survives_reclassification(self):
         ingest_statement(statement_payload(rows=[row("스타벅스 과천점", 5_600)]))
         transaction = Transaction.objects.get()

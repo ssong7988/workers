@@ -113,6 +113,14 @@ def ingest_statement(payload: dict) -> IngestResult:
     )
 
     replaced = statement.transactions.count()
+    # 그 달을 통째로 바꾸면 행이 새로 만들어지므로, admin에서 손으로 고른
+    # 분류는 그대로 두면 사라진다. 사람이 판단한 것을 재수집이 지우면 안 되니
+    # 가맹점 단위로 들고 있다가 다시 붙인다.
+    manual = dict(
+        statement.transactions.filter(category_source="manual").values_list(
+            "merchant_norm", "category_id"
+        )
+    )
     statement.transactions.all().delete()
 
     unclassified = unclassified_category()
@@ -135,7 +143,18 @@ def ingest_statement(payload: dict) -> IngestResult:
     Transaction.objects.bulk_create(saved)
 
     # 저장 직후 분류한다. 규칙이 나중에 바뀌면 recategorize_all이 다시 매긴다.
-    categorize(list(statement.transactions.select_related("category")))
+    rows = list(statement.transactions.select_related("category"))
+    categorize(rows)
+
+    if manual:
+        restored = [
+            item for item in rows if item.merchant_norm in manual
+        ]
+        for item in restored:
+            item.category_id = manual[item.merchant_norm]
+            item.category_source = "manual"
+        if restored:
+            Transaction.objects.bulk_update(restored, ["category", "category_source"])
 
     return IngestResult(
         billing_month=billing_month,
