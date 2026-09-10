@@ -18,9 +18,8 @@
   th:nth-child(2), td:nth-child(2),
   th:nth-child(3), td:nth-child(3),
   th:nth-child(4), td:nth-child(4),
-  th:nth-child(5), td:nth-child(5),
   th:nth-child(6), td:nth-child(6) { text-align: left; }
-  th:last-child, td:last-child { text-align: right; }
+  td[data-label="가맹점"] { cursor: default; }
   tr.dropped td:not(.pick) { opacity: .45; text-decoration: line-through; }
   .note { margin: 0 0 1rem; font-size: 12px; color: #64748b; line-height: 1.6; }
   .flash { margin-bottom: 1rem; border-radius: .5rem; border: 1px solid #bbf7d0; background: #f0fdf4; padding: .6rem .75rem; font-size: 13px; color: #14532d; }
@@ -29,7 +28,7 @@
   .pickcat:focus { outline: 2px solid #14532d; outline-offset: 1px; }
   .pickcat.chosen { border-color: #16a34a; background: #f0fdf4; color: #14532d; }
   .noteinput { font: inherit; font-size: 12px; padding: .25rem .4rem; border-radius: .4rem;
-               border: 1px solid #e2e8f0; width: 7rem; max-width: 100%; }
+               border: 1px solid #e2e8f0; width: 10.5rem; max-width: 100%; }
   .holder-form { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: 1rem; }
   .holder-form select { font: inherit; font-size: .8125rem; padding: .35rem .6rem;
                          border-radius: .5rem; border: 1px solid #cbd5e1; background: #fff; }
@@ -88,7 +87,7 @@
       <thead>
         <tr>
           <th class="pick">선택 여부</th>
-          <th>이용일</th><th>가맹점</th><th>카테고리</th><th>결제</th><th>메모</th><th>청구액</th>
+          <th>이용일</th><th>가맹점</th><th>카테고리</th><th>가격</th><th>메모</th>
         </tr>
       </thead>
       <tbody>
@@ -98,7 +97,7 @@
             <input type="checkbox" name="keep" value="{{ row.id }}"{% if row.selected %} checked{% endif %}>
           </td>
           <td data-label="이용일">{{ row.used_at|date:"m.d" }}</td>
-          <td data-label="가맹점">{{ row.merchant }}</td>
+          <td data-label="가맹점" title="{{ row.merchant }}">{{ row.merchant_short }}</td>
           <td data-label="카테고리">
             <select class="pickcat{% if not row.unclassified %} chosen{% endif %}" name="category-{{ row.id }}">
               {% if row.unclassified %}<option value="">미분류 — 고르면 규칙이 됩니다</option>{% endif %}
@@ -107,14 +106,13 @@
               {% endfor %}
             </select>
           </td>
-          <td data-label="결제">{{ row.payment }}{% if row.installment %} {{ row.installment }}{% endif %}</td>
+          <td data-label="가격">{{ row.amount }}</td>
           <td data-label="메모">
             <input class="noteinput" type="text" name="note-{{ row.id }}" value="{{ row.note }}" maxlength="15" placeholder="메모">
           </td>
-          <td data-label="청구액">{{ row.amount }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="7" class="empty">거래가 없습니다.</td></tr>
+        <tr><td colspan="6" class="empty">거래가 없습니다.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -48,11 +48,12 @@ UNASSIGNED_HOLDER = "미지정"
 NOTE_LIMIT = 15
 
 
-def _truncate_note(text: str, limit: int = NOTE_LIMIT) -> str:
+def _truncate(text: str, limit: int = NOTE_LIMIT) -> str:
     text = (text or "").strip()
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)] + "..."
+
 
 # 이보다 낮은 조각에는 안에 숫자를 적을 수 없다.
 STACK_LABEL_MIN_HEIGHT = 15
@@ -408,15 +409,10 @@ def transactions(request: HttpRequest) -> HttpResponse:
                 "id": item.pk,
                 "used_at": item.used_at,
                 "merchant": item.merchant,
+                "merchant_short": _truncate(item.merchant),
                 "category": item.category.name,
                 "category_id": item.category_id,
                 "unclassified": item.category.is_unclassified,
-                "payment": item.get_payment_type_display(),
-                "installment": (
-                    f"{item.installment_seq}/{item.installment_months}"
-                    if item.is_installment
-                    else ""
-                ),
                 "card": item.card_last4,
                 "holder": holder_of(item),
                 "note": item.note,
@@ -504,7 +500,7 @@ def _save_notes(request: HttpRequest, rows) -> None:
         item = by_id.get(int(raw_id))
         if item is None:
             continue
-        value = _truncate_note(value)
+        value = _truncate(value)
         if item.note != value:
             item.note = value
             changed.append(item)
