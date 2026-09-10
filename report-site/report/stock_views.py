@@ -3,6 +3,10 @@
 부동산 화면과 같은 구조다 - 빌드도 배포도 없고, 요청마다 DB를 읽어 그린다.
 차트 좌표는 서버에서 만들어 내려보낸다(브라우저에서 차트 라이브러리를 받지
 않는다). 표기는 전부 `portfolio/display.py` 하나를 통과한다.
+
+두 화면 모두 admin 로그인을 요구한다. 계좌 잔고와 실현손익이 그대로 보이는
+화면이라 경로 토큰만으로는 부족하고, Funnel이 인터넷에 열어두는 주소이기도
+하다. 카카오 버튼으로 들어오면 로그인 화면을 거친 뒤 원래 화면으로 돌아간다.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
@@ -64,6 +69,7 @@ def _links(page: str) -> dict[str, str]:
     }
 
 
+@staff_member_required
 def allocation(request: HttpRequest) -> HttpResponse:
     view = build_allocation()
     rows = [
@@ -207,6 +213,7 @@ def _line_chart(rows: list) -> dict | None:
     }
 
 
+@staff_member_required
 def performance(request: HttpRequest) -> HttpResponse:
     range_key, range_label, days = _resolve_range(request.GET.get("range"))
     portfolios = list(InvestmentAccount.objects.filter(active=True, institution="KB증권")
