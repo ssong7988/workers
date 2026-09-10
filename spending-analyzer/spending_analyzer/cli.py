@@ -24,11 +24,14 @@ from .categorize import (
 from .claude_client import classify_merchants, describe_usage
 from .config import load_config
 from .demo import build_demo_statements
-from .diagnose import describe_message, verdict
-from .env import MissingCredential, load_env, optional, require
+from .diagnose import describe_message, statement_attachments, verdict
+from .env import MissingCredential, load_env, optional, require, require_secret
 from .mailbox import Mailbox, MailboxError
 from .models import Statement
 from .report import load_analysis, write_report
+from .securemail import SecureMailError
+from .statement import StatementParseError
+from .statement import parse as parse_statement
 from .storage import StatementStore, write_json
 
 
@@ -44,6 +47,13 @@ GMAIL_HINT = (
     f"  {PROJECT_DIR / '.env'} 에 넣으세요:\n"
     "    GMAIL_USER=본인주소@gmail.com\n"
     "    GMAIL_APP_PASSWORD=발급받은16자리"
+)
+
+STATEMENT_HINT = (
+    "명세서 첨부를 여는 비밀번호가 필요합니다.\n"
+    f"  {PROJECT_DIR / '.env'} 에 넣으세요:\n"
+    "    SAMSUNG_STATEMENT_PASSWORD=생년월일6자리\n"
+    "  (메일 본문 안내: 생년월일 6자리 또는 사업자번호 뒤 7자리)"
 )
 
 
@@ -62,6 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--since", default=None, help="YYYY-MM-DD, 설정값을 덮어씀")
     scan.add_argument("--dump", type=int, default=None, help="이 번호 메일의 원문·첨부를 저장")
     scan.add_argument("--all-senders", action="store_true", help="제목이 안 맞는 메일도 출력")
+
+    fetch = commands.add_parser("fetch", help="메일의 명세서를 읽어 저장")
+    fetch.add_argument("--since", default=None, help="YYYY-MM-DD, 설정값을 덮어씀")
+    fetch.add_argument(
+        "--force", action="store_true", help="이미 저장된 청구월도 다시 읽음"
+    )
 
     demo = commands.add_parser(
         "demo", help="가짜 명세서를 만들어 분류·집계·페이지를 먼저 확인"
@@ -102,7 +118,11 @@ def _paths(data_dir: Path) -> dict[str, Path]:
 
 
 def _open_mailbox(config) -> Mailbox:
-    return Mailbox(config.mail, require("GMAIL_USER", GMAIL_HINT), require("GMAIL_APP_PASSWORD", GMAIL_HINT))
+    return Mailbox(
+        config.mail,
+        require("GMAIL_USER", GMAIL_HINT),
+        require_secret("GMAIL_APP_PASSWORD", GMAIL_HINT),
+    )
 
 
 def _require_statements(store: StatementStore) -> list[Statement]:
@@ -126,7 +146,7 @@ def _validate_config(config, config_path: Path, store: StatementStore) -> None:
     for name in ("GMAIL_USER", "GMAIL_APP_PASSWORD"):
         status = "설정됨" if optional(name) else "없음   ← scan-mail을 돌리려면 필요합니다"
         print(f"  {name}: {status}")
-    for name in ("SAMSUNG_PDF_PASSWORD", "ANTHROPIC_API_KEY"):
+    for name in ("SAMSUNG_STATEMENT_PASSWORD", "ANTHROPIC_API_KEY"):
         print(f"  {name}: {'설정됨' if optional(name) else '없음 (선택)'}")
 
     rules = load_rules(RULES_PATH)
@@ -156,7 +176,7 @@ def _dump_message(message, index: int, samples_dir: Path) -> None:
 
 
 def _scan_mail(config, args, samples_dir: Path) -> None:
-    pdf_password = optional("SAMSUNG_PDF_PASSWORD")
+    pdf_password = optional("SAMSUNG_STATEMENT_PASSWORD")
     with _open_mailbox(config) as mailbox:
         uids = mailbox.search_uids(args.since)
         window = args.since if args.since is not None else config.mail.since
@@ -185,6 +205,66 @@ def _scan_mail(config, args, samples_dir: Path) -> None:
         if skipped and not args.all_senders:
             print(f"제목 키워드가 맞지 않아 {skipped}통을 건너뛰었습니다 (--all-senders로 볼 수 있습니다).\n")
         print(verdict(messages, pdf_password))
+
+
+def _fetch(config, store: StatementStore, args) -> None:
+    """Read every statement mail and store the months it yields.
+
+    One statement that fails to parse does not stop the rest — the failure is
+    named and the run continues, so a single format change never blocks months
+    that are still readable.
+    """
+    password = require_secret("SAMSUNG_STATEMENT_PASSWORD", STATEMENT_HINT)
+    existing = set(store.months())
+    saved, skipped, failed = [], [], []
+
+    with _open_mailbox(config) as mailbox:
+        uids = mailbox.search_uids(args.since)
+        print(f"메일 {len(uids)}통을 확인합니다.")
+        candidates = []
+        for uid in uids:
+            message = mailbox.fetch(uid)
+            if not mailbox.matches_subject(message):
+                continue
+            attachments = statement_attachments(message)
+            if attachments:
+                candidates.append((message, attachments))
+
+    print(f"명세서 첨부가 있는 메일 {len(candidates)}통\n")
+    for message, attachments in candidates:
+        for attachment in attachments:
+            label = f"{message.date[:16]} {attachment.filename}"
+            try:
+                statement = parse_statement(
+                    attachment.content, password, source_ref=message.message_id
+                )
+            except (StatementParseError, SecureMailError) as exc:
+                failed.append(label)
+                print(f"  ✗ {label}\n    {exc}")
+                continue
+
+            if statement.billing_month in existing and not args.force:
+                skipped.append(statement.billing_month)
+                print(f"  · {statement.billing_month} 이미 저장됨 (--force로 다시 읽기)")
+                continue
+
+            store.save(statement)
+            existing.add(statement.billing_month)
+            saved.append(statement.billing_month)
+            print(
+                f"  ✓ {statement.billing_month}  {len(statement.transactions)}건  "
+                f"{statement.total_billed_won:,}원  (소계와 일치)"
+            )
+
+    print(
+        f"\n저장 {len(saved)}개월"
+        + (f", 건너뜀 {len(skipped)}개월" if skipped else "")
+        + (f", 실패 {len(failed)}건" if failed else "")
+    )
+    if saved:
+        print("  다음: python -m spending_analyzer run")
+    elif not skipped:
+        print("  저장된 것이 없습니다. scan-mail로 메일 상태를 확인하세요.")
 
 
 def _demo(store: StatementStore, months: int) -> None:
@@ -281,6 +361,8 @@ def main(argv: list[str] | None = None) -> None:
             _validate_config(config, _resolve_config(args.config), store)
         elif args.command == "scan-mail":
             _scan_mail(config, args, paths["samples"])
+        elif args.command == "fetch":
+            _fetch(config, store, args)
         elif args.command == "demo":
             _demo(store, args.months)
         elif args.command == "categorize":

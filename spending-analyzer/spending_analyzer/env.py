@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -56,3 +57,13 @@ def require(name: str, hint: str) -> str:
 
 def optional(name: str) -> str:
     return (os.environ.get(name) or "").strip()
+
+
+def require_secret(name: str, hint: str) -> str:
+    """A credential with every space removed.
+
+    Google displays an app password as four spaced groups ("abcd efgh ijkl
+    mnop") and pasting it verbatim is the common case. The spaces are
+    presentation only, so strip them rather than fail a login over them.
+    """
+    return re.sub(r"\s+", "", require(name, hint))
