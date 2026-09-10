@@ -1,8 +1,8 @@
-"""Build and check the local property-report UI.
+"""Build and check the hosted property-report UI.
 
 `app/page.tsx` imports `report-data.json` at build time, so writing that file
-is picked up automatically by the Next.js development server. A production
-run still needs a fresh local build before `npm start`.
+does not update the hosted page. Builds and deployments are explicit tasks;
+hourly scans never trigger them automatically.
 """
 
 from __future__ import annotations
@@ -23,17 +23,18 @@ SITE_ROOT = ROOT_DIR / "property-report-site"
 SITE_DIR = SITE_ROOT / "site-app"
 
 BUILD_TIMEOUT_SECONDS = 900
-# A freshly started local server can take a moment to become ready.
+# A deployment can take a moment to become ready.
 VERIFY_ATTEMPTS = 4
 VERIFY_INTERVAL_SECONDS = 6.0
 
 _OBSERVED_AT = re.compile(r'data-observed-at="([^"]+)"')
 
 MANUAL_STEPS = (
-    "로컬 UI를 먼저 실행해 주세요:\n"
+    "Codex Sites에서 리포트를 빌드·배포해 주세요:\n"
     f"  1) cd {SITE_DIR}\n"
-    "  2) .\\run-local.ps1\n"
-    "  3) 브라우저에서 http://127.0.0.1:3000 열기"
+    "  2) npm run build\n"
+    "  3) Codex Sites로 배포\n"
+    "  4) python -m real_estate_finder publish-report --verify-only"
 )
 
 
@@ -75,7 +76,7 @@ def _run(
 
 
 def build_site(site_dir: Path = SITE_DIR) -> None:
-    """Create a production build of the local Next.js UI."""
+    """Create a Codex Sites deployment build."""
     env = _build_env()
     npm = shutil.which("npm", path=env["PATH"])
     if not npm:
@@ -96,7 +97,7 @@ def _fetch(url: str, timeout: float) -> str:
 
 
 def live_observed_at(report_url: str, timeout: float = 20.0) -> str | None:
-    """The `observedAt` the running local page is serving.
+    """The `observedAt` the hosted page is serving.
 
     `None` covers two different situations — the site was unreachable, and the
     server answered with a build too old to carry the marker at all. Neither one
@@ -133,7 +134,7 @@ def _same_moment(left: str, right: str) -> bool:
 
 
 def is_live(expected_observed_at: str, report_url: str, *, attempts: int = 1) -> bool:
-    """Whether the running local report already shows this scan."""
+    """Whether the hosted report already shows this scan."""
     for attempt in range(attempts):
         if attempt:
             time.sleep(VERIFY_INTERVAL_SECONDS)

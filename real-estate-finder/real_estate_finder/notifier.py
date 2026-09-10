@@ -10,10 +10,10 @@ from typing import Callable
 from .models import Listing, ScanResult
 
 
-# The report UI now runs locally. Override this with a LAN URL when another
-# device (for example, the phone opening a Kakao button) must reach the PC.
+# Public Codex Sites URL used by Kakao. Localhost cannot be used for Kakao
+# message buttons because the domain must be registered and phone-accessible.
 REPORT_URL = os.environ.get(
-    "KAKAO_REPORT_URL", "http://127.0.0.1:3000"
+    "KAKAO_REPORT_URL", "https://my-property-report-20260902.ssong7988.chatgpt.site"
 ).strip()
 # Kakao feed templates cap the title and description; the card image carries
 # the detail, so these only ever hold a short summary.

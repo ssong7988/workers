@@ -90,12 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     publish = commands.add_parser(
         "publish-report",
-        help="현재 리포트 데이터로 로컬 UI 프로덕션 빌드 생성",
+        help="현재 리포트 데이터로 Codex Sites 배포 빌드 생성",
     )
     publish.add_argument(
         "--verify-only",
         action="store_true",
-        help="빌드를 건너뛰고 로컬 UI 반영 여부만 확인",
+        help="빌드를 건너뛰고 Codex Sites 반영 여부만 확인",
     )
     explain = commands.add_parser(
         "explain-filters",
@@ -149,10 +149,10 @@ def _explain_filters(config, store: FileStore, show_passed: bool) -> None:
 
 
 def _publish_report(verify_only: bool) -> None:
-    """Build the local UI from the report written by the last scan.
+    """Build the Codex Sites UI from the report written by the last scan.
 
-    Development mode reloads JSON changes automatically. This command is for a
-    production-style local run (`npm start`), where data is captured at build time.
+    Scans only write JSON. Building and deploying remain explicit so frequent
+    scans do not repeatedly spend time rebuilding an unchanged UI.
     """
     report_data = SITE_DIR / "app" / "report-data.json"
     if not report_data.exists():
@@ -163,19 +163,19 @@ def _publish_report(verify_only: bool) -> None:
     print(
         f"발행 대상: 단지 {len(data['complexes'])}개, 매물 {total}건, 기준 {observed_at}"
     )
-    print(f"현재 로컬 UI: {describe_live(REPORT_URL)}")
+    print(f"현재 Codex Sites: {describe_live(REPORT_URL)}")
 
     if not verify_only:
-        print("로컬 UI를 빌드합니다...")
+        print("Codex Sites 배포본을 빌드합니다...")
         build_site()
-        print("빌드 완료. `npm start`로 로컬 UI를 실행할 수 있습니다.")
+        print("빌드 완료. 이제 Codex Sites로 배포하세요.")
         print(MANUAL_STEPS)
         return
 
     if is_live(observed_at, REPORT_URL, attempts=VERIFY_ATTEMPTS):
-        print(f"확인 완료: {REPORT_URL} 가 {observed_at} 결과를 보여줍니다.")
+        print(f"배포 확인 완료: {REPORT_URL} 가 {observed_at} 결과를 보여줍니다.")
         return
-    print(f"로컬 UI가 실행 중이 아니거나 아직 반영되지 않았습니다: {REPORT_URL}")
+    print(f"Codex Sites에 아직 반영되지 않았습니다: {REPORT_URL}")
     raise SystemExit(1)
 
 
