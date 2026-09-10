@@ -16,7 +16,7 @@
   </div>
   <div class="tile">
     <div class="tile-value {% if gap_up %}tile-up{% else %}tile-down{% endif %}">{{ gap_text }}</div>
-    <div class="tile-label">평균 대비 ({{ average_text }})</div>
+    <div class="tile-label">최근 {{ months_used }}개월 평균 대비 ({{ average_text }})</div>
   </div>
   <div class="tile">
     <div class="tile-value">{{ count }}건</div>
@@ -63,7 +63,7 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>대분류</th><th>비중</th><th>청구액</th><th>전월 대비</th></tr></thead>
+    <thead><tr><th>대분류</th><th>비중</th><th>청구액</th><th>최근 {{ window }}개월 평균 대비</th></tr></thead>
     <tbody>
       {% for row in groups %}
       <tr>
@@ -81,11 +81,20 @@
 </p>
 
 {% if group_trend %}
-<h2 class="section-title">대분류 추이</h2>
+<h2 class="section-title">월별 청구액</h2>
 <div class="panel">
-  {# 월별 청구액과 같은 이유로 위쪽에 총액 자리를 낸다. #}
+  {# 가장 높은 막대의 y가 0이라, 그 위에 얹는 총액이 들어갈 자리를 위로 낸다. #}
   <svg viewBox="0 -20 {{ group_trend.width }} {{ group_trend.height|add:50 }}" role="img"
-       aria-label="달마다 대분류 구성">
+       aria-label="달마다 대분류로 쌓은 청구액">
+    {% if group_trend.average_y %}
+    <line x1="0" y1="{{ group_trend.average_y }}" x2="{{ group_trend.width }}"
+          y2="{{ group_trend.average_y }}" stroke="#64748b" stroke-width="1"
+          stroke-dasharray="4 4"/>
+    <text x="{{ group_trend.width }}" y="{{ group_trend.average_y|add:"-6" }}"
+          text-anchor="end" font-size="11" fill="#475569"
+          paint-order="stroke" stroke="#fff" stroke-width="3"
+          stroke-linejoin="round">{{ group_trend.average_label }}</text>
+    {% endif %}
     {% for column in group_trend.columns %}
       {% for piece in column.pieces %}
       <g><title>{{ piece.title }}</title>
@@ -113,31 +122,6 @@
 </div>
 {% endif %}
 
-{% if trend %}
-<h2 class="section-title">월별 청구액</h2>
-<div class="panel">
-  {# 가장 높은 막대의 y가 0이라, 그 위에 얹는 금액이 들어갈 자리를 위로 낸다. #}
-  <svg viewBox="0 -20 {{ trend.width }} {{ trend.height|add:50 }}" role="img" aria-label="월별 청구액 추이">
-    {% if trend.average_y %}
-    <line x1="0" y1="{{ trend.average_y }}" x2="{{ trend.width }}" y2="{{ trend.average_y }}"
-          stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 4"/>
-    {% endif %}
-    {% for bar in trend.bars %}
-    <g><title>{{ bar.title }}</title>
-      <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.width }}" height="{{ bar.height }}"
-            rx="4" fill="{% if bar.current %}#16a34a{% else %}#86efac{% endif %}"/>
-    </g>
-    <text x="{{ bar.centre }}" y="{{ bar.y|add:"-6" }}" text-anchor="middle"
-          font-size="11" font-weight="700" fill="#0f172a"
-          paint-order="stroke" stroke="#fff" stroke-width="3"
-          stroke-linejoin="round">{{ bar.value }}</text>
-    <text x="{{ bar.centre }}" y="{{ trend.height|add:18 }}" text-anchor="middle"
-          font-size="11" fill="#64748b">{{ bar.label }}</text>
-    {% endfor %}
-  </svg>
-  <p class="hint">점선은 최근 6개월 평균({{ trend.average_label }})입니다.</p>
-</div>
-{% endif %}
 
 <h2 class="section-title">카테고리별</h2>
 <div class="table-wrap">
@@ -163,7 +147,24 @@
 </div>
 
 {% if changes %}
-<h2 class="section-title">전월 대비 증감</h2>
+<h2 class="section-title">
+  증감 비교
+  <form method="get" class="inline-pick">
+    <input type="hidden" name="month" value="{{ statement.billing_month }}">
+    <input type="hidden" name="top" value="{{ top }}">
+    <select name="window" onchange="this.form.submit()" aria-label="비교 기준">
+      {% for choice in window_choices %}
+      <option value="{{ choice }}"{% if choice == window %} selected{% endif %}>최근 {{ choice }}개월 평균 대비</option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit">보기</button></noscript>
+  </form>
+</h2>
+{% if window_short %}
+<div class="notice">
+  명세서가 {{ months_used }}개월치뿐이라 최근 {{ months_used }}개월 평균과 견줍니다.
+</div>
+{% endif %}
 <div class="table-wrap">
   <table>
     <thead><tr><th>카테고리</th><th>변화</th><th>증감</th></tr></thead>
@@ -224,6 +225,7 @@
   가맹점 TOP {{ top }}
   <form method="get" class="inline-pick">
     <input type="hidden" name="month" value="{{ statement.billing_month }}">
+    <input type="hidden" name="window" value="{{ window }}">
     <select name="top" onchange="this.form.submit()" aria-label="가맹점 표시 개수">
       {% for choice in top_choices %}
       <option value="{{ choice }}"{% if choice == top %} selected{% endif %}>상위 {{ choice }}개</option>

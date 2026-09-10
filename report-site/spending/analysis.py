@@ -99,6 +99,47 @@ def trailing_average(totals: list[MonthTotal], window: int = AVERAGE_WINDOW) -> 
     return round(sum(item.total for item in recent) / len(recent))
 
 
+def preceding(statement: Statement, months: int) -> list[Statement]:
+    """이 청구월 **직전** 달들. 오래된 것이 먼저다.
+
+    자기 자신은 넣지 않는다. 자기를 포함한 평균과 견주면 차이가 눌려서, 많이
+    쓴 달일수록 기준도 같이 올라가 덜 튀어 보인다.
+    """
+    return list(
+        Statement.objects.filter(billing_month__lt=statement.billing_month).order_by(
+            "-billing_month"
+        )[:months]
+    )[::-1]
+
+
+def baseline_average(statement: Statement, months: int) -> tuple[int, int]:
+    """직전 N개월의 월평균 청구액과, 실제로 쓴 달 수.
+
+    달 수를 함께 돌려준다. 아홉 달을 요구했는데 셋뿐이라면 그 사실이 화면에
+    적혀야 한다 - 숫자만 보이면 여섯 달 평균인 줄 안다.
+    """
+    months_used = preceding(statement, months)
+    if not months_used:
+        return 0, 0
+    total = sum(item.analysed_total_won for item in months_used)
+    return round(total / len(months_used)), len(months_used)
+
+
+def _averaged(statements: list[Statement], totals_of) -> dict[str, int]:
+    """여러 달의 항목별 합계를 월평균으로 낸다.
+
+    어떤 달에 없던 항목은 그 달 0원으로 친다. 나온 달만 나눠 평균을 내면
+    가끔 쓰는 항목이 매달 쓰는 것처럼 커 보인다.
+    """
+    if not statements:
+        return {}
+    summed: dict[str, int] = defaultdict(int)
+    for statement in statements:
+        for key, value in totals_of(statement).items():
+            summed[key] += value
+    return {key: round(value / len(statements)) for key, value in summed.items()}
+
+
 def category_rows(statement: Statement, previous: Statement | None) -> list[dict]:
     """카테고리별 합계와 직전 달 대비.
 
@@ -189,6 +230,52 @@ def _group_totals(statement: Statement | None) -> dict[str, int]:
         row["category__group_id"]: row["total"] or 0
         for row in rows
         if row["category__group_id"]
+    }
+
+
+def category_comparison(statement: Statement, months: int) -> list[dict]:
+    """카테고리별 이번 달과 직전 N개월 월평균의 차이."""
+    now = {key: value[0] for key, value in _category_totals(statement).items()}
+    names = {key: value[1] for key, value in _category_totals(statement).items()}
+    base = _averaged(
+        preceding(statement, months),
+        lambda item: {k: v[0] for k, v in _category_totals(item).items()},
+    )
+    base_names = {}
+    for item in preceding(statement, months):
+        for key, value in _category_totals(item).items():
+            base_names.setdefault(key, value[1])
+
+    rows = []
+    for key in set(now) | set(base):
+        total = now.get(key, 0)
+        average = base.get(key, 0)
+        rows.append(
+            {
+                "id": key,
+                "name": names.get(key) or base_names.get(key, key),
+                "total": total,
+                "baseline": average,
+                "delta": total - average,
+                "percent": _percent_change(total, average),
+                "unclassified": key == UNCLASSIFIED_CATEGORY_ID,
+            }
+        )
+    rows.sort(key=lambda row: -abs(row["delta"]))
+    return rows
+
+
+def group_comparison(statement: Statement, months: int) -> dict[str, dict]:
+    """대분류별 이번 달과 직전 N개월 월평균의 차이."""
+    now = _group_totals(statement)
+    base = _averaged(preceding(statement, months), _group_totals)
+    return {
+        key: {
+            "baseline": base.get(key, 0),
+            "delta": now.get(key, 0) - base.get(key, 0),
+            "percent": _percent_change(now.get(key, 0), base.get(key, 0)),
+        }
+        for key in set(now) | set(base)
     }
 
 

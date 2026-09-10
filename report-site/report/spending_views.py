@@ -18,7 +18,10 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 
 from spending.analysis import (
+    baseline_average,
+    category_comparison,
     category_rows,
+    group_comparison,
     group_rows,
     group_series,
     installment_outlook,
@@ -26,7 +29,6 @@ from spending.analysis import (
     monthly_totals,
     payment_type_rows,
     top_merchants,
-    trailing_average,
     unclassified_merchants,
 )
 from spending.display import man_text, month_text, signed_percent_text, won_text
@@ -38,12 +40,24 @@ from spending.models import (
     Transaction,
 )
 
-MONTH_TREND_LIMIT = 12
 # 이보다 낮은 조각에는 안에 숫자를 적을 수 없다.
 STACK_LABEL_MIN_HEIGHT = 15
 # 가맹점 TOP에서 고를 수 있는 개수.
 TOP_CHOICES = (5, 10, 20)
 DEFAULT_TOP = 10
+# 무엇과 견줄지. 한 화면에서 점선·요약·증감 비교가 모두 같은 창을 쓴다 -
+# 기준이 자리마다 다르면 숫자끼리 이야기가 안 맞는다.
+WINDOW_CHOICES = (1, 3, 6)
+DEFAULT_WINDOW = 3
+
+
+def _pick(request, name: str, choices: tuple[int, ...], default: int) -> int:
+    """고를 수 있는 값만 받는다. 주소로 아무 숫자나 넣지 못한다."""
+    try:
+        value = int(request.GET.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value in choices else default
 
 
 def _links(page: str) -> dict[str, str]:
@@ -51,41 +65,6 @@ def _links(page: str) -> dict[str, str]:
         "page": page,
         "report_url": f"{settings.SPENDING_REPORT_URL_PATH}/",
         "transactions_url": f"{settings.SPENDING_TRANSACTIONS_URL_PATH}/",
-    }
-
-
-def _trend(totals, latest_month: str) -> dict | None:
-    """막대 좌표를 서버에서 만든다. 브라우저는 차트 라이브러리를 받지 않는다."""
-    rows = totals[-MONTH_TREND_LIMIT:]
-    if not rows:
-        return None
-    ceiling = max(row.total for row in rows) or 1
-    width, height = 720, 200
-    slot = width / len(rows)
-    bar = min(48.0, slot - 14)
-    bars = []
-    for index, row in enumerate(rows):
-        length = height * row.total / ceiling
-        bars.append(
-            {
-                "x": slot * (index + 0.5) - bar / 2,
-                "y": height - length,
-                "width": bar,
-                "height": length,
-                "label": row.month[2:].replace("-", "."),
-                "centre": slot * (index + 0.5),
-                "value": man_text(row.total),
-                "current": row.month == latest_month,
-                "title": f"{row.month} {won_text(row.total)} · {row.count}건",
-            }
-        )
-    average = trailing_average(totals)
-    return {
-        "width": width,
-        "height": height,
-        "bars": bars,
-        "average_y": height - (height * average / ceiling) if average else None,
-        "average_label": man_text(average),
     }
 
 
@@ -162,10 +141,14 @@ def _pie(groups: list[dict]) -> dict | None:
     }
 
 
-def _group_trend() -> dict | None:
-    """달마다 대분류 구성을 쌓은 막대.
+def _group_trend(average: int, window: int, months_used: int) -> dict | None:
+    """달마다의 청구액을 대분류로 쌓은 막대.
 
     한 달만 있으면 추이가 아니라 같은 정보의 반복이라 그리지 않는다.
+
+    점선은 이 화면이 견주는 기준(직전 N개월 월평균)이다. 막대만 있으면 어느
+    달이 많이 쓴 달인지 눈으로 재야 하고, 요약과 증감 비교가 말하는 기준선이
+    차트 어디에 있는지도 보이지 않는다.
     """
     series = group_series()
     if len(series["months"]) < 2:
@@ -227,7 +210,16 @@ def _group_trend() -> dict | None:
         for group in series["groups"]
         if group.pk in present
     ]
-    return {"width": width, "height": height, "columns": columns, "legend": legend}
+    return {
+        "width": width,
+        "height": height,
+        "columns": columns,
+        "legend": legend,
+        # 기준선이 차트 위쪽으로 벗어나면 그리지 않는다. 그릴 자리가 없는 선을
+        # 억지로 얹으면 다른 막대 위에 걸쳐 엉뚱한 값으로 읽힌다.
+        "average_y": (height - height * average / ceiling) if 0 < average <= ceiling else None,
+        "average_label": f"최근 {months_used}개월 평균 {man_text(average)}",
+    }
 
 
 @staff_member_required
@@ -239,16 +231,20 @@ def report(request: HttpRequest) -> HttpResponse:
     statement = view.statement
     totals = view.totals
     current = next((item for item in totals if item.month == statement.billing_month), None)
-    average = trailing_average(totals)
+
+    # 화면 전체가 같은 창을 쓴다 - 점선, 평균 대비 KPI, 증감 비교 표가 서로
+    # 다른 기간을 견주면 숫자끼리 이야기가 안 맞는다.
+    top = _pick(request, "top", TOP_CHOICES, DEFAULT_TOP)
+    window = _pick(request, "window", WINDOW_CHOICES, DEFAULT_WINDOW)
+    average, months_used = baseline_average(statement, window)
+    against = group_comparison(statement, window)
+
     categories = category_rows(statement, view.previous)
-    # 직전 달이 없으면 증감이 아니라 이번 달 금액 그 자체다. 0에서 늘어난 것으로
-    # 그리면 첫 달이 전부 급증한 것처럼 읽힌다.
+    # 비교할 앞선 달이 없으면 증감이 아니라 이번 달 금액 그 자체다. 0에서
+    # 늘어난 것으로 그리면 첫 달이 전부 급증한 것처럼 읽힌다.
     changed = (
-        sorted(
-            (row for row in categories if row["delta"]),
-            key=lambda row: -abs(row["delta"]),
-        )[:8]
-        if view.previous
+        [row for row in category_comparison(statement, window) if row["delta"]][:8]
+        if months_used
         else []
     )
     ceiling = max((row["total"] for row in categories), default=0) or 1
@@ -256,13 +252,6 @@ def report(request: HttpRequest) -> HttpResponse:
 
     # 비중이 큰 것부터 읽는다. 색은 대분류에 묶여 있으므로 순서를 바꿔도
     # 조각 색이 달마다 자리를 옮기지 않는다.
-    # 고를 수 있는 값만 받는다. 주소로 아무 숫자나 넣어 표를 늘리지 못한다.
-    try:
-        top = int(request.GET.get("top", DEFAULT_TOP))
-    except ValueError:
-        top = DEFAULT_TOP
-    if top not in TOP_CHOICES:
-        top = DEFAULT_TOP
 
     groups = sorted(
         (row for row in group_rows(statement, view.previous) if row["total"] > 0),
@@ -283,13 +272,17 @@ def report(request: HttpRequest) -> HttpResponse:
                 **row,
                 "amount": won_text(row["total"]),
                 "percent": f"{row['share'] * 100:.1f}%",
-                "delta_text": man_text(row["delta"]) if row["previous"] else "",
-                "up": row["delta"] > 0,
+                "delta_text": (
+                    man_text(against.get(row["id"], {}).get("delta", 0))
+                    if months_used
+                    else ""
+                ),
+                "up": against.get(row["id"], {}).get("delta", 0) > 0,
             }
             for row in groups
         ],
         "pie": pie,
-        "group_trend": _group_trend(),
+        "group_trend": _group_trend(average, window, months_used),
         "month_label": month_text(statement.billing_month),
         "total": view.total,
         "total_text": won_text(view.total),
@@ -302,8 +295,11 @@ def report(request: HttpRequest) -> HttpResponse:
         "average_text": won_text(average),
         "gap_text": man_text(view.total - average) if average else "—",
         "gap_up": bool(average and view.total > average),
-        # 달이 하나뿐이면 추이가 아니라 막대 한 개다. 대분류 추이와 같은 기준.
-        "trend": _trend(totals, statement.billing_month) if len(totals) > 1 else None,
+        "window": window,
+        "window_choices": WINDOW_CHOICES,
+        "months_used": months_used,
+        # 요구한 창보다 실제 달이 적으면 그 사실을 화면이 말해야 한다.
+        "window_short": months_used and months_used < window,
         "categories": [
             {
                 **row,
@@ -329,7 +325,7 @@ def report(request: HttpRequest) -> HttpResponse:
                 # 계산에 실패한 것처럼 보인다.
                 "percent_text": (
                     "신규"
-                    if row["percent"] is None and row["previous"] == 0
+                    if row["percent"] is None and row["baseline"] == 0
                     else signed_percent_text(row["percent"])
                 ),
                 "up": row["delta"] > 0,

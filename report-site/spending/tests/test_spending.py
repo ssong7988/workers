@@ -13,11 +13,15 @@ from django.test import TestCase
 from spending.categorize import categorize, recategorize_all
 from spending.delivery import build_digest
 from spending.analysis import (
+    baseline_average,
+    category_comparison,
     category_rows,
+    group_comparison,
     group_rows,
     installment_outlook,
     month_view,
     monthly_totals,
+    preceding,
 )
 from spending.ingest import IngestError, ingest_statement
 from spending.models import (
@@ -204,6 +208,97 @@ class AnalysisTest(TestCase):
         self.assertEqual(outlook["active"][0]["remaining"], 4)
         self.assertEqual(outlook["future_total"], 200_000)
         self.assertEqual(outlook["by_month"][0]["month"], "2026-10")
+
+
+class WindowComparisonTest(TestCase):
+    """1/3/6개월 select가 실제로 다른 기간을 견주는지 확인한다.
+
+    화면의 점선, KPI, 증감 비교가 모두 이 함수들 위에 서 있으므로, 여기서
+    어긋나면 세 곳이 동시에 조용히 틀린다.
+    """
+
+    def build(self, totals: list[int]) -> None:
+        for index, total in enumerate(totals, start=1):
+            ingest_statement(
+                statement_payload(
+                    month=f"2026-{index:02d}", rows=[row("가맹점", total)]
+                )
+            )
+
+    def test_preceding_excludes_the_month_itself(self):
+        """자기를 포함하면 많이 쓴 달일수록 기준도 같이 올라가 덜 튀어 보인다."""
+        self.build([100_000, 200_000, 300_000])
+        latest = Statement.objects.get(billing_month="2026-03")
+        months = preceding(latest, 6)
+        self.assertEqual([s.billing_month for s in months], ["2026-01", "2026-02"])
+
+    def test_preceding_is_oldest_first(self):
+        self.build([100_000, 200_000, 300_000, 400_000])
+        latest = Statement.objects.get(billing_month="2026-04")
+        months = preceding(latest, 2)
+        self.assertEqual([s.billing_month for s in months], ["2026-02", "2026-03"])
+
+    def test_baseline_average_of_three_months(self):
+        self.build([100_000, 200_000, 300_000, 400_000])
+        latest = Statement.objects.get(billing_month="2026-04")
+        average, months_used = baseline_average(latest, 3)
+        self.assertEqual(average, 200_000)  # (100k+200k+300k)/3
+        self.assertEqual(months_used, 3)
+
+    def test_baseline_average_reports_fewer_months_than_asked(self):
+        """3개월을 요구했는데 2개월치뿐이면 그 사실이 같이 나와야 한다.
+
+        숫자만 돌려주면 화면은 3개월 평균인 줄 알고 그렇게 적는다.
+        """
+        self.build([100_000, 200_000, 300_000])
+        latest = Statement.objects.get(billing_month="2026-03")
+        average, months_used = baseline_average(latest, 6)
+        self.assertEqual(average, 150_000)  # (100k+200k)/2
+        self.assertEqual(months_used, 2)
+
+    def test_baseline_average_of_the_first_month_is_undefined(self):
+        self.build([100_000])
+        latest = Statement.objects.get(billing_month="2026-01")
+        average, months_used = baseline_average(latest, 3)
+        self.assertEqual((average, months_used), (0, 0))
+
+    def test_one_month_window_matches_the_immediately_preceding_month(self):
+        self.build([100_000, 200_000, 999_000])
+        latest = Statement.objects.get(billing_month="2026-03")
+        average, months_used = baseline_average(latest, 1)
+        self.assertEqual(average, 200_000)
+        self.assertEqual(months_used, 1)
+
+    def test_category_comparison_uses_the_chosen_window(self):
+        ingest_statement(statement_payload(month="2026-01", rows=[row("스타벅스", 10_000)]))
+        ingest_statement(statement_payload(month="2026-02", rows=[row("스타벅스", 30_000)]))
+        ingest_statement(statement_payload(month="2026-03", rows=[row("스타벅스", 100_000)]))
+        latest = Statement.objects.get(billing_month="2026-03")
+
+        one_month = {r["id"]: r for r in category_comparison(latest, 1)}["cafe"]
+        self.assertEqual(one_month["baseline"], 30_000)
+        self.assertEqual(one_month["delta"], 70_000)
+
+        two_month = {r["id"]: r for r in category_comparison(latest, 2)}["cafe"]
+        self.assertEqual(two_month["baseline"], 20_000)  # (10k+30k)/2
+
+    def test_category_comparison_labels_a_first_appearance_as_undefined(self):
+        ingest_statement(statement_payload(month="2026-01", rows=[row("스타벅스", 10_000)]))
+        ingest_statement(
+            statement_payload(month="2026-02", rows=[row("스타벅스", 10_000), row("이마트", 50_000)])
+        )
+        latest = Statement.objects.get(billing_month="2026-02")
+        grocery = next(r for r in category_comparison(latest, 6) if r["id"] == "grocery")
+        self.assertIsNone(grocery["percent"])
+        self.assertEqual(grocery["baseline"], 0)
+
+    def test_group_comparison_rolls_up_categories_the_same_way(self):
+        ingest_statement(statement_payload(month="2026-01", rows=[row("스타벅스", 10_000)]))
+        ingest_statement(statement_payload(month="2026-02", rows=[row("스타벅스", 40_000)]))
+        latest = Statement.objects.get(billing_month="2026-02")
+        dining = group_comparison(latest, 6)["dining"]
+        self.assertEqual(dining["baseline"], 10_000)
+        self.assertEqual(dining["delta"], 30_000)
 
 
 class GroupTest(TestCase):
